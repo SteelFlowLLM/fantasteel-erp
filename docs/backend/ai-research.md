@@ -6,7 +6,7 @@
 ## 1. 담당 범위
 
 - 사원이 질문하면 AI가 **조사 계획**을 세우고, 사원이 계획을 보고 고친 뒤 **시작**하면 서버가 백그라운드로 웹을 **검색·읽기**를 반복하며 근거를 모으고, **점검**을 거쳐 출처 번호 `[n]`을 단 **마크다운 보고서**를 쓴다.
-- ERP 데이터는 읽지도 보내지도 않는다. 회사 밖으로 나가는 것은 검색어뿐이고, 검색어는 웹 검색(`docs/backend/ai-assistant.md` 4장 '웹 검색')과 같은 회사 안 정보 막기를 거친다.
+- 묻는 사원의 권한으로 읽는 ERP 자료(이슈 #435, 아래 'ERP 자료')는 근거로만 쓰고 회사 밖으로 보내지 않는다. 회사 밖으로 나가는 것은 검색어뿐이고, 검색어는 웹 검색(`docs/backend/ai-assistant.md` 4장 '웹 검색')과 같은 회사 안 정보 막기를 거친다.
 - 웹 검색·페이지 읽기는 ai-assistant 모듈의 웹 도구(`AssistantWebToolbox` — 같은 검색 캐시·1분 한도·SSRF 막기·worker 글 뽑기·동시 4개)를 그대로 쓴다. 이 모듈은 `AiAssistantModule`이 export한 `AssistantWebToolbox`를 받는다.
 - 폴더: `server/src/modules/ai-research/` (controller · service · repository · runner(일꾼) · rules(순수 규칙) · prompt · llm(JSON 묻기) · report · view), 공유 타입 `shared/src/ai-research.ts`.
 
@@ -208,10 +208,22 @@ COMPLETED·FAILED·CANCELLED ─(rerun)→ 새 조사: 계획이 있으면 AWAIT
 - **계획**: 계획 프롬프트에 `[먼저 찾아본 것]`(간단 답·출처, `wrapUntrusted('research:seed')`로 감쌈)과 부탁 `SEED_PLAN_RULE`(이미 확인된 내용을 다시 찾는 단계는 줄이고, 근거가 약하거나 빠진 부분·수치·1차 자료·반대 근거 중심)을 붙인다. 다음 행동·점검·보고서에는 넣지 않는다(간단 답은 확인된 사실이 아니라서 출처로만 쓴다).
 - 화면은 조사 상세의 질문 칸 아래에 접힌 "철강맨AI에서 먼저 알아본 것"으로 보인다(글자로만, 주소는 http(s)만 연다).
 
+### ERP 자료 (이슈 #435, 문서에 없는 기능)
+
+- **무엇**: 조사가 웹만 보지 않고 우리 회사 ERP 자료(재고·수주·생산계획·실적·LOT·검사·구매·출하 등)를 보고 계획·조사한다. 예: `/조사 우리 재고에 있는 제품 정리해줘` → 재고를 조회해 어떤 강종이 있는지 보고, 웹에서 그 강종의 규격·시황을 찾는다.
+- **어떻게 모으나** (`ai-research.erp.ts`의 `ResearchErpLookup`): 철강맨AI의 `AssistantToolbox`를 그대로 쓴다. 모델에 조회 도구(`definitions()` — 실행 카드·내 일정/업무는 알리지 않고, 목록에 없는 이름은 실행하지 않는다)와 조사 질문을 주고 도구를 고르게 한다(`streamWithTools`, 프로필 `RESEARCH_JSON`). 질문이 우리 회사 자료와 상관없으면 모델이 도구를 부르지 않고 끝난다(결과 없음, 이벤트·출처 없음). 모델 요청 3번·조회 5번까지(가정값), 같은 조회(이름+인자, 키 순서·공백 무시)는 한 번만.
+- **권한**: 조사를 만든 사원(`run.employeeId`)을 `AuthUserService.load`로 `AuthUser`로 만들어 `toolbox.run(user, call)`에 넘긴다 — 도구가 각자 권한을 본다. 권한 없음·인자 오류·서버 오류는 근거에 넣지 않고(모델에는 알려 되풀이하지 않게 한다), 그만둔 사원(`AuthUser` 없음)은 아예 부르지 않는다. 조회는 조사를 맡은 일꾼이 하므로 조사 사이에 사원의 권한이 바뀌면 그 시점 권한이다.
+- **언제**: ① 계획 세우기(PLANNING) 앞 — 조회한 자료를 계획 프롬프트의 `[우리 회사 ERP 자료]`(`wrapUntrusted('research:erp-n')`로 감쌈, 12,000자)와 부탁 `ERP_PLAN_RULE`(웹에서 무엇을 찾아야 우리 상황을 이해·비교할 수 있는지로 단계를 짜고, 거래처 이름·업무·LOT 번호는 검색어에 넣지 않음)로 준다. `research_state.erpChecked`를 남긴다. ② 조사를 시작할 때 `erpChecked`가 없으면(계획을 복사한 다시 조사·이 기능 전의 조사) 한 번 모은다. (검색 없는 고치기는 조회하지 않는다.) 조사를 이어 하거나 시작할 때 사원이 이미 그만뒀으면 저장된 ERP 출처도 근거에서 빼고 지운다(거래처 이름 막기는 먼저 한다). 질문에 거래처 이름을 직접 적어 계획이 이름 때문에 비면 이름을 뺀 일반 검색 한 단계로 계획을 세운다(`fallbackPlan`, 계획 확인 단계에서 사용자가 고친다). ③ 더 검색하는 보고서 고치기(이슈 #418)는 부탁(`[더 알아볼 것]`)에 맞는 조회를 한 번 더 모은다(이미 모은 조회는 되풀이하지 않음, `revision.erpChecked`). 계획 말로 고치기(이슈 #416)는 새로 조회하지 않고 이미 모은 자료를 프롬프트에 넣어 고친다.
+- **출처로 저장**: 성공한 조회마다 조사 출처 하나(`sources` jsonb, 웹 출처와 같은 번호 [n]): `title` `ERP 조회(도구 이름)`, `url` `erp:도구이름`(웹 주소가 아니라 읽거나 링크로 달지 않음), `readText` 도구 결과 JSON(도구 모음이 8,000자로 자름), `erp: { tool, arguments }`. 새 열·이벤트 종류는 없다 — 화면에는 기존 `source.added` 이벤트로 "출처 [n] ERP 조회(get_inventory)"가 보이고 출처 칸에는 호스트 대신 "우리 회사 ERP"가 보인다.
+- **근거**: 다음 행동·점검·보고서·차트의 근거에 웹 단계 기록과 따로 앞에 둔다(`withErpEvidence`: 남는 글자의 40%까지, 하나 12,000자까지 똑같이 나눔, 웹 기록이 많아도 밀려나지 않음). 글머리는 `### 우리 회사 ERP [n] …`, "우리 회사 ERP에서 조회한 결과예요. 웹 자료가 아니에요". 보고서 지시에 "'ERP 조회' 출처는 우리 회사 자료로 웹 자료와 구분해 '우리 회사 ERP 기준'이라고 밝히고, 견줄 때 어느 쪽 숫자인지 분명히" 규칙을 더했다. ERP 글도 모델이 지시로 읽지 않게 감싼다(재고 비고 같은 자유 글에 지시가 있을 수 있다).
+- **보고서 출처**: `finalizeReport`가 ERP 출처도 [n]으로 인용할 수 있게 하고 출처 목록에 링크 없이 `- [n] ERP 조회(도구 이름)`으로 붙인다. `[ERP](erp:…)` 같은 링크는 지운다. Notion 내보내기도 출처 목록에 같은 글(링크 없음)로 넣는다.
+- **출처 수 상한**: `budget.maxSources`·"출처 없이 끝내기 금지"·`sourceCount`(조사 화면·목록·고치기의 새 출처 자리 계산)는 웹 출처만 센다(ERP 출처가 웹 자리를 차지하지 않음). 읽기(`read`) 행동은 ERP 출처를 고를 수 없다(이미 읽은 것).
+- **회사 밖으로**: ERP 자료는 LLM(회사가 정한 AI 연결)에는 가지만 웹 검색 엔진·페이지 읽기에는 가지 않는다. 보고서에는 ERP 숫자가 들어가므로 Notion으로 내보내면 회사 Notion에 ERP 숫자가 간다(내보내기는 사원이 누르는 동작).
+
 ### 회사 안 정보 막기
 
 - 검색어는 공백 정리 → 80자로 자름 → `redactQuery`(이메일·전화·카드·주민번호·키 모양 빼기) → `internalReferenceIn`(업무·LOT 번호 모양이면 막음). 모델이 낸 계획·사용자가 고친 계획(400 `RES-004`)·모델이 고른 검색어(막히면 계획의 다음 검색어로) 모두 거친다. 웹 세션도 한 번 더 본다.
-- 조사는 ERP 조회 도구를 쓰지 않아 거래처 이름 막기(ERP 결과에서 모은 이름)는 해당 없다.
+- 거래처 이름 막기: 이 조사가 조회한 ERP 결과(`partnerNamesIn`)에 나온 거래처 이름도 검색어에 있으면 막는다 — 계획 다듬기(`readPlan`)·계획 말로 고치기·사용자가 고친 계획(400 `RES-004`)·모델이 고른 검색어(`decideAction`, 막히면 계획의 다음 검색어로)에 이름 목록(`erpPartnerNames`)을 넘기고, 웹 세션에는 `observeErpResult`로 넘겨 한 번 더 막는다.
 
 ### PDF 읽기 (이슈 #384)
 
@@ -254,6 +266,7 @@ COMPLETED·FAILED·CANCELLED ─(rerun)→ 새 조사: 계획이 있으면 AWAIT
 | 대상 | 쓰는 것 |
 | --- | --- |
 | ai-assistant | `AssistantWebToolbox.session(employeeId, { offerTools: false, maxSearches, maxReads })`의 `searchWeb`·`readKnownPage`·`rememberVisited`(이 기능을 위해 `WebToolSession`에 구조화된 결과를 돌려주는 두 함수를 더하고, 웹 도구는 그것을 감싸 쓰도록 바꿈. 한 답 상한 3번·3개는 그대로) · `web-text.ts`(`wrapUntrusted`·`filterAnswerLinks`·`redactQuery`·`internalReferenceIn`) |
+| ai-assistant (ERP 조회) | `AssistantToolbox`(`definitions()`·`run(user, call)`, 모듈이 export) — 철강맨AI와 같은 조회 도구·권한 확인 · `common`의 `AuthUserService.load`(사원 → `AuthUser`) |
 | llm | `LlmClient.chatJsonWithText`, 새 `LlmClient.chatText`(글 답 + 끊김 여부), 프로필 `RESEARCH_JSON`·`RESEARCH_REPORT`, `LlmSettingsStore` |
 | notification | `NotificationService.notifyEmployees` (끝 알림, 같은 트랜잭션) |
 | integration | `NotionPageService.assertReady`·`createPage`, `MCP_REQUEST_TIMEOUT_MS`(잡기 만료 5분) · meeting-minutes의 `escapeNotionText` |
@@ -267,8 +280,14 @@ COMPLETED·FAILED·CANCELLED ─(rerun)→ 새 조사: 계획이 있으면 AWAIT
 - `ai-research.spec.ts`(fs_collab, 가짜 LLM·검색·페이지 읽기, 네트워크 없음): 만들기 → 계획(막힌 단계 빠짐) → 고치기(판 충돌 409·회사 안 정보 400) → 시작(옛 판 409) → 검색·깨진 JSON의 읽기·모르는 행동 대신·모르는 출처 대신·끝내기 → 점검 → 보고서(모르는 번호·링크·모델 목록 지움, 서버 출처 목록) → COMPLETED·이벤트 순번·afterSeq·목록 / 단계를 다 써 더 조사하기 → 이어서(출처 20개 상한) → 다시 쓴 보고서, 두 번째 더 조사하기 409 / 취소(대기 중·조사 중 다음 저장에서 멈춤) / 남의 조사 404 / 표시가 끊긴 RUNNING 이어서 하기(살아 있는 표시는 그대로) / 모델 없음·동시 3개·capabilities / 반복 중 LLM 끊김·30분 상한·보고서 LLM 실패 → COMPLETED(맨 위 알림) / 취소하면 하던 LLM 요청을 끊음(이 서버 interrupt·다른 서버는 표시 갱신 실패) / `pending`부터 이어서 하기·알림·점검 되풀이 없음 / 동시에 5개 만들어도 3개 / int4 넘는 id·afterSeq / (이슈 #384 2차) 길이 한도 → 이어 쓰기·겹침 떼기·16,384토큰, 또 끊기면 맨 위 알림, 낱말 순서만 바꾼 검색 막기, 점검에 계획·단계 기록 3개, 문맥 8,192 → 프롬프트 8,192자·보고서 4,096토큰 / (이슈 #384) 차트 저장·`charts.ready`·확인 못 한 점 빼기, 차트 LLM 실패 → 차트 없이 COMPLETED, 완료·실패 알림(취소는 없음), 조사별 예산(31단계 400·기본 12/40·30/100), Notion 내보내기(대기 중 409·남의 것 404·INT-006 그대로·성공·두 번째 RES-007), `researchRunId`로 묻기(규칙·감싼 보고서·출처 목록·`webSources`·남의 것 RES-001·미완료 RES-002) / (이슈 #400) 계획 저장만(대기 그대로·일꾼 할 일 없음·두 번 저장·시작 뒤 409), 제목 바꾸기(계획 중 409·판 +1·단계 그대로·옛 판 RES-003·빈 칸·101자 400·완료 뒤 보고서 그대로·목록 제목), 다시 조사(진행 중 409·질문·계획·예산 복사·`copiedFrom`·원래 그대로·고쳐서 시작·COMPLETED, 계획 전에 취소한 조사는 PLANNING부터, RES-005·RES-006), 남의 조사의 제목 바꾸기·다시 조사 404. / (이슈 #408) seed 저장·다듬기(같은 주소·http 아닌 주소 뺌)·출처 미리 넣기·계획 프롬프트의 감싼 블록과 부탁·미리 넣은 출처 읽기 → COMPLETED, seed 없으면 null·블록 없음, 출처 11개·답 4,001자·모양 틀림 400, 다시 조사가 seed·출처를 옮김, 심층 조사 카드 실행(다듬은 질문·seed·남의 것 404·짧은 질문 ACT-001·진행 중 3개 RES-006). `ai-research.unit.spec.ts`: `normalizeSeed`·`seedSources`·`storedSeed`, 계획 프롬프트 seed 블록, `proposeResearchCard`.
 - (이슈 #418) `ai-research.unit.spec.ts`: `revisionStart`(+4단계·30단계 상한·새 출처 자리 +10·100개 상한·부탁을 모르는 것 맨 앞·8개·검색 안 함은 그대로·저장 뒤 읽기), `revisionNeedsStep`·끝내기 막기(모델 검색어 → 부탁 글 → 계획, 읽기는 허용), `reportBodyForRevision`(알림·서버 출처 목록 떼기), 보고서 프롬프트(감싼 앞 보고서·부탁·규칙·40%·고치기가 아니면 없음), 다음 행동의 부탁 블록. `ai-research.spec.ts`(가짜 LLM): 더 검색해 고치기(1판 남김·QUEUED·예산·모르는 것·`revision.requested`, 고치는 중 또 고치기·더 조사하기 409, 부탁 겨냥 검색·다시 점검·앞 보고서·규칙이 든 보고서 프롬프트, 2판·`revision.ready`·판 본문·메모의 부탁 지움), 바로 끝내려 하면 부탁 글로 한 번 찾기, 검색 없이 고치기(반복·점검 없음, 3판, 옛 판 그대로), 보고서 LLM 실패 → 앞 판 그대로·판 남김, 완료 전 409·남의 것 404·입력 400·`RES-005`·`RES-006`(막힌 요청은 판 없음), 판 10개면 고치기·더 조사하기 막힘, 고치는 중 취소. 화면: `versionLabel`·`revisionTurns`·`revisionBlockReason`·타임라인 두 이벤트, `revise`·`getVersion` 요청.
 - (이슈 #416) `ai-research.unit.spec.ts`: 말로 고치기 프롬프트(빈 칸·다듬은 부탁·오늘 날짜·감싼 seed·500자), 고친 계획 다듬기(막힌·같은 검색어·6단계·빈 제목), `askResearchJson`(형식대로·깨진 답의 마지막 객체·빈 답이면 생각 없이 한 번 더·연결 실패는 던짐). `ai-research.spec.ts`(가짜 LLM): 고친 계획·`dropped`, 모델에 간 지금 계획·부탁, 저장하지 않음(판·계획·이벤트 그대로)·여러 번·받은 계획 저장, 빈 제목, 쓸 단계 없음·LLM 실패 `RES-008`·깨진 JSON 읽기, 부탁 0·501자·7단계·81자 검색어·계획 없음 400, `RES-005`, 계획 중·시작 뒤 `RES-002`, 남의 조사 `RES-001`. 화면: `planSuggestionDiff`·`planSuggestionSummary`(`lib/aiResearch.test.ts`), `suggestPlan` 요청 본문(`api/server/aiResearch.test.ts`).
+- (이슈 #435) `ai-research.unit.spec.ts`: `ResearchErpLookup`(고른 도구를 사원 권한으로 부르고 성공한 조회만 모음·도구를 안 부르면 결과 없음·권한 없음/오류는 근거 아님·목록에 없는 도구(실행 카드)와 같은 조회는 안 부름·모은 조회(known) 되풀이 안 함·조회 5번/모델 3번 상한·그만둔 사원은 모델도 안 부름·AI 끊김은 모은 것으로, 취소·버그는 던짐), `callKey`, ERP 출처 만들기·저장/읽기, 거래처 이름이 계획 다듬기·검색어 확인·행동 대신하기에서 막힘, ERP 출처가 웹 출처 자리·끝내기에 안 세짐, ERP 근거(감싸기·웹 기록과 따로·글자 모자랄 때)·출처 목록 표시·옛 조사 대신 기록에서 빠짐, 계획·말로 고치기·다음 행동·점검·보고서 프롬프트의 ERP 블록과 글자 상한, 보고서 출처 목록(링크 없는 ERP 조회). `ai-research.spec.ts`(진짜 `AssistantToolbox`·DB, 가짜 LLM): 계획 앞 조회 → 출처·`source.added`·계획 프롬프트(구매 담당 역할에서 검사 조회 권한을 잠깐 빼 권한 없는 조회가 빠지는 것 확인), 시작 → 다음 행동·보고서 프롬프트의 ERP 근거·ERP 출처 읽기 거절·보고서 출처 목록·다시 조회 안 함, 거래처 이름(조회 결과를 가짜로 바꿔)이 계획 단계·모델 검색어·고친 계획·말로 고치기 어디서도 검색어로 안 나감, 도구를 안 부르면 출처·이벤트 없음·AI 끊겨도 계획은 세움, 실행 카드 도구 거절·같은 조회 한 번, 더 검색하는 고치기의 추가 조회(검색 없는 고치기는 조회 없음), 다시 조사의 시작 때 조회·퇴사한 사원은 조회 안 함. 화면: `lib/aiResearch.test.ts`(ERP 출처의 타임라인·출처 칸·진행 줄).
 
 ## 8. 확인 필요 🟡
+
+- ERP 자료 모으기(이슈 #435)의 모델 요청 3번·조회 5번·계획 프롬프트 12,000자·근거 40%는 가정값이다. 모델이 도구를 고르므로 작은 모델은 필요한 조회를 빠뜨리거나 불필요하게 부를 수 있다(필요 없으면 부르지 않게 지시했다).
+- 조사 중간에 ERP 자료가 바뀌어도 모은 시점의 자료다(보고서에 "조회한 자료"라고 쓰게 했다). 다시 조사하면 새로 조회한다. 계획 말로 고치기·조사 도중 모델이 새로 ERP를 조회하는 행동은 없다.
+- ERP 출처의 본문(도구 결과 JSON)은 `ai_research_run.sources`에 그대로 저장된다(출처당 8,000자 이하, 조사당 최대 5개 + 고치기마다 더). 조사 화면 API에는 본문을 보내지 않는다.
+
 
 - 보고서 고치기(이슈 #418)의 판 10개·+4단계·새 출처 10개·앞 보고서 40%는 가정값이다. 판은 지우지 않아 보고서가 길면 조사 하나에 판 10개만큼 글이 쌓인다.
 - "부탁한 것만 고친다"는 프롬프트 규칙일 뿐이라 모델이 다른 곳을 바꿀 수 있다. 판을 골라 앞 판과 비교한다.

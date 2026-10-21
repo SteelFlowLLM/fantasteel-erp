@@ -87,7 +87,7 @@ import { AssistantScreenToolbox, ScreenActionBroker } from './screen/assistant-s
     // ERP 화면 조작(이슈 #382, 시험 중): 화면 동작을 기다리는 자리를 서버 메모리에 하나만 둔다
     { provide: AssistantScreenToolbox, useFactory: () => new AssistantScreenToolbox(new ScreenActionBroker()) },
   ],
-  // 심층 조사(이슈 #378)가 같은 웹 검색 클라이언트(캐시·1분 한도)와 페이지 읽기(SSRF 막기·동시 4개)를 쓴다
-  exports: [AiAssistantService, AssistantWebToolbox],
+  // 심층 조사(이슈 #378)가 같은 웹 검색 클라이언트(캐시·1분 한도)와 페이지 읽기(SSRF 막기·동시 4개)를 쓰고, ERP 조회 도구(이슈 #435)도 쓴다
+  exports: [AiAssistantService, AssistantWebToolbox, AssistantToolbox],
 })
 export class AiAssistantModule {}

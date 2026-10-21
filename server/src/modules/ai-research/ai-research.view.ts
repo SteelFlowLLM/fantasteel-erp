@@ -2,7 +2,7 @@ import { AI_RESEARCH_LIMITS, AI_RESEARCH_STATUS, type AiResearchEventView, type 
 import type { AiResearchEvent, AiResearchReportVersion, AiResearchRun } from '../../generated/prisma/client';
 import type { listAiResearchRuns } from '../../generated/prisma/sql';
 import { storedCharts } from './ai-research.charts';
-import { canExtend, readBudget, storedAudit, storedPlan, storedSeed, storedSources, storedState } from './ai-research.rules';
+import { canExtend, isErpSource, readBudget, storedAudit, storedPlan, storedSeed, storedSources, storedState } from './ai-research.rules';
 
 export function toRunSummary(row: listAiResearchRuns.Result): AiResearchRunSummaryView {
   return {
@@ -45,7 +45,8 @@ export function toRunView(row: AiResearchRun, events: AiResearchEvent[], lastSeq
     status,
     stepsUsed: row.stepsUsed,
     maxSteps: budget.maxSteps,
-    sourceCount: sources.length,
+    // 우리 ERP 조회 출처는 웹 출처 수에 세지 않는다 (이슈 #435)
+    sourceCount: sources.filter((s) => !isErpSource(s)).length,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     finishedAt: row.finishedAt?.toISOString() ?? null,

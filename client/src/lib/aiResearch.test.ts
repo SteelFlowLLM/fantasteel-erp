@@ -58,6 +58,15 @@ describe('타임라인', () => {
     expect(line.title).toBe('출처 [1] <b>제목</b>');
     expect(line.detail).toBe('example.com');
   });
+  it('우리 ERP 조회 출처는 링크 없이 우리 회사 ERP로 보인다 (이슈 #435)', () => {
+    const line = timelineLineOf({ seq: 2, type: 'source.added', createdAt: at, payload: { sourceId: 3, title: 'ERP 조회(get_inventory)', url: 'erp:get_inventory' } });
+    expect(line.title).toBe('출처 [3] ERP 조회(get_inventory)');
+    expect(line.detail).toBe('우리 회사 ERP');
+    const erp = { id: 3, title: 'ERP 조회(get_inventory)', url: 'erp:get_inventory', snippet: '', read: true };
+    expect(sourceRows([erp])[0]).toMatchObject({ host: '우리 회사 ERP', href: null });
+    const budget = { maxSteps: 8, maxSources: 20 };
+    expect(progressText({ stepsUsed: 2, budget, sources: [erp, { ...erp, id: 4, url: 'https://www.example.com/a' }] })).toBe('2/8 단계 · 출처 1/20');
+  });
   it('실패한 읽기·검색은 경고 톤', () => {
     expect(timelineLineOf({ seq: 3, type: 'page.read', createdAt: at, payload: { sourceId: 1, title: '', chars: 0, error: '시간 초과' } }).tone).toBe('wait');
     expect(timelineLineOf({ seq: 4, type: 'failed', createdAt: at, payload: { reason: '이유' } }).tone).toBe('danger');

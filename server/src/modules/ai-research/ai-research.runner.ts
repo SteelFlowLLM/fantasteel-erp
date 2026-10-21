@@ -12,6 +12,7 @@ import { LLM_PROFILE } from '../llm/llm-profiles';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
 import { checkCharts } from './ai-research.charts';
 import { modelBudget, researchLimits, type ModelBudget } from './ai-research.config';
+import { erpSourcesFrom, ResearchErpLookup } from './ai-research.erp';
 import { askResearchJson, withNoThinkHint } from './ai-research.llm';
 import { notifyResearchFinished } from './ai-research.notify';
 import { seoulToday } from '../../common/time/seoul-date';
@@ -33,8 +34,10 @@ import { AiResearchRepository, retryOnSeqConflict, type NewResearchEvent } from 
 import {
   decideAction,
   EMPTY_STATE,
+  erpPartnerNames,
   fallbackAudit,
   fallbackPlan,
+  isErpSource,
   isRecord,
   queryKey,
   readAudit,
@@ -132,6 +135,8 @@ interface Work {
   stepsUsed: number;
   /** 연달아 출처를 하나도 못 얻은 검색 수 (이어서 할 때는 0에서 다시 센다) */
   emptySearchStreak: number;
+  /** ERP 조회 결과에 나온 거래처 이름 (이슈 #435). 검색어로 내보내지 않는다 */
+  partners: string[];
 }
 
 /**
@@ -156,6 +161,7 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     private readonly llmSettings: LlmSettingsStore,
     private readonly webTools: AssistantWebToolbox,
     private readonly notifications: NotificationService,
+    private readonly erpLookup: ResearchErpLookup,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -263,18 +269,54 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     const run = await this.repository.findById(this.prisma, ctx.id);
     if (!run) return;
     const endpoint = await this.endpoint();
-    const value = await this.askJson(ctx, endpoint, buildPlanMessages(run.question, ctx.today, storedSeed(run.seed)), PLAN_JSON_SCHEMA, (v) => Array.isArray(v.steps));
-    let plan: AiResearchPlan | null = readPlan(value, run.question)?.plan ?? null;
+    // 우리 ERP 자료가 필요해 보이면 먼저 조회해서, 그 자료를 보고 웹에서 무엇을 찾을지 정한다 (이슈 #435)
+    const sources = storedSources(run.sources);
+    const erp = await this.gatherErp(ctx, endpoint, run.employeeId, run.question, sources);
+    const partners = erpPartnerNames(sources);
+    const value = await this.askJson(ctx, endpoint, buildPlanMessages(run.question, ctx.today, storedSeed(run.seed), sources.filter(isErpSource)), PLAN_JSON_SCHEMA, (v) => Array.isArray(v.steps));
+    let plan: AiResearchPlan | null = readPlan(value, run.question, partners)?.plan ?? null;
     const fallback = plan === null;
-    plan ??= fallbackPlan(run.question);
+    plan ??= fallbackPlan(run.question, partners);
     if (!plan) throw new ResearchFailure(NO_PLAN_REASON);
     const revision = run.planRevision + 1;
     await this.save(
       ctx,
       AI_RESEARCH_STATUS.PLANNING,
-      { status: AI_RESEARCH_STATUS.AWAITING_APPROVAL, plan: plan as unknown as Prisma.InputJsonObject, planRevision: revision, researchState: json(EMPTY_STATE), ...released },
-      [{ type: 'plan.ready', payload: { title: plan.title, stepCount: plan.steps.length, revision, fallback } }],
+      {
+        status: AI_RESEARCH_STATUS.AWAITING_APPROVAL,
+        plan: plan as unknown as Prisma.InputJsonObject,
+        planRevision: revision,
+        researchState: json({ ...EMPTY_STATE, erpChecked: true }),
+        ...(erp.length ? { sources: json(sources) } : {}),
+        ...released,
+      },
+      [...erp, { type: 'plan.ready', payload: { title: plan.title, stepCount: plan.steps.length, revision, fallback } }],
     );
+  }
+
+  /**
+   * 우리 ERP 자료 모으기 (이슈 #435): 조사를 만든 사원의 권한으로 철강맨AI 조회 도구를 불러, 성공한 조회를 'ERP 조회' 출처로 sources 뒤에 더한다(번호는 이어서).
+   * 필요 없어 보이면 아무것도 더하지 않는다. AI 응답이 끊기면 모은 만큼으로 조사를 계속하고, 조사가 취소됐으면 멈춘다. 더한 출처마다 source.added 이벤트를 돌려준다.
+   */
+  private async gatherErp(ctx: RunContext, endpoint: Endpoint, employeeId: number, question: string, sources: StoredSource[], focus?: string): Promise<NewResearchEvent[]> {
+    try {
+      const found = await this.erpLookup.lookup({
+        employeeId,
+        question,
+        endpoint,
+        known: sources.flatMap((s) => (s.erp ? [{ tool: s.erp.tool, arguments: s.erp.arguments }] : [])),
+        focus,
+        signal: ctx.abort.signal,
+      });
+      const added = erpSourcesFrom(found.findings, sources.reduce((max, s) => Math.max(max, s.id), 0) + 1);
+      sources.push(...added);
+      return added.map((s): NewResearchEvent => ({ type: 'source.added', payload: { sourceId: s.id, title: s.title, url: s.url } }));
+    } catch (error) {
+      if (ctx.abort.signal.aborted) throw new LeaseLostError();
+      // ERP 자료는 덤이다: 모으지 못해도 웹 조사는 계속한다
+      this.logger.warn(`조사 ${ctx.id} ERP 자료 모으기 실패: ${error instanceof Error ? error.name : 'unknown'}`);
+      return [];
+    }
   }
 
   // ───────────────────────────── 조사 ─────────────────────────────
@@ -291,10 +333,27 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     const endpoint = await this.endpoint();
     await this.sizeForModel(ctx, endpoint);
     const budget = readBudget(run.budget);
-    const work: Work = { state: storedState(run.researchState), sources: storedSources(run.sources), stepsUsed: run.stepsUsed, emptySearchStreak: 0 };
+    const work: Work = { state: storedState(run.researchState), sources: storedSources(run.sources), stepsUsed: run.stepsUsed, emptySearchStreak: 0, partners: [] };
     // 읽기는 이 조사가 모은 출처만 (검색 결과로 받은 주소). 이어서 할 때는 저장된 출처를 다시 알려 준다
     const session = this.webTools.session(run.employeeId, { offerTools: false, maxSearches: Number.MAX_SAFE_INTEGER, maxReads: Number.MAX_SAFE_INTEGER });
-    for (const source of work.sources) session.rememberVisited(source.url, source.title);
+    // 계획을 복사한 다시 조사처럼 ERP 자료를 아직 살펴보지 않았거나, 더 검색하는 고치기의 부탁이 아직 살펴보지 않은 것이면 한 번 살펴본다 (이슈 #435)
+    const askRevision = work.state.revision?.search === true && work.state.revision.erpChecked !== true ? work.state.revision : null;
+    // 검색 없는 고치기는 모은 것으로 다시 쓸 뿐이라 조회하지 않는다
+    if ((!work.state.erpChecked && work.state.revision?.search !== false) || askRevision) {
+      const events = await this.gatherErp(ctx, endpoint, run.employeeId, run.question, work.sources, askRevision?.instruction);
+      work.state = { ...work.state, erpChecked: true, ...(work.state.revision ? { revision: { ...work.state.revision, erpChecked: true as const } } : {}) };
+      await this.save(ctx, AI_RESEARCH_STATUS.RUNNING, { researchState: json(work.state), ...(events.length ? { sources: json(work.sources) } : {}) }, events);
+    }
+    work.partners = erpPartnerNames(work.sources);
+    for (const source of work.sources) {
+      if (source.erp) session.observeErpResult(source.readText ?? '');
+      else session.rememberVisited(source.url, source.title);
+    }
+    // 그만둔 사원의 조사는 이미 모은 ERP 자료도 근거로 쓰지 않는다 (거래처 이름 막기는 위에서 끝났다)
+    if (work.sources.some(isErpSource) && !(await this.erpLookup.isActive(run.employeeId))) {
+      work.sources = work.sources.filter((s) => !isErpSource(s));
+      await this.save(ctx, AI_RESEARCH_STATUS.RUNNING, { sources: json(work.sources) }, []);
+    }
 
     const notes: string[] = [];
     let llmDown = false;
@@ -484,7 +543,7 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
       const nextState = readState(turn.state, work.state);
       if (nextState) work.state = nextState;
       const noFinish = revisionNeedsStep(work.state, work.stepsUsed, budget.maxSteps) ? work.state.revision?.instruction : undefined;
-      const decision = decideAction(turn, { plan, searchedQueries: work.state.searchedQueries, sources: work.sources, maxSources: budget.maxSources, noFinish });
+      const decision = decideAction(turn, { plan, searchedQueries: work.state.searchedQueries, sources: work.sources, maxSources: budget.maxSources, noFinish, partnerNames: work.partners });
       const stateEvent: NewResearchEvent[] = nextState ? [{ type: 'state.updated', payload: { summary: cutText(work.state.summary, 300), gapCount: work.state.gaps.length, unsupportedCount: work.state.unsupportedClaims.length } }] : [];
       if (decision.kind === 'finish') {
         await this.save(ctx, AI_RESEARCH_STATUS.RUNNING, { researchState: json(work.state) }, stateEvent);
@@ -529,6 +588,8 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
         note: { step, kind: 'search', query, engine: null, error: outcome.reason, results: [] },
       };
     const known = new Map(sources.map((s) => [urlKey(s.url), s.id]));
+    // 출처 수 상한은 웹 출처만 센다 (ERP 조회 출처는 자리를 차지하지 않는다, 이슈 #435)
+    let webCount = sources.filter((s) => !isErpSource(s)).length;
     const added: StoredSource[] = [];
     // 출처로 넣지 못한 결과(이미 있는 주소·꽉 참)도 단계 기록에는 남긴다 (검색어와 그 결과를 함께 근거로 보인다)
     const results: StepNoteResult[] = [];
@@ -538,13 +599,14 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
       const snippet = cutText(stripInvisible(result.snippet ?? ''), SNIPPET_MAX);
       if (!key) continue;
       const existing = known.get(key);
-      if (existing !== undefined || sources.length >= maxSources) {
+      if (existing !== undefined || webCount >= maxSources) {
         results.push({ sourceId: existing ?? null, title, url: result.url, snippet });
         continue;
       }
       const source: StoredSource = { id: sources.reduce((max, s) => Math.max(max, s.id), 0) + 1, title, url: result.url, snippet };
       known.set(key, source.id);
       sources.push(source);
+      webCount += 1;
       added.push(source);
       results.push({ sourceId: source.id, title, url: result.url, snippet });
     }

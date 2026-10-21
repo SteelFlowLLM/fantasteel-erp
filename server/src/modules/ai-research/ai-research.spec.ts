@@ -9,6 +9,7 @@ import { AppException } from '../../common/errors/app.exception';
 import { NotionPageService } from '../integration/notion/notion-page.service';
 import { AppModule } from '../../app.module';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AssistantToolbox } from '../ai-assistant/tools/assistant-toolbox';
 import { AssistantWebToolbox, UserSearchLimiter } from '../ai-assistant/web/assistant-web-toolbox';
 import type { WebSearchClient } from '../ai-assistant/web/web-search.client';
 import { KakaoPlaceClient } from '../ai-assistant/web/web-search.client';
@@ -59,6 +60,14 @@ const settings = { model: 'test-model' as string | null };
 /** 계획 말로 고치기 답 (이슈 #416). 계획 프롬프트 중 [고칠 부탁]이 든 요청에만 쓴다 */
 let suggestReply: Turn = { title: '고친 계획', steps: [{ title: '가격', query: '열연 가격 전망' }] };
 const suggestPrompts: string[] = [];
+/** ERP 자료 모으기 (이슈 #435): 모델이 첫 차례에 부를 도구. 비면 도구를 부르지 않는다(ERP 자료가 필요 없다고 본 것) */
+let erpCalls: { name: string; arguments: string }[] = [];
+/** AI 응답이 끊긴 것을 흉내 낸다 */
+let erpError: string | null = null;
+const erpPrompts: string[] = [];
+/** 계획 답의 단계 (null이면 기본 계획). 계획 프롬프트는 planPrompts에 쌓는다 */
+let planSteps: { title: string; query: string }[] | null = null;
+const planPrompts: string[] = [];
 
 const state = (summary: string, gaps: string[] = []) => ({ summary, gaps, unsupportedClaims: [] });
 
@@ -70,6 +79,8 @@ const llmClient = {
       if ('error' in suggestReply) throw new LlmRequestError(String(suggestReply.error));
       return wrap(suggestReply);
     }
+    if (format.name === 'research_plan') planPrompts.push(messages.map((m) => m.content).join('\n'));
+    if (format.name === 'research_plan' && planSteps) return wrap({ title: 'ERP 자료로 세운 계획', steps: planSteps });
     if (format.name === 'research_plan')
       return wrap({
         title: '전기로와 고로 비교',
@@ -106,6 +117,12 @@ const llmClient = {
     return { text: next?.text ?? reportText, thinking: null, truncated: next?.truncated ?? false };
   }),
   modelContextLength: jest.fn(async () => contextLength),
+  streamWithTools: jest.fn(async (_endpoint: unknown, _model: string, messages: LlmToolMessage[]) => {
+    erpPrompts.push(messages.map((m) => (m.role === 'assistant' ? `${m.content ?? ''}${'toolCalls' in m ? JSON.stringify(m.toolCalls) : ''}` : m.content)).join('\n'));
+    if (erpError) throw new LlmRequestError(erpError);
+    const calls = erpCalls.splice(0);
+    return { content: calls.length ? '' : '조회 필요 없음', toolCalls: calls.map((c, i) => ({ id: `erp-${i}`, ...c })), reasoning: null, reasoningApplied: true };
+  }),
   chatWithTools: jest.fn(async (_endpoint: unknown, _model: string, messages: LlmToolMessage[]) => {
     assistantPrompts.push(messages.map((m) => m.content ?? '').join('\n'));
     return { content: '전기로가 적다고 보고서에 있어요 [1]. 없는 번호 [42].', toolCalls: [], reasoning: null, reasoningApplied: true };
@@ -239,6 +256,11 @@ beforeEach(async () => {
   settings.model = 'test-model';
   suggestReply = { title: '고친 계획', steps: [{ title: '가격', query: '열연 가격 전망' }] };
   suggestPrompts.length = 0;
+  erpCalls = [];
+  erpError = null;
+  erpPrompts.length = 0;
+  planSteps = null;
+  planPrompts.length = 0;
 });
 
 describe('심층 조사', () => {
@@ -1209,5 +1231,301 @@ describe('심층 조사 — 보고서를 말로 고치기 (판, 이슈 #418)', (
     const cancelled = await call<AiResearchRunView>('POST', `/ai-research/runs/${done.id}/cancel`, ownerCookie);
     expect(cancelled.body.data).toMatchObject({ status: 'CANCELLED', report: done.report, pendingRevision: null, canRevise: false });
     expect(cancelled.body.data.versions.map((v) => v.version)).toEqual([1]);
+  });
+});
+
+describe('심층 조사 — 우리 ERP 자료 (이슈 #435)', () => {
+  const inventory = { name: 'get_inventory', arguments: '{}' };
+  /** 시험이 구매 담당 역할에서 검사 등록 조회 권한을 잠깐 빼고 조회한다 */
+  const inspections = { name: 'get_quality_inspections', arguments: '{}' };
+  const order = { 수주: [{ 수주번호: 'SO-2610-001', 고객사: '한빛철강', 품목: 'SS275 열연코일', 수량: 120 }] };
+  const salesOrders = { name: 'get_sales_orders', arguments: '{"keyword":"SS275"}' };
+  const erpSourceRow = (id: number, content: string) => ({ id, title: 'ERP 조회(get_sales_orders)', url: 'erp:get_sales_orders', snippet: '우리 회사 ERP 조회 결과', readText: content, erp: { tool: 'get_sales_orders', arguments: '{}' } });
+
+  it('계획을 세우기 전에 ERP 조회 도구로 자료를 모아 출처로 두고 계획 프롬프트에 준다. 권한 없는 조회는 빠진다', async () => {
+    erpCalls = [inventory, inspections];
+    const role = await prisma.role.findUniqueOrThrow({ where: { roleCode: 'PURCHASE' } });
+    const removed = await prisma.rolePermission.findMany({ where: { roleId: role.id, permission: 'INSPECTION_REGISTER' } });
+    expect(removed).toHaveLength(1);
+    await prisma.rolePermission.deleteMany({ where: { id: { in: removed.map((r) => r.id) } } });
+    let run: AiResearchRunView;
+    try {
+      run = await planned('우리 재고에 있는 제품 정리해줘');
+    } finally {
+      await prisma.rolePermission.createMany({ data: removed.map(({ roleId, permission, permissionLevel }) => ({ roleId, permission, permissionLevel })) });
+    }
+    // 권한이 있는 조회만 출처 (웹 출처와 같은 번호), 링크가 아닌 'ERP 조회(도구 이름)'
+    expect(run.sources).toHaveLength(1);
+    expect(run.sources[0]).toMatchObject({ id: 1, title: 'ERP 조회(get_inventory)', url: 'erp:get_inventory', read: true });
+    expect(run.events.map((e) => e.type)).toEqual(['source.added', 'plan.ready']);
+    expect(run.events[0].payload).toEqual({ sourceId: 1, title: 'ERP 조회(get_inventory)', url: 'erp:get_inventory' });
+    // 모델이 본 도구 결과: 권한 없음은 알려 주어 되풀이하지 않게 한다
+    expect(erpPrompts.at(-1)).toContain('권한 없음');
+    // 계획 프롬프트에 우리 회사 자료가 감싸져 들어간다
+    expect(planPrompts).toHaveLength(1);
+    expect(planPrompts[0]).toContain('[우리 회사 ERP 자료]\n');
+    expect(planPrompts[0]).toContain('<untrusted_web_content source="research:erp-1">');
+    expect(planPrompts[0]).toContain('### 우리 회사 ERP [1] ERP 조회(get_inventory)');
+    expect(planPrompts[0]).toContain('제품');
+    const stored = await prisma.aiResearchRun.findUniqueOrThrow({ where: { id: run.id } });
+    expect((stored.researchState as { erpChecked?: boolean }).erpChecked).toBe(true);
+  });
+
+  it('시작하면 ERP 자료를 다음 행동·점검·보고서의 근거로 쓰고, 보고서 출처에 링크 없이 ERP 조회(도구 이름)로 보인다. 다시 조회하지 않는다', async () => {
+    erpCalls = [inventory];
+    const run = await planned('우리 재고에 있는 제품 정리해줘');
+    const erpPromptCount = erpPrompts.length;
+    await call('POST', `/ai-research/runs/${run.id}/start`, ownerCookie, { revision: run.planRevision });
+    turns = [
+      { action: 'search', query: '철강 제품 시황', sourceId: 0, researchState: state('시황 확인') },
+      // ERP 출처는 웹으로 읽지 않는다 (이미 읽은 출처)
+      { action: 'read', query: '', sourceId: 1, researchState: state('계속') },
+      { action: 'finish', query: '', sourceId: 0, researchState: state('충분해요') },
+    ];
+    reportText = '# 재고 정리\n우리 재고에 제품이 있다 [1]. 시황은 약하다 [2].\n\n## 출처\n- 모델 목록';
+    chartValue = { charts: [] };
+    await runner.processNext();
+    const done = await getRun(run.id);
+    expect(done.status).toBe('COMPLETED');
+    expect(erpPrompts).toHaveLength(erpPromptCount);
+    // 웹 출처는 ERP 출처 다음 번호
+    expect(done.sources.slice(0, 3).map((s) => s.title)).toEqual(['ERP 조회(get_inventory)', '철강 제품 시황 개요', '철강 제품 시황 뉴스']);
+    expect(readUrls).toEqual([]);
+    expect(done.events.filter((e) => e.type === 'step.started').map((e) => (e.payload as { action: string }).action)).toEqual(['search', 'search']);
+    // 다음 행동·보고서 프롬프트에 ERP 자료가 웹 자료와 구분되어 들어간다
+    expect(turnPrompts[0]).toContain('### 우리 회사 ERP [1] ERP 조회(get_inventory)');
+    expect(turnPrompts[0]).toContain('[1] ERP 조회(get_inventory) — 우리 회사 ERP (읽음)');
+    expect(turnPrompts[0]).toContain('웹 출처 0/20개');
+    const reportPrompt = reportCalls[0].messages.map((m) => m.content).join('\n');
+    expect(reportPrompt).toContain('<untrusted_web_content source="research:erp-1">');
+    expect(reportPrompt).toContain('우리 회사 ERP에서 조회한 결과예요. 웹 자료가 아니에요');
+    expect(done.report).toContain('우리 재고에 제품이 있다 [1].');
+    expect(done.report).toContain('## 출처\n- [1] ERP 조회(get_inventory)\n- [2] [');
+    expect(done.report).not.toContain('모델 목록');
+    expect(done.report).not.toContain('erp:get_inventory');
+  });
+
+  it('조회 결과의 거래처 이름은 계획 단계·모델이 고른 검색어·사용자가 고친 계획 어디서도 웹 검색어로 나가지 않는다', async () => {
+    const toolbox = app.get(AssistantToolbox);
+    const spy = jest.spyOn(toolbox, 'run').mockResolvedValue({ content: JSON.stringify(order), source: { kind: 'DATA', id: 'get_sales_orders', label: '수주' } });
+    try {
+      erpCalls = [salesOrders];
+      planSteps = [
+        { title: '거래처 신용', query: '한빛철강 신용 등급' },
+        { title: 'SS275 시황', query: 'SS275 열연코일 가격 전망' },
+      ];
+      const run = await planned('SS275 수주 현황과 시황');
+      expect(run.plan?.steps.map((s) => s.query)).toEqual(['SS275 열연코일 가격 전망']);
+      expect(toolbox.run).toHaveBeenCalledTimes(1);
+      // 사원이 거래처 이름으로 계획을 고쳐도 막는다
+      const blocked = await call('PUT', `/ai-research/runs/${run.id}/plan`, ownerCookie, { revision: run.planRevision, plan: { title: '신용', steps: [{ title: 'x', query: '한빛철강 재무' }] } });
+      expect(blocked.status).toBe(400);
+      expect(blocked.body.error?.code).toBe('RES-004');
+      // 말로 고치기: 모델이 거래처 이름 단계를 넣어도 뺀다 (그 수는 dropped)
+      suggestReply = { title: '고친 계획', steps: [{ title: '시황', query: 'SS275 열연코일 가격 전망' }, { title: '신용', query: '한빛철강 매출' }] };
+      const suggested = await call<AiResearchPlanSuggestion>('POST', `/ai-research/runs/${run.id}/plan/suggest`, ownerCookie, { instruction: '거래처도 알아봐', plan: run.plan });
+      expect(suggested.body.data.plan.steps.map((s) => s.query)).toEqual(['SS275 열연코일 가격 전망']);
+      expect(suggested.body.data.dropped).toBe(1);
+      expect(suggestPrompts[0]).toContain('한빛철강');
+
+      await call('POST', `/ai-research/runs/${run.id}/start`, ownerCookie, { revision: run.planRevision });
+      turns = [
+        { action: 'search', query: '한빛철강 열연 거래 이력', sourceId: 0, researchState: state('거래처 조사') },
+        { action: 'finish', query: '', sourceId: 0, researchState: state('끝') },
+      ];
+      reportText = '# 수주 현황\n수주가 있다 [1].';
+      await runner.processNext();
+      const done = await getRun(run.id);
+      expect(done.status).toBe('COMPLETED');
+      // 모델이 거래처 이름으로 검색하려 해도 계획의 검색어로 바뀐다
+      expect(searched).toEqual(['SS275 열연코일 가격 전망']);
+      expect(done.events.filter((e) => e.type === 'step.started').map((e) => (e.payload as { fallback: boolean }).fallback)).toEqual([true]);
+      expect(JSON.stringify(done.events)).not.toContain('한빛');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('질문에 거래처 이름을 직접 적고 모델의 계획도 이름 때문에 비면, 이름을 뺀 일반 검색 단계로 계획을 세운다 (실패하지 않음)', async () => {
+    const toolbox = app.get(AssistantToolbox);
+    const spy = jest.spyOn(toolbox, 'run').mockResolvedValue({ content: JSON.stringify(order), source: { kind: 'DATA', id: 'get_sales_orders', label: '수주' } });
+    try {
+      erpCalls = [salesOrders];
+      planSteps = [{ title: '거래처', query: '한빛철강 납기 지연' }];
+      const run = await planned('한빛철강 납기 지연 사례');
+      expect(run.status).toBe('AWAITING_APPROVAL');
+      expect(run.plan?.steps).toEqual([{ title: '거래처 이름을 뺀 일반 검색', query: '납기 지연 사례' }]);
+      expect(run.events.find((e) => e.type === 'plan.ready')?.payload).toMatchObject({ fallback: true });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('이어서 할 때도 저장된 ERP 결과의 거래처 이름을 검색어로 내보내지 않는다 (저장해 둔 행동이 이름을 담아도)', async () => {
+    const plan = { title: '이어서', steps: [{ title: 'a', query: 'SS275 열연 가격' }] };
+    const erpSource = erpSourceRow(1, JSON.stringify(order));
+    const row = await prisma.aiResearchRun.create({
+      data: {
+        employeeId: ownerId,
+        question: '이어서 하는 ERP 조사',
+        status: 'RUNNING',
+        plan,
+        planRevision: 1,
+        budget: { maxSteps: 8, maxSources: 20 },
+        leaseOwner: 'dead-server',
+        leaseExpiresAt: new Date(Date.now() - 1000),
+        stepsUsed: 1,
+        sources: [erpSource],
+        researchState: { summary: '앞', gaps: [], unsupportedClaims: [], searchedQueries: [], erpChecked: true, pending: { kind: 'search', query: '한빛철강 열연 거래', step: 1 } },
+      },
+    });
+    reportText = '이어서 [1]';
+    await runner.processNext();
+    const resumed = await getRun(row.id);
+    expect(resumed.status).toBe('COMPLETED');
+    // 저장해 둔 한빛철강 검색은 나가지 않고, 이어서 계획의 검색어로 찾는다
+    expect(searched).toEqual(['SS275 열연 가격']);
+    const done = resumed.events.find((e) => e.type === 'search.done');
+    expect(done?.payload).toMatchObject({ resultCount: 0 });
+    expect(String((done?.payload as { error: string }).error)).toContain('회사 안 정보');
+  });
+
+  it('그만둔 사원의 조사는 이미 모은 ERP 자료도 근거로 쓰지 않는다', async () => {
+    erpCalls = [inventory];
+    const run = await planned('그만두기 전에 모은 재고');
+    expect(run.sources).toHaveLength(1);
+    await prisma.aiResearchRun.update({ where: { id: run.id }, data: { status: 'QUEUED' } });
+    await prisma.employee.update({ where: { id: ownerId }, data: { isActive: false } });
+    try {
+      turns = [{ action: 'finish', query: '', sourceId: 0, researchState: state('끝') }];
+      reportText = '보고서 [1]';
+      turnPrompts.length = 0;
+      await runner.processNext();
+      const row = await prisma.aiResearchRun.findUniqueOrThrow({ where: { id: run.id } });
+      expect(row.status).toBe('COMPLETED');
+      expect((row.sources as { erp?: unknown }[]).filter((x) => x.erp)).toEqual([]);
+      expect(turnPrompts.join('\n')).not.toContain('### 우리 회사 ERP [');
+      expect(reportCalls.at(-1)?.messages.map((m) => m.content).join('\n')).not.toContain('research:erp-');
+    } finally {
+      await prisma.employee.update({ where: { id: ownerId }, data: { isActive: true } });
+    }
+  });
+
+  it('ERP 출처는 출처 수(sourceCount)에 세지 않는다 (조사 화면·목록 모두)', async () => {
+    erpCalls = [inventory];
+    const run = await planned('출처 수에 안 세는 재고');
+    expect(run.sources).toHaveLength(1);
+    expect(run.sourceCount).toBe(0);
+    const list = await call<PageResult<AiResearchRunSummaryView>>('GET', '/ai-research/runs', ownerCookie);
+    expect(list.body.data.items.find((i) => i.id === run.id)?.sourceCount).toBe(0);
+  });
+
+  it('ERP 자료가 필요 없으면(도구를 부르지 않으면) 출처·이벤트 없이 웹 계획만 세운다. AI 응답이 끊겨도 계획은 세운다', async () => {
+    const plain = await planned('전기로와 고로의 탄소 배출 차이');
+    expect(plain.sources).toEqual([]);
+    expect(plain.events.map((e) => e.type)).toEqual(['plan.ready']);
+    expect(planPrompts[0]).not.toContain('[우리 회사 ERP 자료]\n');
+    expect(erpPrompts).toHaveLength(1);
+    expect(erpPrompts[0]).toContain('[조사 질문]\n전기로와 고로의 탄소 배출 차이');
+
+    erpError = 'LLM 연결 실패';
+    const down = await planned('우리 재고 알려줘');
+    expect(down.status).toBe('AWAITING_APPROVAL');
+    expect(down.sources).toEqual([]);
+  });
+
+  it('도구 모음에 없는 도구(실행 카드 등)는 부르지 않고, 같은 조회는 한 번만 부른다', async () => {
+    const toolbox = app.get(AssistantToolbox);
+    const spy = jest.spyOn(toolbox, 'run');
+    try {
+      erpCalls = [{ name: 'create_task_card', arguments: '{"title":"x"}' }, inventory, { name: 'get_inventory', arguments: ' {} ' }];
+      const run = await planned('우리 재고 알려줘');
+      expect(spy.mock.calls.map(([, call]) => call.name)).toEqual(['get_inventory']);
+      expect(run.sources.map((s) => s.title)).toEqual(['ERP 조회(get_inventory)']);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('더 검색하는 보고서 고치기는 부탁에 맞는 ERP 자료를 한 번 더 모은다. 이미 모은 조회는 되풀이하지 않고, 검색 없는 고치기는 모으지 않는다', async () => {
+    erpCalls = [inventory];
+    const run = await planned('우리 재고와 시황');
+    await call('POST', `/ai-research/runs/${run.id}/start`, ownerCookie, { revision: run.planRevision });
+    turns = [{ action: 'search', query: '전기로 탄소 배출량', sourceId: 0, researchState: state('처음 메모', ['수입 가격']) }, { action: 'finish', query: '', sourceId: 0, researchState: state('끝') }];
+    reportText = '첫 보고서 [1]';
+    await runner.processNext();
+
+    // 검색 없는 고치기: ERP 조회 없음
+    const before = erpPrompts.length;
+    await call('POST', `/ai-research/runs/${run.id}/revisions`, ownerCookie, { instruction: '문장만 다듬어 줘', search: false });
+    reportText = '다듬은 보고서 [1]';
+    await runner.processNext();
+    expect(erpPrompts).toHaveLength(before);
+
+    // 더 검색하는 고치기: 부탁이 ERP 자료를 더 묻는다 → 이미 모은 get_inventory는 되풀이하지 않고 새 조회만 더한다
+    erpCalls = [inventory, { name: 'get_inventory', arguments: '{"category":"RAW_MATERIAL"}' }];
+    await call('POST', `/ai-research/runs/${run.id}/revisions`, ownerCookie, { instruction: '원료 재고도 같이 보여 줘', search: true });
+    turns = [{ action: 'finish', query: '', sourceId: 0, researchState: state('끝') }];
+    reportText = '원료 재고까지 [3].';
+    await runner.processNext();
+    const done = await getRun(run.id);
+    expect(done.status).toBe('COMPLETED');
+    const erpSources = done.sources.filter((s) => s.url.startsWith('erp:'));
+    // 새 조회는 웹 출처(2·3) 다음 번호로 더해진다
+    expect(erpSources.map((s) => s.id)).toEqual([1, 4]);
+    expect(erpSources[1].snippet).toContain('RAW_MATERIAL');
+    expect(erpPrompts.at(-1)).toContain('[더 알아볼 것] (사원이 쓴 글)\n원료 재고도 같이 보여 줘');
+    expect(erpPrompts.at(-1)).toContain('이미 조회한 내용이에요');
+  });
+
+  it('이 기능 전의 조사(erpChecked 없음)도 검색 없는 고치기는 ERP를 조회하지 않는다', async () => {
+    const run = await planned('옛 조사의 고치기');
+    await call('POST', `/ai-research/runs/${run.id}/start`, ownerCookie, { revision: run.planRevision });
+    turns = [{ action: 'search', query: '전기로 탄소 배출량', sourceId: 0, researchState: state('메모') }, { action: 'finish', query: '', sourceId: 0, researchState: state('끝') }];
+    reportText = '첫 보고서 [1]';
+    await runner.processNext();
+    const row = await prisma.aiResearchRun.findUniqueOrThrow({ where: { id: run.id } });
+    const { erpChecked: _checked, ...oldState } = row.researchState as Record<string, unknown>;
+    await prisma.aiResearchRun.update({ where: { id: run.id }, data: { researchState: oldState as object } });
+    erpCalls = [inventory];
+    const before = erpPrompts.length;
+    await call('POST', `/ai-research/runs/${run.id}/revisions`, ownerCookie, { instruction: '문장만 다듬어 줘', search: false });
+    reportText = '다듬은 보고서 [1]';
+    await runner.processNext();
+    expect(erpPrompts).toHaveLength(before);
+    expect((await getRun(run.id)).sources.filter((s) => s.url.startsWith('erp:'))).toEqual([]);
+  });
+
+  it('계획을 복사한 다시 조사는 시작할 때 ERP 자료를 한 번 살펴본다. 퇴사한 사원은 ERP를 보지 않는다', async () => {
+    const source = await planned('다시 조사할 우리 재고');
+    await call('POST', `/ai-research/runs/${source.id}/start`, ownerCookie, { revision: source.planRevision });
+    reportText = '첫 보고서 [1]';
+    await runner.processNext();
+    const rerun = await call<AiResearchRunView>('POST', `/ai-research/runs/${source.id}/rerun`, ownerCookie);
+    expect(rerun.body.data.sources).toEqual([]);
+    erpCalls = [inventory];
+    await call('POST', `/ai-research/runs/${rerun.body.data.id}/start`, ownerCookie, { revision: 1 });
+    reportText = '다시 쓴 보고서 [1]';
+    await runner.processNext();
+    const done = await getRun(rerun.body.data.id);
+    expect(done.status).toBe('COMPLETED');
+    expect(done.sources[0]).toMatchObject({ id: 1, title: 'ERP 조회(get_inventory)' });
+    expect(done.events.map((e) => e.type).indexOf('source.added')).toBeLessThan(done.events.map((e) => e.type).indexOf('step.started'));
+
+    // 조사를 만든 뒤 퇴사(is_active = false)한 사원의 조사는 도구를 부르지 않는다
+    const created = await call<AiResearchRunView>('POST', '/ai-research/runs', ownerCookie, { question: '퇴사 뒤의 재고 조사' });
+    expect(created.status).toBe(201);
+    const callsBefore = erpPrompts.length;
+    await prisma.employee.update({ where: { id: ownerId }, data: { isActive: false } });
+    try {
+      erpCalls = [inventory];
+      await runner.processNext();
+      const row = await prisma.aiResearchRun.findUniqueOrThrow({ where: { id: created.body.data.id } });
+      expect(row.status).toBe('AWAITING_APPROVAL');
+      expect(row.sources).toEqual([]);
+      expect(erpPrompts).toHaveLength(callsBefore);
+    } finally {
+      await prisma.employee.update({ where: { id: ownerId }, data: { isActive: true } });
+    }
   });
 });
