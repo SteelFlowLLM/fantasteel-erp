@@ -74,6 +74,28 @@ describe('재고 도구 (get_inventory)', () => {
   it('없는 category는 인자 오류', async () => {
     await expect(tool.run({ category: 'ALL' }, SALES_USER)).rejects.toBeInstanceOf(ToolArgumentError);
   });
+
+  it('줄 수 상한을 넘으면 재고 있는 제품을 먼저 넣고 재고 0인 제품을 자른다', async () => {
+    const empty = (id: number) => ({ ...overview.products[0], itemId: id, itemCode: `C-EMPTY-${id}`, onHandQty: 0, reservedQty: 0, availableQty: 0, onHandTon: '0.000', availableTon: '0.000', unallocatedPassedQty: 0 });
+    const products = [...Array.from({ length: 15 }, (_, i) => empty(100 + i)), overview.products[1], empty(200), overview.products[0]];
+    const crowded = inventoryTool({ listInventories: async () => ({ ...overview, products }) } as unknown as InventoryService);
+    const data = (await crowded.run({ category: 'PRODUCT' }, SALES_USER)).data as { 제품: { 규격: string }[]; '제품 생략 줄 수': number; '재고 있는데 생략한 제품 줄 수': number };
+    expect(data.제품.slice(0, 3).map((r) => r.규격)).toEqual(['C-SS275-2.0', 'S-SM355A-250', 'C-EMPTY-100']);
+    expect(data['제품 생략 줄 수']).toBe(3);
+    expect(data['재고 있는데 생략한 제품 줄 수']).toBe(0);
+  });
+
+  it('재고 있는 제품만으로 상한을 넘으면 재고 많은 순으로 남기고 재고 있는데 생략한 줄 수를 알린다', async () => {
+    const stocked = (id: number, qty: number) => ({ ...overview.products[0], itemId: id, itemCode: `C-STOCK-${id}`, onHandQty: qty });
+    const products = [overview.products[1], ...Array.from({ length: 16 }, (_, i) => stocked(300 + i, 10 + i)), { ...overview.products[0], onHandQty: 0 }];
+    const crowded = inventoryTool({ listInventories: async () => ({ ...overview, products }) } as unknown as InventoryService);
+    const data = (await crowded.run({ category: 'PRODUCT' }, SALES_USER)).data as { 제품: { 규격: string; '합격 재고 매수': number }[]; '제품 생략 줄 수': number; '재고 있는데 생략한 제품 줄 수': number };
+    expect(data.제품).toHaveLength(15);
+    expect(data.제품[0]).toMatchObject({ 규격: 'C-STOCK-315', '합격 재고 매수': 25 });
+    expect(data.제품.every((r) => r['합격 재고 매수'] >= 11)).toBe(true);
+    expect(data['제품 생략 줄 수']).toBe(3);
+    expect(data['재고 있는데 생략한 제품 줄 수']).toBe(2);
+  });
 });
 
 describe('수주 도구 (get_sales_orders)', () => {

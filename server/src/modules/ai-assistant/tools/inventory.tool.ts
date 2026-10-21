@@ -27,7 +27,12 @@ export function inventoryTool(inventory: InventoryService): AssistantTool {
       const match = (texts: (string | null)[]) => !keyword || looseIncludes(texts, keyword);
       const want = (c: (typeof CATEGORIES)[number]) => !category || category === c;
 
-      const products = limitRows(overview.products.filter((r) => match([r.itemCode, r.itemName, r.steelGradeCode])));
+      // 재고 0인 품목이 앞에 섞여 있으면 줄 수 상한에 걸려 재고 있는 품목이 잘린다 (이슈 #455).
+      // 재고 있는 품목만으로 상한을 넘으면 많은 것부터 남기고, 잘린 줄에 재고가 있었는지 따로 알린다
+      const matched = overview.products.filter((r) => match([r.itemCode, r.itemName, r.steelGradeCode]));
+      const stocked = matched.filter((r) => r.onHandQty > 0).sort((a, b) => b.onHandQty - a.onHandQty);
+      const products = limitRows([...stocked, ...matched.filter((r) => r.onHandQty <= 0)]);
+      const stockedOmitted = Math.max(0, stocked.length - products.rows.length);
       const rawMaterials = limitRows(overview.rawMaterials.filter((r) => match([r.itemCode, r.itemName])));
       const surplus = limitRows(overview.surplus.filter((r) => r.surplusQty > 0 && match([r.itemCode, r.itemName, r.steelGradeCode])));
 
@@ -49,6 +54,7 @@ export function inventoryTool(inventory: InventoryService): AssistantTool {
                   '가용재고 톤': r.availableTon,
                 })),
                 '제품 생략 줄 수': products.omitted,
+                '재고 있는데 생략한 제품 줄 수': stockedOmitted,
               }
             : {}),
           ...(want('RAW_MATERIAL')
