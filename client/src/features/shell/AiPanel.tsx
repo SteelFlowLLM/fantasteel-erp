@@ -3,9 +3,9 @@
 // 철강맨AI 패널 = AI 어시스턴트 (REQ-AST-001·003·004·007·008·009). 더 넓게(SPEC 4장 4번), 여는 버튼은 상단 바(4장 5번).
 // 용어 사전과 데이터 조회(REQ-AST-004 조회 대상 전부), 과거 사례 검색(AST-006, 예시 사례 + 등록 사례)으로 답한다. 업무·일정·구매요청 등록을 부탁하면 실행 카드(AST-005)로 보여 주고, 사용자가 확인해 [실행]을 눌러야 반영된다.
 // 답을 받은 질문은 서버가 대화로 저장하고(이슈 #399), [대화 목록]에서 지난 대화를 열어 이어 묻거나 지운다.
-// 입력칸 맨 앞의 /로 명령(심층 조사·이번 질문만 웹 검색·브라우저, 새 대화, 대화 목록)을 부른다(이슈 #410, lib/aiSlashCommand.ts).
+// 입력칸 맨 앞의 /로 명령(심층 조사·이번 질문만 웹 검색·브라우저, 새 대화, 대화 목록, 오늘 브리핑)을 부른다(이슈 #410·#506, lib/aiSlashCommand.ts).
 // 화면 도우미 펫 철강맨과 한 캐릭터로 느끼도록 펫 말풍선·대화창(public/pet/pet-engine.js의 .fp-bubble·.fp-chat)과 같은 모양으로 그린다.
-import { AI_IMAGE_MAX_COUNT, AI_REASONING_DEFAULT, AI_RESEARCH_LIMITS, type DriveFileView, AI_REASONING_LABEL, AI_REASONING_LEVELS, type AiAssistantImageInput, type AiAssistantScreenContext, type AiReasoningLevel, type AiResearchSeed } from '@fantasteel/shared';
+import { AI_BRIEFING_QUESTION, AI_IMAGE_MAX_COUNT, AI_REASONING_DEFAULT, AI_RESEARCH_LIMITS, type DriveFileView, AI_REASONING_LABEL, AI_REASONING_LEVELS, type AiAssistantImageInput, type AiAssistantScreenContext, type AiReasoningLevel, type AiResearchSeed } from '@fantasteel/shared';
 import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from 'react';
 import { aiResearchApi } from '@/api/aiResearch';
@@ -15,6 +15,7 @@ import { IconButton } from '@/components/IconButton';
 import { ROLE_LABEL } from '@/codes';
 import { DriveFilePicker } from '@/features/drive/components/DriveFilePicker';
 import { AiBrowserFramesDetails, AiLiveView, AiStepsDetails } from '@/features/shell/AiAnswerTrace';
+import { AiBriefingButton } from '@/features/shell/AiBriefingButton';
 import { AiAnswerText, AiWebSources } from '@/features/shell/AiWebAnswer';
 import { routeTitleOf } from '@/features/shell/routeTitles';
 import { AiActionCards } from '@/features/shell/AiActionCards';
@@ -65,6 +66,7 @@ const SLASH_RESEARCH_OFF = '심층 조사를 쓸 수 없어요 (AI 연결에 모
 const SLASH_WEB_OFF = '웹 검색을 쓸 수 없어요';
 const SLASH_NEW_CHAT_PENDING = '답을 받는 중에는 새 대화를 시작할 수 없어요';
 const SLASH_NEW_CHAT_EMPTY = '이미 새 대화예요';
+const SLASH_BRIEFING_PENDING = '답을 받는 중에는 브리핑을 받을 수 없어요';
 const SLASH_RESEARCH_SHORT = `조사할 질문을 ${AI_RESEARCH_LIMITS.questionMin}자 이상 적어 주세요`;
 const ATTACH_ACCEPT = 'image/png,image/jpeg,image/webp';
 
@@ -266,6 +268,8 @@ export function AiPanel() {
         return pending ? SLASH_NEW_CHAT_PENDING : entries.length ? null : SLASH_NEW_CHAT_EMPTY;
       case 'threads':
         return null;
+      case 'briefing':
+        return pending ? SLASH_BRIEFING_PENDING : null;
     }
   };
   const slashPicked = slashCommands.findIndex((command) => command.key === slashActive);
@@ -395,6 +399,11 @@ export function AiPanel() {
         return;
       case 'threads':
         setShowThreads(true);
+        setDraft(question);
+        return;
+      // 오늘 브리핑 (이슈 #506): 첫 화면의 [오늘 브리핑]과 같은 질문. 명령 뒤에 적은 글은 버리지 않고 입력칸에 남긴다
+      case 'briefing':
+        send(AI_BRIEFING_QUESTION, false);
         setDraft(question);
         return;
     }
@@ -757,8 +766,9 @@ function Welcome({ roleLabel, contextQuestion, disabled, onAsk, onFill }: { role
   return (
     <div className="flex flex-col gap-2">
       <p className="text-cap leading-relaxed text-ink-3">
-        용어는 용어 사전에서, 재고·수주·생산·검사·구매·출하·LOT 추적·작업 로그는 내 권한 범위의 데이터를 조회해 출처와 함께 답해요. "비슷한 사례 찾아줘"처럼 물으면 과거 사례에서 찾아 요약해요. 자료에 없는 내용은 확인할 수 없다고 답해요. "견적서 보내기 업무 등록해줘"처럼 업무·일정·구매요청·수주 등록, 열연 배정, 히트 편성 확정, 과거 사례 등록, 내 일정·업무 고치기를 부탁하면 실행 카드로 만들어 줘요. 'Notion'을 켜면 회사 Notion을 찾아 읽고 정리 글을 Notion 카드로 써 줘요. 카드를 확인하고 [실행]을 눌러야 반영돼요.
+        용어는 용어 사전에서, 재고·수주·생산·검사·구매·출하·LOT 추적·작업 로그는 내 권한 범위의 데이터를 조회해 출처와 함께 답해요. 내 알림함·결재함·Agent 위험·초안·심층 조사 진행과 기준정보·지난 회의도 찾아 주고, KS 규격(강종별 기준값·검사 기준)도 읽어 답해요. [오늘 브리핑]은 오늘 일정·업무·결재·알림·Agent 위험·납기를 모아 먼저 할 일 3가지를 정리해 줘요. "비슷한 사례 찾아줘"처럼 물으면 과거 사례에서 찾아 요약해요. 자료에 없는 내용은 확인할 수 없다고 답해요. "견적서 보내기 업무 등록해줘"처럼 업무·일정·구매요청·수주 등록, 열연 배정, 히트 편성 확정, 과거 사례 등록, 내 일정·업무 고치기를 부탁하면 실행 카드로 만들어 줘요. 'Notion'을 켜면 회사 Notion을 찾아 읽고 정리 글을 Notion 카드로 써 줘요. 카드를 확인하고 [실행]을 눌러야 반영돼요.
       </p>
+      <AiBriefingButton disabled={disabled} onAsk={onAsk} />
       {suggested.isError ? <p className="text-cap text-danger">추천 질문을 불러오지 못했어요. 질문은 바로 입력할 수 있어요.</p> : null}
       {contextQuestion || roleQuestions.length ? (
         <>

@@ -35,6 +35,7 @@ import { myActionDraftsTool } from './action-draft.tool';
 import { agentRiskTool } from './agent.tool';
 import { myApprovalsTool } from './approval.tool';
 import { ToolArgumentError, type AssistantTool } from './assistant-tool';
+import { myBriefingTool } from './briefing.tool';
 import { businessEventTool } from './business-event.tool';
 import { dashboardTool } from './dashboard.tool';
 import { inventoryTool } from './inventory.tool';
@@ -126,6 +127,7 @@ export function assistantTools(s: AssistantToolServices): AssistantTool[] {
     myResearchTool(s.research),
     masterDataTool(s.masterData),
     meetingMinutesTool(s.meetingMinutes),
+    myBriefingTool({ scheduleEvents: s.scheduleEvents, tasks: s.tasks, purchasing: s.purchasing, notifications: s.notifications, agent: s.agent, salesOrders: s.salesOrders }),
     ...actionCardTools(s.actionCards, s.opsCards, s.updateCards),
   ];
 }

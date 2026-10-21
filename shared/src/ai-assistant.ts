@@ -208,6 +208,7 @@ export const AI_ASSISTANT_TOOL_TITLE: Record<string, string> = {
   drive_read_file: 'Drive 파일 읽기',
   get_my_schedule: '내 일정 조회',
   get_my_tasks: '내 업무 조회',
+  get_my_briefing: '오늘 브리핑 모으기',
   get_agent_risks: 'Agent 위험 조회',
   get_my_notifications: '내 알림 조회',
   get_my_approvals: '내 결재함 조회',
