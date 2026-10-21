@@ -133,10 +133,12 @@ export class HotRollingService {
 
   /** FIFO 추천: 저장하지 않고 작업 로그(ALLOCATION_RECOMMENDED)만 남긴다 (REQ-INV-006) */
   async recommend(user: AuthUser, productionPlanId: number): Promise<HotRollingDetail> {
-    return this.prisma.$transaction(async (tx) => {
-      const detail = await this.detail(productionPlanId, tx);
-      const recommended = detail.candidates.filter((c) => c.isRecommended);
-      if (recommended.length > 0) {
+    // 추천은 아무것도 잠그거나 바꾸지 않으니 상세(쿼리 수십 개)는 트랜잭션 밖에서 읽는다.
+    // 안에서 읽으면 DB가 느릴 때 기본 5초 제한을 넘겨 COM-999가 났다 (부하 중 시연에서 재현)
+    const detail = await this.detail(productionPlanId);
+    const recommended = detail.candidates.filter((c) => c.isRecommended);
+    if (recommended.length > 0) {
+      await this.prisma.$transaction(async (tx) => {
         await this.businessEventRecorder.record(tx, {
           type: BUSINESS_EVENT_TYPE.ALLOCATION_RECOMMENDED,
           actor: user,
@@ -146,9 +148,9 @@ export class HotRollingService {
           after: { allocationPurpose: 'HOT_ROLLING', neededQty: detail.neededQty, recommendedLotNos: recommended.map((c) => c.lotNo) },
           reason: `FIFO_RECOMMENDATION: 생산완료일이 오래된 순으로 ${recommended.length}매 추천 (더 필요한 슬래브 ${detail.neededQty}매)`,
         });
-      }
-      return detail;
-    });
+      });
+    }
+    return detail;
   }
 
   /** 배정 확정: 고른 슬래브마다 CONFIRMED 배정 (필요 매수 안에서, 판매 예약 비침범) */

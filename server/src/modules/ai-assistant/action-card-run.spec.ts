@@ -113,7 +113,9 @@ describe('실행 카드 한 번만 실행 (이슈 #479)', () => {
     // 수주처럼 다른 모듈의 트랜잭션으로 실행한 카드는 실행됐는지 몰라 다시 실행하지 않는다
     const order = randomUUID();
     expect(await ledger.claim(order, ownerId, 'SALES_ORDER', false)).toEqual({ state: 'claimed' });
-    expect(await ledger.claim(order, ownerId, 'SALES_ORDER', false, later)).toEqual({ state: 'unknown' });
+    // 잡은 뒤에 시각을 정한다 (위 later는 이 행보다 먼저 정해져, 느린 DB에서 1초 여유를 넘기면 아직 '실행 중'으로 보였다)
+    const orderLater = new Date(Date.now() + CARD_RUN_STALE_MS + 1000);
+    expect(await ledger.claim(order, ownerId, 'SALES_ORDER', false, orderLater)).toEqual({ state: 'unknown' });
   });
 
   it('업무 카드의 실행 기록은 업무와 같은 트랜잭션에 남는다 (업무가 롤백되면 기록도 없다)', async () => {
