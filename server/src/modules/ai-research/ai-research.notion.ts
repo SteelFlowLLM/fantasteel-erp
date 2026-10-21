@@ -3,7 +3,8 @@ import { escapeNotionText } from '../meeting-minutes/meeting-notion.markdown';
 import { urlKey } from '../ai-assistant/web/web-text';
 
 const TITLE_MAX = 200;
-const isErpSourceUrl = (url: string): boolean => url.startsWith('erp:');
+/** 웹 주소가 아닌 출처: ERP 조회(`erp:`, 이슈 #435)·사내 지식(`knowledge:`, 이슈 #484) */
+const isErpSourceUrl = (url: string): boolean => url.startsWith('erp:') || url.startsWith('knowledge:');
 
 const oneLine = (text: string): string => text.replace(/\s*\r?\n\s*/g, ' ').trim();
 /** 한 줄 글 그대로 (태그·링크 글자를 막는다, 회의록 내보내기와 같은 이스케이프) */
@@ -79,7 +80,7 @@ const linkUrl = (url: string): string => url.replace(/[()\s<>]/g, (c) => encodeU
 export function buildResearchNotionMarkdown(view: AiResearchRunView): string {
   const lines: string[] = [`**질문** ${inline(view.question)}`, '', reportToNotion(view.report ?? '') || '보고서가 없어요.'];
   if (view.charts.length) lines.push('', '## 차트', ...view.charts.flatMap((c) => ['', chartToNotionTable(c)]));
-  // 우리 ERP 조회 출처(이슈 #435)는 주소가 없어 링크 없는 글로 넣는다. 본문의 [n]이 가리킬 곳이 있어야 한다
+  // 우리 ERP 조회·사내 지식 출처는 주소가 없어 링크 없는 글로 넣는다. 본문의 [n]이 가리킬 곳이 있어야 한다
   const sources = view.sources.filter((s) => isErpSourceUrl(s.url) || urlKey(s.url) !== null);
   if (sources.length) lines.push('', '## 출처', ...sources.map((s) => (isErpSourceUrl(s.url) ? `- \\[${s.id}\\] ${inline(s.title)}` : `- \\[${s.id}\\] [${linkLabel(s.title)}](${linkUrl(s.url)})`)));
   lines.push('', '---', `FantaSteel ERP 심층 조사 #${view.id}에서 내보냈어요.`);

@@ -1,5 +1,5 @@
 import { cutText, filterAnswerLinks, stripInvisible, urlKey } from '../ai-assistant/web/web-text';
-import { isErpSource, type StoredAudit, type StoredSource, type StoredState } from './ai-research.rules';
+import { isInternalSource, type StoredAudit, type StoredSource, type StoredState } from './ai-research.rules';
 
 export const REPORT_TRUNCATED_NOTICE = '> **보고서가 길이 한도에 걸려 끝까지 쓰지 못했어요.** 아래 내용은 중간에서 끊겼을 수 있어요.';
 const SOURCE_HEADING = '## 출처';
@@ -21,8 +21,8 @@ export interface FinalizedReport {
  * 출처 목록은 인용한 출처만, 하나도 인용하지 않았으면 모은 출처 모두.
  */
 export function finalizeReport(raw: string, sources: readonly StoredSource[], truncated: boolean, incompleteReason: string | null = null): FinalizedReport {
-  // ERP 조회 출처(이슈 #435)는 주소가 없어도 인용할 수 있다. 링크로 허용하는 것은 웹 주소만
-  const byId = new Map(sources.filter((s) => isErpSource(s) || isHttpUrl(s.url)).map((s) => [s.id, s]));
+  // ERP 조회(이슈 #435)·사내 지식(이슈 #484) 출처는 주소가 없어도 인용할 수 있다. 링크로 허용하는 것은 웹 주소만
+  const byId = new Map(sources.filter((s) => isInternalSource(s) || isHttpUrl(s.url)).map((s) => [s.id, s]));
   const allowed = new Set([...byId.values()].map((s) => urlKey(s.url)).filter((k): k is string => k !== null));
   const body = withoutModelSourceSection(raw).trim();
   const { answer } = filterAnswerLinks(body, allowed);
@@ -78,8 +78,8 @@ export function fallbackReportBody(question: string, audit: StoredAudit, state: 
 }
 
 function sourceList(sources: readonly StoredSource[]): string {
-  // ERP 조회 출처는 링크 없이 'ERP 조회(도구 이름)'로 보인다 (제목은 서버가 만든 글)
-  return [SOURCE_HEADING, ...sources.map((s) => (isErpSource(s) ? `- [${s.id}] ${s.title}` : `- [${s.id}] [${markdownLabel(s.title || hostLabel(s.url))}](${markdownUrl(s.url)})`))].join('\n');
+  // ERP 조회·사내 지식 출처는 링크 없이 제목으로 보인다 (제목은 서버가 만든 글)
+  return [SOURCE_HEADING, ...sources.map((s) => (isInternalSource(s) ? `- [${s.id}] ${s.title}` : `- [${s.id}] [${markdownLabel(s.title || hostLabel(s.url))}](${markdownUrl(s.url)})`))].join('\n');
 }
 
 /** 제목은 웹에서 온 글이라 마크다운 문법이 되는 글자를 뺀다 */
