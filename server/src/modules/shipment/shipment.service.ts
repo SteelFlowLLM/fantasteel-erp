@@ -137,17 +137,20 @@ export class ShipmentService {
     return new Map(rows.map((r) => [r.salesOrderItemId, Math.max(0, (r.activeReservedQty ?? 0) - (r.pendingRequestQty ?? 0))]));
   }
 
-  async list(user: AuthUser, query: ListShipmentRequestsQuery): Promise<PageResult<ShipmentRequestSummary>> {
+  async list(user: AuthUser, query: ListShipmentRequestsQuery): Promise<PageResult<ShipmentRequestSummary | ShipmentRequestDetail>> {
     this.assertCanView(user);
     const where: Prisma.ShipmentRequestWhereInput = {
       ...(query.shipmentRequestStatus ? { shipmentRequestStatus: query.shipmentRequestStatus } : {}),
       ...(query.customerId ? { customerId: query.customerId } : {}),
       ...(query.shipmentRequestNo ? { shipmentRequestNo: { contains: query.shipmentRequestNo.trim(), mode: 'insensitive' as const } } : {}),
     };
-    const [rows, total] = await Promise.all([
-      this.repository.findMany(this.prisma, where, (query.page - 1) * query.size, query.size),
-      this.repository.count(this.prisma, where),
-    ]);
+    const skip = (query.page - 1) * query.size;
+    // withItems면 줄마다 상세를 함께 준다: 화면이 목록 줄마다 상세를 따로 부르던 것(N+1)을 없앤다 (이슈 #476)
+    if (query.withItems) {
+      const [rows, total] = await Promise.all([this.repository.findManyDetail(this.prisma, where, skip, query.size), this.repository.count(this.prisma, where)]);
+      return { items: rows.map(toShipmentRequestDetail), page: query.page, size: query.size, total };
+    }
+    const [rows, total] = await Promise.all([this.repository.findMany(this.prisma, where, skip, query.size), this.repository.count(this.prisma, where)]);
     return { items: rows.map(toShipmentRequestSummary), page: query.page, size: query.size, total };
   }
 

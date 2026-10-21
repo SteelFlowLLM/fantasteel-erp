@@ -65,7 +65,7 @@ export function useImagePreview(messageId: number, fileId: number, fileName: str
   const me = useMe();
   const isImage = imageMimeOf(fileName) !== null;
   return useQuery({
-    queryKey: [...messengerKeys.all, 'image', me.employeeId, messageId, fileId] as const,
+    queryKey: messengerKeys.image(me.employeeId, messageId, fileId),
     queryFn: isImage ? () => messengerApi.getFile({ messageId, fileId, fileName }) : skipToken,
     staleTime: Infinity,
     retry: false,

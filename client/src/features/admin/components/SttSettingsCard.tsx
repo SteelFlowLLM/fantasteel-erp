@@ -38,7 +38,7 @@ function SttSettingsForm({ saved, canEdit, active }: { saved: SttSettingsView; c
 
   const connection = useSttConnectionTest();
   const transcribe = useSttTranscribeTest();
-  const save = useAction(sttApi.updateSettings, { success: '음성 인식 설정을 저장했어요', invalidate: [sttKeys.settings()] });
+  const save = useAction(sttApi.updateSettings, { success: '음성 인식 설정을 저장했어요', invalidate: [sttKeys.settings(), sttKeys.savedConnection()] });
 
   /** 주소 출처가 저장된 것과 같을 때만 저장된 키를 이어 쓴다 (서버도 같은 규칙: 다른 주소로 키가 새지 않게) */
   const keyCarriesOver = sameOriginUrl(baseUrl, saved.baseUrl);

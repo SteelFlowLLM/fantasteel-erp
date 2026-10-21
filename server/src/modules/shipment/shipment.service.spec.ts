@@ -8,6 +8,9 @@ import { ShipmentModule } from './shipment.module';
 import { ShipmentService } from './shipment.service';
 
 // 실제 DB(fs_sales)에 수주·예약을 직접 넣고 서비스를 부른다. 시드에는 거래 데이터가 없다 (seed.md)
+/** 관리자가 생산의 출하요청·출고 확정 조회 권한을 뺀 경우 */
+const withoutPermission = (user: AuthUser): AuthUser => ({ ...user, permissions: { PRODUCTION_PLAN_CONFIRM: 'USE' } });
+
 describe('ShipmentService 출하요청 (REQ-SHP-001)', () => {
   let prisma: PrismaService;
   let service: ShipmentService;
@@ -170,10 +173,17 @@ describe('ShipmentService 출하요청 (REQ-SHP-001)', () => {
     const byNo = await service.list(logistics, { shipmentRequestNo: created.shipmentRequestNo.slice(3).toLowerCase(), page: 1, size: 20 });
     expect(byNo.items.map((r) => r.id)).toEqual([created.id]);
     await expect(service.findOne(logistics, created.id)).resolves.toMatchObject({ customerName: '나래조선' });
+    // withItems면 줄마다 상세(품목·배정)를 함께 준다: 상세와 같은 값이라 화면이 건마다 상세를 따로 부르지 않는다 (이슈 #476)
+    const withItems = await service.list(logistics, { customerId: customerB, withItems: true, page: 1, size: 20 });
+    expect(withItems.total).toBe(page.total);
+    const detail = await service.findOne(logistics, created.id);
+    expect(withItems.items.find((r) => r.id === created.id)).toEqual(detail);
+    expect('items' in (page.items[0] ?? {})).toBe(false);
+    await expect(service.list(withoutPermission(production), { withItems: true, page: 1, size: 20 })).rejects.toMatchObject({ code: 'COM-002' });
 
     await expect(service.findOne(production, created.id)).resolves.toMatchObject({ customerName: '나래조선' });
     // 관리자가 생산의 출하요청·출고 확정 조회 권한을 뺀 경우
-    const withoutShipmentView: AuthUser = { ...production, permissions: { PRODUCTION_PLAN_CONFIRM: 'USE' } };
+    const withoutShipmentView = withoutPermission(production);
     await expect(service.list(withoutShipmentView, { page: 1, size: 20 })).rejects.toMatchObject({ code: 'COM-002' });
     await expect(service.findOne(withoutShipmentView, created.id)).rejects.toMatchObject({ code: 'COM-002' });
     await expect(service.findOne(logistics, 999999)).rejects.toMatchObject({ code: 'COM-003' });

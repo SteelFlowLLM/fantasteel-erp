@@ -1,6 +1,6 @@
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsIn, IsInt, IsNotEmpty, IsObject, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateNested } from 'class-validator';
-import { MEETING_MINUTES_STATUS, MEETING_SUMMARY_MAX, MEETING_TITLE_MAX, MEETING_TRANSCRIPT_MAX } from '@fantasteel/shared';
+import { MEETING_KEYWORD_MAX, MEETING_MINUTES_STATUS, MEETING_SUMMARY_MAX, MEETING_TITLE_MAX, MEETING_TRANSCRIPT_MAX } from '@fantasteel/shared';
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -75,7 +75,7 @@ export class ListMeetingMinutesQuery {
 
   @IsOptional()
   @IsString()
-  @MaxLength(100, { message: '검색어는 100자까지 쓸 수 있어요' })
+  @MaxLength(MEETING_KEYWORD_MAX, { message: `검색어는 ${MEETING_KEYWORD_MAX}자까지 쓸 수 있어요` })
   keyword?: string;
 
   @IsOptional()

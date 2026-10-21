@@ -172,6 +172,11 @@ export class ShipmentRepository {
     return tx.shipmentRequest.findMany({ where, orderBy: { id: 'desc' }, skip, take, select: summarySelect });
   }
 
+  /** 목록 줄마다 상세(품목·배정)까지 (withItems) */
+  findManyDetail(tx: Tx, where: Prisma.ShipmentRequestWhereInput, skip: number, take: number) {
+    return tx.shipmentRequest.findMany({ where, orderBy: { id: 'desc' }, skip, take, select: detailSelect });
+  }
+
   count(tx: Tx, where: Prisma.ShipmentRequestWhereInput) {
     return tx.shipmentRequest.count({ where });
   }

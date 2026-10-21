@@ -130,12 +130,6 @@ describe('출고 확정 서버 어댑터 (api/server/goodsIssues.ts)', () => {
   });
 
   it('목록: 취소는 빼고 배정 확정 → 배정 대기 → 출고 완료 순, 출고 완료는 LOT을 읽지 않는다', async () => {
-    const summaries = [
-      { id: 71, shipmentRequestStatus: 'ISSUED' },
-      { id: 72, shipmentRequestStatus: 'REQUESTED' },
-      { id: 73, shipmentRequestStatus: 'CANCELLED' },
-      { id: 70, shipmentRequestStatus: 'ALLOCATED' },
-    ];
     const issued = request({
       id: 71,
       shipmentRequestNo: 'DR-2610-0002',
@@ -146,9 +140,8 @@ describe('출고 확정 서버 어댑터 (api/server/goodsIssues.ts)', () => {
     });
     const waiting = request({ id: 72, shipmentRequestNo: 'DR-2610-0003', shipmentRequestStatus: 'REQUESTED', shipDate: '2026-10-08', items: [{ ...request().items[0], allocations: [] }] });
     const calls = useFakeServer(SEED_EMPLOYEE_NO.logisticsHead, (c) => {
-      if (c.path === '/shipment-requests') return ok(page(summaries));
-      if (c.path === '/shipment-requests/71') return ok(issued);
-      if (c.path === '/shipment-requests/72') return ok(waiting);
+      // 목록이 줄마다 상세(품목·배정)를 함께 준다 (withItems). 취소된 요청(73)은 화면이 뺀다
+      if (c.path === '/shipment-requests') return ok(page([issued, waiting, request({ id: 73, shipmentRequestStatus: 'CANCELLED' }), request({ id: 70, shipmentRequestStatus: 'ALLOCATED' })]));
       return respond(c);
     });
     const rows = await goodsIssueApi.queue();
@@ -160,6 +153,9 @@ describe('출고 확정 서버 어댑터 (api/server/goodsIssues.ts)', () => {
     expect(rows[2]).toMatchObject({ issuedEmployeeName: '신현우', totalAllocatedQty: 1, totalWeightTon: '37.680', problems: [] });
     expect(rows[1].problems.map((p) => p.code)).toEqual(['INV-001']);
     expect(calls.some((c) => c.path === '/lots/503' || c.path === '/shipment-requests/73')).toBe(false);
+    // 목록은 상세를 함께 받고, 건마다 상세를 따로 부르지 않는다 (N+1 없음, 이슈 #476)
+    expect(calls.filter((c) => c.path === '/shipment-requests')[0].query).toMatchObject({ withItems: 'true' });
+    expect(calls.filter((c) => /^\/shipment-requests\/\d+$/.test(c.path))).toEqual([]);
     // 같은 수주는 한 번만 읽는다
     expect(calls.filter((c) => c.path === '/sales-orders/50')).toHaveLength(1);
   });

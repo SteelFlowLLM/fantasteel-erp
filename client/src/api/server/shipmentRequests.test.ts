@@ -91,14 +91,15 @@ describe('출하요청 서버 어댑터', () => {
   });
 
   it('목록: 요청 톤 합계, 취소된 요청은 배정 대기 0', async () => {
-    useFakeServer(SEED_EMPLOYEE_NO.sales, (c: ServerCall) => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.sales, (c: ServerCall) => {
       if (c.path === '/shipment-requests') return ok(page([request(1, 'REQUESTED'), request(2, 'CANCELLED')]));
-      if (c.path === '/shipment-requests/1') return ok(request(1, 'REQUESTED'));
-      if (c.path === '/shipment-requests/2') return ok(request(2, 'CANCELLED'));
       if (c.path === '/mill-sheets') return ok(page([]));
       return undefined;
     });
     const rows = await shipmentRequestApi.list();
+    // 목록 한 번에 줄마다 상세(품목·배정)까지 받는다: 건마다 상세를 따로 부르지 않는다 (N+1 없음, 이슈 #476)
+    expect(calls.filter((c) => c.path === '/shipment-requests')[0].query).toMatchObject({ withItems: 'true' });
+    expect(calls.filter((c) => /^\/shipment-requests\/\d+$/.test(c.path))).toEqual([]);
     expect(rows.map((r) => [r.shipmentRequestNo, r.totalWeightTon, r.waitingAllocationQty])).toEqual([
       ['DR-2610-0001', '117.752', 3],
       ['DR-2610-0002', '117.752', 0],
