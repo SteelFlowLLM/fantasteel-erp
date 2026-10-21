@@ -63,7 +63,7 @@ function limitText(item: FailedItemFact): string {
  */
 export function failedItemText(item: FailedItemFact): string {
   const unit = item.unit ? ` ${item.unit}` : '';
-  const symbol = /^[A-Z]{1,3}$/.test(item.code) && !/\([^)]*\)$/.test(item.name) ? `(${item.code})` : '';
+  const symbol = /^[A-Z]{1,3}$/.test(item.code) && !item.name.toUpperCase().includes(`(${item.code})`) ? `(${item.code})` : '';
   return `${item.name}${symbol} ${item.value}${unit} (기준 ${limitText(item)})`;
 }
 

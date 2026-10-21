@@ -36,6 +36,8 @@ describe('사례 초안 (REQ-CASE-002)', () => {
     // 이름에 이미 기호가 있으면 다시 붙이지 않는다 (#519)
     expect(failedItemText({ name: '인(P)', code: 'P', value: '0.058', unit: '%', min: null, max: '0.050' })).toBe('인(P) 0.058 % (기준 0.050 이하)');
     expect(failedItemText({ name: '망간(Mn)', code: 'MN', value: '1.68', unit: '%', min: null, max: '1.60' })).toBe('망간(Mn) 1.68 % (기준 1.60 이하)');
+    // 괄호가 있어도 다른 글이면 기호를 붙인다
+    expect(failedItemText({ name: '탄소(분석값)', code: 'C', value: '0.30', unit: '%', min: null, max: '0.25' })).toBe('탄소(분석값)(C) 0.30 % (기준 0.25 이하)');
     const draft = ruleDraft(facts);
     expect(draft).toMatchObject({ caseCategory: 'QUALITY', cause: '', equipmentText: '' });
     expect(draft.title).toBe('SM355A 히트 제강 검사 불합격');
