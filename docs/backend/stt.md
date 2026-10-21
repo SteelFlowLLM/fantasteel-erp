@@ -80,4 +80,4 @@ whisper-server -m ~/models/ggml-large-v3-turbo.bin --host 127.0.0.1 --port 8000 
 
 ## 설정 파일 쓰기 (2026-10-21, #487)
 
-- `storage/settings/stt.json`은 같은 폴더의 임시 파일(무작위 이름)에 다 쓴 뒤 이름을 바꿔 끼운다. 쓰는 도중 읽는 요청이 반쪽 JSON을 읽어 오류가 나지 않는다. LLM 설정(`llm.json`)에도 같은 문제가 있지만 그 저장소는 #468이 고치는 중이라 이 이슈에서는 건드리지 않았다 🟡.
+- `storage/settings/stt.json`·`steelman-wake.json`과 철강맨AI 브라우저 설정은 공통 함수 `writeFileAtomic`(common/storage)으로 같은 폴더의 임시 파일(무작위 이름)에 다 쓴 뒤 이름을 바꿔 끼운다. 실패하면 임시 파일(API 키가 든)을 지운다. 쓰는 도중 읽는 요청이 반쪽 JSON을 읽어 오류가 나지 않는다. LLM 설정(`llm.json`)에도 같은 문제가 있지만 그 저장소는 #468이 고치는 중이라 이 이슈에서는 건드리지 않았다 🟡.

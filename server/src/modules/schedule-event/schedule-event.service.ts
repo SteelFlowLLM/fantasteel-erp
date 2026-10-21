@@ -60,6 +60,8 @@ export function seoulDateTimeOf(text: string): Date {
 function fieldsOf(input: ScheduleEventInput): ScheduleEventFields {
   const startAt = seoulDateTimeOf(input.startAt);
   const endAt = seoulDateTimeOf(input.endAt);
+  // DTO가 ISO 8601만 받지만, 읽을 수 없는 시각이 DB까지 가 서버 오류가 되지 않게 한 번 더 막는다
+  if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime())) throw new AppException('COM-004', '시각은 YYYY-MM-DDTHH:mm 형식으로 입력해 주세요');
   if (endAt.getTime() <= startAt.getTime()) throw new AppException('COM-004', '끝나는 시각은 시작 시각보다 뒤여야 해요');
   return { scheduleEventTitle: input.scheduleEventTitle, scheduleEventDescription: input.scheduleEventDescription ?? null, startAt, endAt, notionSync: input.notionSync };
 }

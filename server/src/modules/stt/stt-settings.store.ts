@@ -1,8 +1,8 @@
-import { randomUUID } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { STT_DEFAULT_BASE_URL } from '@fantasteel/shared';
+import { writeFileAtomic } from '../../common/storage/write-file-atomic';
 
 export interface SttSettings {
   baseUrl: string;
@@ -34,15 +34,8 @@ export class SttSettingsStore {
     };
   }
 
-  /**
-   * 임시 파일에 다 쓴 뒤 이름을 바꿔 끼운다. 같은 파일에 바로 쓰면 쓰는 도중 읽은 요청이 반쪽 JSON을 받아 오류가 난다 (#487).
-   * 같은 폴더 안 rename은 한 번에 바뀐다
-   */
+  /** 쓰는 도중 읽는 요청이 반쪽 JSON을 읽지 않게 통째로 바꿔 쓴다 (#487) */
   async write(settings: SttSettings): Promise<void> {
-    await mkdir(dirname(this.file), { recursive: true });
-    // 동시에 두 번 써도 임시 파일이 겹치지 않게 무작위 이름을 쓴다
-    const temp = `${this.file}.${randomUUID()}.tmp`;
-    await writeFile(temp, JSON.stringify(settings, null, 2), 'utf8');
-    await rename(temp, this.file);
+    await writeFileAtomic(this.file, JSON.stringify(settings, null, 2));
   }
 }

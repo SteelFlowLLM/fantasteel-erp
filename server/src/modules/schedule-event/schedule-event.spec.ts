@@ -157,6 +157,11 @@ describe('내 일정 직접 등록·수정 (POST·PATCH /schedule-events, 2026-1
     expect(res.body.data).toMatchObject({ startAt: '2026-11-03T05:00:00.000Z', endAt: '2026-11-03T06:00:00.000Z' });
   });
 
+  it('날짜와 시각 사이가 공백이면(2026-11-03 14:00) 입력 오류 400이고 서버 오류가 되지 않는다 (#487)', async () => {
+    const res = await send<ScheduleEventView>('POST', '/schedule-events', salesCookie, input('공백 시각', '2026-11-03 14:00', '2026-11-03 15:00'));
+    expect(res.status).toBe(400);
+  });
+
   it('빈 메모는 없는 것으로, 끝이 시작과 같거나 앞이면 COM-004, 제목이 비면 COM-004', async () => {
     const blank = await send<ScheduleEventView>('POST', '/schedule-events', salesCookie, { ...input('메모 없음'), scheduleEventDescription: '   ' });
     created.push(blank.body.data.id);

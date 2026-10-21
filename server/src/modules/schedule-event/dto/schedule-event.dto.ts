@@ -32,10 +32,10 @@ export class ScheduleEventInputDto implements ScheduleEventInput {
   @MaxLength(1000)
   scheduleEventDescription!: string | null;
 
-  @IsISO8601({ strict: true }, { message: TIME_MESSAGE })
+  @IsISO8601({ strict: true, strictSeparator: true }, { message: TIME_MESSAGE })
   startAt!: string;
 
-  @IsISO8601({ strict: true }, { message: TIME_MESSAGE })
+  @IsISO8601({ strict: true, strictSeparator: true }, { message: TIME_MESSAGE })
   endAt!: string;
 
   @IsOptional()
