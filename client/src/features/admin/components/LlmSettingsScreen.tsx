@@ -2,10 +2,11 @@
 
 // AI 연결 /admin/llm (문서에 없는 기능, 2026-10-07 추가): LM Studio 서버 연결 확인 · 모델 선택 · 응답 확인.
 // 모델은 연결 확인으로 받은 목록에서 고르므로 서버 연결 카드 안에 둔다.
-// 같은 화면 아래에 음성 인식(STT) 카드가 있다 (Voice2ERP 1단계).
+// 카드가 늘어 탭 세 개로 나눈다: AI 모델(LM Studio) · 음성 인식(STT, Voice2ERP) · 철강맨AI 기능(브라우저, 철강맨 부르기).
+// 탭을 바꿔도 저장하지 않은 입력이 사라지지 않게 세 탭을 모두 그려 두고 고른 탭만 보인다.
 // 나중에 외부 LLM을 쓸 때는 주소와 API 키만 바꾼다 (둘 다 OpenAI 호환 API).
 // 설정 전용 권한 코드가 없어 부서·권한 관리(ORG_MANAGE) 권한으로 연다(가정). 사용 권한이 없으면 조회만 한다.
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { LLM_DEFAULT_BASE_URL, type LlmConnectionView, type LlmSettingsView } from '@fantasteel/shared';
 import { PERMISSION } from '@/codes';
 import { llmApi, llmKeys } from '@/api/llm';
@@ -18,6 +19,7 @@ import { Input, Select } from '@/components/Input';
 import { PageMain } from '@/components/Page';
 import { QueryBoundary } from '@/components/QueryBoundary';
 import { ReadOnlyHint } from '@/components/ReadOnlyHint';
+import { Tabs } from '@/components/Tabs';
 import { useAction } from '@/hooks/useAction';
 import { useLlmChatTest, useLlmConnectionTest, useLlmSettings } from '@/hooks/useLlm';
 import { useCanUse } from '@/hooks/usePermission';
@@ -27,34 +29,64 @@ import { SttLocalServerCard } from './SttLocalServerCard';
 import { SttSettingsCard } from './SttSettingsCard';
 import { SteelmanWakeSettingsCard } from './SteelmanWakeSettingsCard';
 
+type SettingsTab = 'model' | 'voice' | 'assistant';
+
+const TABS: readonly { key: SettingsTab; label: string }[] = [
+  { key: 'model', label: 'AI 모델' },
+  { key: 'voice', label: '음성 인식' },
+  { key: 'assistant', label: '철강맨AI 기능' },
+];
+
 export function LlmSettingsScreen() {
   const canEdit = useCanUse(PERMISSION.ORG_MANAGE);
   const settings = useLlmSettings();
+  const [tab, setTab] = useState<SettingsTab>('model');
 
   return (
     <PageMain>
       <div className="flex flex-none items-end gap-4">
         <div className="flex min-w-0 flex-col gap-0.5">
           <h1 className="text-2xl font-semibold">AI 연결</h1>
-          <span className="text-cap text-ink-3">LM Studio 서버에 연결해 AI 기능이 쓸 모델을 고르고, 음성 인식(Whisper) 서버도 연결해요</span>
+          <span className="text-cap text-ink-3">AI 기능이 쓸 모델(LM Studio)과 음성 인식(Whisper) 서버를 연결하고, 철강맨AI가 쓸 기능을 정해요</span>
         </div>
         <div className="ml-auto flex items-center gap-2">{canEdit ? null : <ReadOnlyHint permissions={[PERMISSION.ORG_MANAGE]} />}</div>
       </div>
-      <QueryBoundary query={settings} loadingLabel="AI 연결 설정을 불러오는 중">
-        {(data) => <LlmSettingsForm key={`${data.baseUrl}|${data.model ?? ''}|${data.hasApiKey}`} saved={data} canEdit={canEdit} />}
-      </QueryBoundary>
-      <div className="grid flex-none grid-cols-[minmax(0,1fr)_340px] items-start gap-4">
-        <BrowserSettingsCard canEdit={canEdit} />
-      </div>
-      <div className="grid flex-none grid-cols-[minmax(0,1fr)_340px] items-start gap-4">
-        <SttSettingsCard canEdit={canEdit} />
-        <div className="flex min-w-0 flex-col gap-4">
-          <SttLocalServerCard canEdit={canEdit} />
-          <SteelmanWakeSettingsCard canEdit={canEdit} />
-          <SttGuideCard />
-        </div>
-      </div>
+      <Tabs<SettingsTab> items={TABS} active={tab} onChange={setTab} ariaLabel="AI 연결 설정" />
+      <TabPanel active={tab === 'model'} label="AI 모델">
+        <QueryBoundary query={settings} loadingLabel="AI 연결 설정을 불러오는 중">
+          {(data) => <LlmSettingsForm key={`${data.baseUrl}|${data.model ?? ''}|${data.hasApiKey}`} saved={data} canEdit={canEdit} />}
+        </QueryBoundary>
+      </TabPanel>
+      <TabPanel active={tab === 'voice'} label="음성 인식">
+        <TwoColumns aside={<><SttLocalServerCard canEdit={canEdit} /><SttGuideCard /></>}>
+          <SttSettingsCard canEdit={canEdit} />
+        </TwoColumns>
+      </TabPanel>
+      <TabPanel active={tab === 'assistant'} label="철강맨AI 기능">
+        <TwoColumns aside={<SteelmanWakeSettingsCard canEdit={canEdit} />}>
+          <BrowserSettingsCard canEdit={canEdit} />
+        </TwoColumns>
+      </TabPanel>
     </PageMain>
+  );
+}
+
+/** 고른 탭만 보인다. 숨긴 탭도 그려 두어 입력하던 값이 남는다 */
+function TabPanel({ active, label, children }: { active: boolean; label: string; children: ReactNode }) {
+  return (
+    <div role="tabpanel" aria-label={label} hidden={!active} className="flex flex-none flex-col gap-4">
+      {children}
+    </div>
+  );
+}
+
+/** 왼쪽 넓은 설정 카드 + 오른쪽 340px 안내·상태 카드 */
+function TwoColumns({ aside, children }: { aside: ReactNode; children: ReactNode }) {
+  return (
+    <div className="grid flex-none grid-cols-[minmax(0,1fr)_340px] items-start gap-4">
+      <div className="flex min-w-0 flex-col gap-4">{children}</div>
+      <div className="flex min-w-0 flex-col gap-4">{aside}</div>
+    </div>
   );
 }
 

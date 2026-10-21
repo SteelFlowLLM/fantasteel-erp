@@ -8,7 +8,7 @@ export function SttGuideCard() {
       <CardHead title="음성 연결 안내" />
       <CardBody className="text-sm leading-relaxed text-ink-2">
         <p>
-          <b>LLM을 API로 바꿔도 음성은 여기 설정을 써요.</b> 위 AI 연결(LLM)과 따로 저장돼요.
+          <b>LLM을 API로 바꿔도 음성은 여기 설정을 써요.</b> AI 모델 탭의 연결과 따로 저장돼요.
         </p>
         <p className="text-xs text-ink-3">
           주소는 ERP 서버가 부르므로 127.0.0.1은 <b>ERP 서버를 돌리는 컴퓨터</b>예요. 사용자 PC에는 음성 서버가 없어도 돼요.
@@ -21,7 +21,7 @@ export function SttGuideCard() {
               (지우기: <code>--uninstall</code>, 상태: <code>--status</code>).
             </li>
             <li>
-              터미널에 나온 <b>주소</b>를, API 키는 <code>cat ~/.config/fantasteel-voice/api-key</code>로 보고 위 카드에 넣어요. 같은 망이면 192.168.x.x, 다른 망이면
+              터미널에 나온 <b>주소</b>를, API 키는 <code>cat ~/.config/fantasteel-voice/api-key</code>로 보고 왼쪽 음성 인식 카드에 넣어요. 같은 망이면 192.168.x.x, 다른 망이면
               Tailscale(100.x.x.x) 주소예요.
             </li>
             <li>
