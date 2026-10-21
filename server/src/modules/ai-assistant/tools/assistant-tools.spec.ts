@@ -290,6 +290,13 @@ describe('도구 모음 (권한·실패 처리)', () => {
     {} as never,
     {} as never,
     {} as never,
+    // 알림·Agent·초안·기준정보·회의 검색·심층 조사 조회와 브리핑 (이슈 #506): 이 시험에서는 부르지 않는다
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
   );
   const run = (name: string, args: string, permissions: AuthUser['permissions'] = {}) => toolbox.run(user(permissions), { id: 'c1', name, arguments: args });
 
