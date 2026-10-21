@@ -20,7 +20,7 @@ curl http://127.0.0.1:8001/health
 
 pyannote 모델은 Hugging Face 토큰이 필요하다. `HF_TOKEN` 환경변수가 없으면 `server/.env`의 `HF_TOKEN=…` 줄을 읽는다(값은 출력·기록하지 않는다). 모델은 첫 요청에서 불러온다.
 
-선택 환경변수: `SIDECAR_PORT`(8001), `WHISPER_URL`, `PYANNOTE_PIPELINE`, `VIBEVOICE_MODEL`, `VIBEVOICE_MAX_TOKENS`(65536).
+선택 환경변수: `SIDECAR_HOST`(127.0.0.1), `SIDECAR_PORT`(8001), `WHISPER_URL`, `PYANNOTE_PIPELINE`, `VIBEVOICE_MODEL`, `VIBEVOICE_MAX_TOKENS`(65536).
 
 ## ERP에 연결
 
@@ -30,7 +30,7 @@ pyannote 모델은 Hugging Face 토큰이 필요하다. `HF_TOKEN` 환경변수�
 
 - 음성은 이 컴퓨터 안에서만 처리하고 외부로 보내지 않는다(모델 내려받기 때 Hugging Face에 접속하는 것 제외).
 - 업로드한 음성과 변환한 WAV는 임시 폴더에 두었다가 요청이 끝나면(성공·실패 모두) 지운다. 음성도 전사 내용도 로그에 남기지 않는다 (BP-VOC-01).
-- `127.0.0.1`에만 열린다. 다른 컴퓨터에서 쓰려면 방화벽·인증을 먼저 정해야 한다.
+- 기본은 `127.0.0.1`에만 열린다. 다른 PC의 ERP 서버가 부르게 하려면 `SIDECAR_HOST=0.0.0.0`으로 띄우되, 인증이 없으므로 같은 망·Tailscale에서만 열고 방화벽을 정한다 ([docs/voice2erp/voice-server-connect.md](../../docs/voice2erp/voice-server-connect.md)).
 
 ## 응답 모양
 

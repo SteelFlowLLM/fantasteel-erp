@@ -4,6 +4,10 @@
 /** whisper.cpp whisper-server 기본 주소 (README의 실행 예시와 같은 포트) */
 export const STT_DEFAULT_BASE_URL = 'http://127.0.0.1:8000/v1';
 
+/** OpenAI 방식 음성 API를 고를 때 채우는 값 */
+export const STT_API_BASE_URL = 'https://api.openai.com/v1';
+export const STT_API_DEFAULT_MODEL = 'whisper-1';
+
 export interface SttSettingsView {
   baseUrl: string;
   /** whisper.cpp는 모델 이름을 무시한다. OpenAI는 whisper-1 같은 이름이 필요하다. 비우면 null */
@@ -21,6 +25,8 @@ export interface SttSettingsInput {
 
 export interface SttConnectionTestInput {
   baseUrl: string;
+  /** 화면에 입력한(저장 전) 모델. 보내지 않으면 저장된 모델을 쓴다. null이면 모델 이름 없이 확인한다 */
+  model?: string | null;
   /** 보내지 않으면 저장된 API 키를 쓴다 */
   apiKey?: string;
 }
