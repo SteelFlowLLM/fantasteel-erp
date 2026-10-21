@@ -5,6 +5,7 @@ import { Test } from '@nestjs/testing';
 import type { AddressInfo } from 'node:net';
 import type { MeetingMinutesView } from '@fantasteel/shared';
 import { AppModule } from '../../app.module';
+import type { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
 let app: INestApplication;
@@ -28,7 +29,7 @@ async function login(employeeNo: string): Promise<string> {
   return (res.headers.get('set-cookie') ?? '').split(';')[0];
 }
 
-async function call<T>(method: 'GET' | 'PUT' | 'DELETE', path: string, cookie: string, payload?: unknown) {
+async function call<T>(method: 'GET' | 'PUT' | 'DELETE' | 'POST', path: string, cookie: string, payload?: unknown) {
   const res = await fetch(`${baseUrl}${path}`, {
     method,
     headers: { cookie, ...(payload === undefined ? {} : { 'content-type': 'application/json' }) },
@@ -52,12 +53,15 @@ beforeAll(async () => {
   creatorId = (await prisma.employee.findUniqueOrThrow({ where: { employeeNo: '2207005' } })).id;
   headId = (await prisma.employee.findUniqueOrThrow({ where: { employeeNo: '1702004' } })).id;
   outsiderId = (await prisma.employee.findFirstOrThrow({ where: { id: { notIn: [creatorId, headId] }, isActive: true } })).id;
-  retiredId = (await prisma.employee.findFirstOrThrow({ where: { id: { notIn: [creatorId, headId, outsiderId] }, isActive: true, employeeNo: { not: '1503001' } }, orderBy: { id: 'desc' } })).id;
+  // 시드 사원을 퇴사로 바꾸면 같은 DB를 쓰는 다른 시험 파일이 흔들리므로 이 시험 전용 사원을 만든다
+  const base = await prisma.employee.findUniqueOrThrow({ where: { id: headId } });
+  retiredId = (await prisma.employee.create({ data: { employeeNo: '9944901', employeeName: '회의 퇴사자', passwordHash: base.passwordHash, departmentId: base.departmentId, jobGradeId: base.jobGradeId, roleId: base.roleId, isActive: false } })).id;
 }, 60_000);
 
 afterAll(async () => {
   await prisma?.meetingAttendee.deleteMany({ where: { meetingMinutesId: { gt: startId } } });
   await prisma?.meetingMinutes.deleteMany({ where: { id: { gt: startId } } });
+  await prisma?.employee.deleteMany({ where: { employeeNo: '9944901' } });
   await app?.close();
 });
 
@@ -99,21 +103,15 @@ describe('PUT /meeting-minutes/:id/attendees', () => {
 
   it('빈 목록은 400, 새로 넣는 퇴사자는 404, 그대로 둔 참석자는 퇴사했어도 남긴다', async () => {
     const id = await seedMinutes();
-    // 시드에 퇴사자가 없어 이 시험 동안만 퇴사로 바꾼다 (같은 DB를 쓰는 다음 시험 파일을 위해 되돌린다)
-    await prisma.employee.update({ where: { id: retiredId }, data: { isActive: false } });
-    try {
-      expect((await call('PUT', `/meeting-minutes/${id}/attendees`, creatorCookie, { attendeeIds: [] })).status).toBe(400);
-      const retiredAdd = await call('PUT', `/meeting-minutes/${id}/attendees`, creatorCookie, { attendeeIds: [creatorId, retiredId] });
-      expect(retiredAdd.status).toBe(404);
-      expect(retiredAdd.body.error?.code).toBe('VOC-002');
+    expect((await call('PUT', `/meeting-minutes/${id}/attendees`, creatorCookie, { attendeeIds: [] })).status).toBe(400);
+    const retiredAdd = await call('PUT', `/meeting-minutes/${id}/attendees`, creatorCookie, { attendeeIds: [creatorId, retiredId] });
+    expect(retiredAdd.status).toBe(404);
+    expect(retiredAdd.body.error?.code).toBe('VOC-002');
 
-      await prisma.meetingAttendee.create({ data: { meetingMinutesId: id, employeeId: retiredId } });
-      const kept = await call<MeetingMinutesView>('PUT', `/meeting-minutes/${id}/attendees`, creatorCookie, { attendeeIds: [creatorId, retiredId] });
-      expect(kept.status).toBe(200);
-      expect(kept.body.data.attendees.map((a) => a.employeeId).sort()).toEqual([creatorId, retiredId].sort());
-    } finally {
-      await prisma.employee.update({ where: { id: retiredId }, data: { isActive: true } });
-    }
+    await prisma.meetingAttendee.create({ data: { meetingMinutesId: id, employeeId: retiredId } });
+    const kept = await call<MeetingMinutesView>('PUT', `/meeting-minutes/${id}/attendees`, creatorCookie, { attendeeIds: [creatorId, retiredId] });
+    expect(kept.status).toBe(200);
+    expect(kept.body.data.attendees.map((a) => a.employeeId).sort()).toEqual([creatorId, retiredId].sort());
   });
 
   it.each(['CONFIRMED', 'ANALYZING', 'TRANSCRIBING'])('%s이면 409로 막는다', async (status) => {
@@ -148,6 +146,49 @@ describe('DELETE /meeting-minutes/:id', () => {
     expect(res.status).toBe(409);
     expect(res.body.error?.code).toBe('VOC-004');
     expect(await prisma.meetingAttendee.count({ where: { meetingMinutesId: id } })).toBe(2);
+  });
+
+  /** 다른 트랜잭션이 회의록 행을 잡은 채로 요청을 보내고, 잠시 뒤 그 트랜잭션을 끝낸다 */
+  async function whileLocked<T>(lock: (tx: Prisma.TransactionClient) => Promise<unknown>, request: () => Promise<T>): Promise<T> {
+    let locked!: () => void;
+    let release!: () => void;
+    const lockedP = new Promise<void>((r) => (locked = r));
+    const gate = new Promise<void>((r) => (release = r));
+    const holder = prisma.$transaction(async (tx) => {
+      await lock(tx);
+      locked();
+      await gate;
+    }, { timeout: 20_000 });
+    await lockedP;
+    const pending = request();
+    await new Promise((r) => setTimeout(r, 500));
+    release();
+    await holder;
+    return pending;
+  }
+
+  it('확정이 먼저 행을 잡으면 지우기는 기다렸다가 409로 막고 아무것도 지우지 않는다', async () => {
+    const id = await seedMinutes('REVIEW');
+    const res = await whileLocked(
+      (tx) => tx.meetingMinutes.updateMany({ where: { id, meetingMinutesStatus: 'REVIEW' }, data: { meetingMinutesStatus: 'CONFIRMED', confirmedAt: new Date() } }),
+      () => call('DELETE', `/meeting-minutes/${id}`, creatorCookie),
+    );
+    expect([res.status, res.body.error?.code]).toEqual([409, 'VOC-004']);
+    expect(await prisma.meetingAttendee.count({ where: { meetingMinutesId: id } })).toBe(2);
+  });
+
+  it('지우기가 먼저 행을 잡으면 확정은 FK 오류(500) 없이 404·409로 끝난다', async () => {
+    const id = await seedMinutes('REVIEW');
+    await prisma.meetingMinutes.update({ where: { id }, data: { analysisResult: { summary: '요약', decisions: [], candidates: [], model: 'test', analyzedAt: '2026-10-21T00:00:00.000Z' } } });
+    const res = await whileLocked(
+      async (tx) => {
+        await tx.meetingAttendee.deleteMany({ where: { meetingMinutesId: id } });
+        await tx.meetingMinutes.deleteMany({ where: { id } });
+      },
+      () => call('POST', `/meeting-minutes/${id}/register`, creatorCookie),
+    );
+    expect([404, 409]).toContain(res.status);
+    expect(['VOC-001', 'VOC-004']).toContain(res.body.error?.code);
   });
 
   it('없는 회의록은 404', async () => {

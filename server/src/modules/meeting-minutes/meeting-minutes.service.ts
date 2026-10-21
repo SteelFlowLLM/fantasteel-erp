@@ -256,7 +256,7 @@ export class MeetingMinutesService {
         if (missing.length > 0) throw new AppException('VOC-002', `참석자로 고른 사원을 찾을 수 없거나 퇴사했어요 (사원 id ${missing.join(', ')})`);
       }
       const { count } = await this.repository.saveForAttendeeEdit(tx, id, row.updatedAt, EDIT_OPEN_STATUSES, unlinked ? (segments as unknown as Prisma.InputJsonArray) : undefined);
-      if (count === 0) await this.throwEditConflict(id, '참석자를 고칠');
+      if (count === 0) await this.throwEditConflict(tx, id, '참석자를 고칠');
       await this.repository.deleteAttendeesExcept(tx, id, attendeeIds);
       if (added.length > 0) await this.repository.createAttendees(tx, id, added);
     });
@@ -272,7 +272,7 @@ export class MeetingMinutesService {
     await this.prisma.$transaction(async (tx) => {
       await this.repository.deleteAllAttendees(tx, id);
       const { count } = await this.repository.deleteMeetingMinutes(tx, id, EDIT_OPEN_STATUSES);
-      if (count === 0) await this.throwEditConflict(id, '지울');
+      if (count === 0) await this.throwEditConflict(tx, id, '지울');
     });
     return { id };
   }
@@ -288,8 +288,8 @@ export class MeetingMinutesService {
   }
 
   /** 읽은 뒤 조건부 쓰기가 0건이면: 상태가 바뀌었는지(분석 시작·확정), 같은 회의록을 동시에 고쳤는지 가려서 알려 준다 */
-  private async throwEditConflict(id: number, action: string): Promise<never> {
-    const current = await this.repository.findDetail(this.prisma, id);
+  private async throwEditConflict(tx: Tx, id: number, action: string): Promise<never> {
+    const current = await this.repository.findDetail(tx, id);
     if (!current) throw new AppException('VOC-001');
     if (!EDIT_OPEN_STATUSES.includes(current.meetingMinutesStatus)) throw new AppException('VOC-004', editClosedMessage(action));
     throw new AppException('COM-001', '그 사이 다른 곳에서 회의록을 고쳤어요. 새로 불러와 주세요');
