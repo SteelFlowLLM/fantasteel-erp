@@ -19,8 +19,9 @@ export class AuthController {
   @Public()
   @Post('login')
   @HttpCode(200)
-  async login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response): Promise<AuthUser> {
-    const { token, user } = await this.auth.login(dto.employeeNo, dto.password);
+  async login(@Body() dto: LoginDto, @Req() req: Request, @Res({ passthrough: true }) res: Response): Promise<AuthUser> {
+    // req.ip는 main.ts의 trust proxy(루프백)로 Caddy가 알려 준 사용자 IP다
+    const { token, user } = await this.auth.login(dto.employeeNo, dto.password, req.ip);
     res.cookie(ACCESS_TOKEN_COOKIE, token, ACCESS_TOKEN_COOKIE_OPTIONS);
     return user;
   }
