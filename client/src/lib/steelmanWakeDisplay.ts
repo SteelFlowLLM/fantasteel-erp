@@ -41,6 +41,10 @@ export interface WakeBarInput {
   activity: WakeActivity | null;
   /** 말로 물은 질문의 답을 기다리는 중 */
   answering: boolean;
+  /** 명령을 말하는 동안 받은 중간 글 (이슈 #494) */
+  partialText?: string | null;
+  /** 8초에서 잘린 명령의 나머지를 듣는 중 */
+  continuing?: boolean;
   now: number;
 }
 
@@ -50,7 +54,8 @@ export type WakeBarTone = 'idle' | 'busy' | 'action' | 'problem';
 const shorten = (text: string): string => (text.length > WAKE_HEARD_MAX_CHARS ? `${text.slice(0, WAKE_HEARD_MAX_CHARS)}…` : text);
 
 /**
- * 지금 띠에 보일 한 줄. 위에 있는 것이 먼저다: 마이크 상태 → 소리 처리 막힘 → 답하는 중 → "네?" 기다림 → 물어보는 중·답했어요 →
+ * 지금 띠에 보일 한 줄. 위에 있는 것이 먼저다: 마이크 상태 → 소리 처리 막힘 → 답하는 중 → 말하는 동안의 중간 글 → 잘린 명령 이어 듣기 →
+ * "네?"·"이어서" 기다림 → 물어보는 중·답했어요 →
  * 받아쓰는 중 → 들은 말 → 말소리 잡는 중 → 기다림
  */
 export function wakeBarLine(input: WakeBarInput): { text: string; tone: WakeBarTone } {
@@ -59,6 +64,8 @@ export function wakeBarLine(input: WakeBarInput): { text: string; tone: WakeBarT
   if (input.status === 'error') return { text: '듣지 못하고 있어요', tone: 'problem' };
   if (input.audioBlocked) return { text: '화면을 한 번 눌러 주세요 · 브라우저가 소리 듣기를 멈춰 두었어요', tone: 'action' };
   if (input.answering) return { text: '철강맨이 답하는 중…', tone: 'busy' };
+  if (input.hearing && input.partialText) return { text: `듣는 중: '${shorten(input.partialText)}'`, tone: 'busy' };
+  if (input.continuing) return { text: '계속 듣는 중… 말이 끝나면 물어봐요', tone: 'busy' };
   if (input.called && input.now <= input.called.until) {
     const left = Math.max(0, Math.ceil((input.called.until - input.now) / 1000));
     return { text: `${input.called.reply} 말씀하세요 (${left}초)`, tone: 'action' };

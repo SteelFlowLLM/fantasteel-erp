@@ -31,6 +31,8 @@ DB가 아니라 `storage/settings/stt.json`에 저장한다. 파일이 없으면
 - 저장된 모델이 사이드카의 화자 분리 엔진(`whisper-pyannote`·`vibevoice`)이면 받아쓰기만 하는 `whisper`로 바꿔 보낸다(`quickModelOf`, 몇 초짜리라 화자 분리가 필요 없고 느리다). 제한 시간 20초.
 - 음성 서버에 닿지 않거나 거절하면 HTTP 오류가 아니라 `{ text: null, error }`라 화면이 스위치 옆에 "음성 서버가 꺼져 있어요"로 보인다. 자세한 이유(음성 서버 주소·Tailscale 이름·서버가 준 오류)는 설정 권한(`ORG_MANAGE` USE)이 있는 사원에게만 돌려주고, 나머지 사원에게는 "음성 서버에 연결할 수 없어요. 관리자에게 알려 주세요"만 준다. 자세한 이유는 서버 기록(`Logger.warn`, 사원 id 포함, 소리·글 없음)에 남는다.
 - 이 Mac 음성 서버(8001, whisper)로 `say -v Yuna`로 만든 1~3초 소리가 0.3~0.9초에 받아써졌다(2026-10-21).
+- **조각 종류 `mode`(이슈 #494)**: multipart 글 칸 `mode`(`WakeClipDto`, 보내지 않으면 `wake`). `wake`는 부르는 말을 찾는 짧은 조각(8초·512KB), `command`는 "철강맨" 뒤 명령 한 덩어리(**30초·1MB**, `STT_WAKE_CLIP_LIMITS.commandMaxSeconds·commandMaxBytes`, 가정값), `partial`은 명령을 말하는 동안 화면에 보이기만 할 중간 글(30초·1MB). multer는 가장 큰 1MB에 맞춰 받고 종류별 크기·길이(`wakeClipLimitOf`, `wakeClipProblem(buffer, maxSeconds)`)는 service가 본다. `partial`은 따로 **1분 40번**(`partialPerMinute`, 가정값) 세어 명령·부르는 말 조각의 30번을 깎지 않는다. 어느 종류도 소리·글을 저장·로그하지 않는다.
+- 측정(2026-10-22, 이 Mac 8001 whisper, `say -v Yuna`로 만든 12초 문장을 2·4·…·12초로 잘라 보냄): 길이와 거의 상관없이 **0.27~0.34초**에 받아썼다. 그래서 명령을 말하는 동안 2초마다 지금까지의 덩어리를 다시 보내 중간 글을 보이는 방식(30초 말에도 15번)을 켰다. 잘린 조각에서는 앞의 "철강맨"이 빠지기도 해 중간 글은 보이기만 하고 명령으로 쓰지 않는다.
 
 `SttClient.transcribe`는 `POST {baseUrl}/audio/transcriptions`(multipart: file, model, language=ko, response_format=verbose_json, temperature=0)를 부르고, OpenAI·whisper.cpp의 `verbose_json`과 `{ text }`만 오는 json을 모두 `{ text, segments[{ start, end, text }], durationSec }`로 바꾼다. 제한 시간은 변환 **60분**(VibeVoice처럼 느린 화자 분리 엔진 대비), 연결 확인 30초.
 

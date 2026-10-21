@@ -58,3 +58,15 @@ describe('소리 크기 막대·민감도', () => {
     expect(parseWakeSensitivity(undefined)).toBe('normal');
   });
 });
+
+describe('긴 명령 표시 (이슈 #494)', () => {
+  it('말하는 동안의 중간 글, 잘린 명령 이어 듣기, 이어 말하기 대답', () => {
+    expect(text({ hearing: true, partialText: '재고 알려' })).toBe("듣는 중: '재고 알려'");
+    // 말이 끝나면 중간 글은 보이지 않는다
+    expect(text({ partialText: '재고 알려' })).toBe(text({}));
+    expect(text({ continuing: true })).toBe('계속 듣는 중… 말이 끝나면 물어봐요');
+    expect(text({ called: { reply: '이어서', until: now + 9_500 } })).toBe('이어서 말씀하세요 (10초)');
+    // 답하는 중이 먼저
+    expect(text({ answering: true, hearing: true, partialText: 'x' })).toBe('철강맨이 답하는 중…');
+  });
+});

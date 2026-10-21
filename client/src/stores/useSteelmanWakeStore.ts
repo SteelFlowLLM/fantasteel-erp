@@ -31,8 +31,12 @@ interface SteelmanWakeState {
   sensitivity: WakeSensitivity;
   /** 마이크·음성 서버 문제. 스위치 옆에 보인다 */
   problem: string | null;
-  /** "철강맨"만 불러 다음 말을 기다리는 중: 대답과 마감 */
-  called: { reply: string; until: number } | null;
+  /** "철강맨"만 불러(또는 말로 물은 답이 끝나 이어 말하기로) 다음 말을 기다리는 중: 대답과 마감. 기다리는 동안 명령 덩어리로 듣는다 */
+  called: { reply: string; until: number; followUp?: boolean } | null;
+  /** 최대 길이에서 잘린 명령의 앞부분. 나머지를 받아 이어 붙여 묻는다 (이슈 #494) */
+  commandPrefix: { text: string; until: number } | null;
+  /** 명령을 말하는 동안 받은 중간 글 (보이기만 하고 쓰지 않는다, 화면 메모리에만) */
+  partialText: string | null;
   /** 잠깐 보일 안내 (멈췄어요, 실행할 카드가 없어요 등) */
   notice: { id: number; text: string } | null;
   approval: VoiceApprovalPending | null;
@@ -54,6 +58,8 @@ interface SteelmanWakeState {
   setSensitivity: (sensitivity: WakeSensitivity) => void;
   setProblem: (problem: string | null) => void;
   setCalled: (called: SteelmanWakeState['called']) => void;
+  setCommandPrefix: (prefix: SteelmanWakeState['commandPrefix']) => void;
+  setPartialText: (text: string | null) => void;
   notify: (text: string) => void;
   clearNotice: (id: number) => void;
   setApproval: (approval: VoiceApprovalPending | null) => void;
@@ -66,7 +72,7 @@ interface SteelmanWakeState {
 let nextId = 1;
 
 /** 끄거나 다른 사원으로 바뀌면 지우는 듣기 상태 (소리 크기는 스토어가 아니라 lib/wakeOrb.ts의 wakeLiveLevel) */
-const IDLE = { hearing: false, audioBlocked: false, transcribing: false, activity: null } as const;
+const IDLE = { hearing: false, audioBlocked: false, transcribing: false, activity: null, commandPrefix: null, partialText: null } as const;
 
 export const useSteelmanWakeStore = create<SteelmanWakeState>((set, get) => ({
   employeeId: null,
@@ -81,6 +87,8 @@ export const useSteelmanWakeStore = create<SteelmanWakeState>((set, get) => ({
   sensitivity: 'normal',
   problem: null,
   called: null,
+  commandPrefix: null,
+  partialText: null,
   notice: null,
   approval: null,
   screenConfirm: null,
@@ -119,6 +127,8 @@ export const useSteelmanWakeStore = create<SteelmanWakeState>((set, get) => ({
   },
   setProblem: (problem) => set({ problem }),
   setCalled: (called) => set({ called }),
+  setCommandPrefix: (commandPrefix) => set({ commandPrefix }),
+  setPartialText: (partialText) => set((state) => (state.partialText === partialText ? {} : { partialText })),
   notify: (text) => set({ notice: { id: nextId++, text } }),
   clearNotice: (id) => set((state) => (state.notice?.id === id ? { notice: null } : {})),
   setApproval: (approval) => set({ approval }),

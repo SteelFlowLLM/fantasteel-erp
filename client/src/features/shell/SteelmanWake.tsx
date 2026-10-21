@@ -16,7 +16,8 @@ import { useAiCapabilities } from '@/hooks/useAiAssistant';
 import { CARD_KIND_LABEL, isWorkCard } from '@/lib/aiActionCard';
 import { microphoneErrorMessage } from '@/lib/meetingAudio';
 import { speakSteelmanReply } from '@/lib/steelmanVoice';
-import { executeApproved, setWakeAudioContext, transcribe, turnOnScreenControl, wakeMuted } from '@/lib/steelmanWakeActions';
+import { COMMAND_QUIET_MS, CONVERSATION_FOLLOW_UP_MS, FOLLOW_UP_REPLY } from '@/lib/steelmanWake';
+import { executeApproved, flushCommandPrefix, setWakeAudioContext, transcribe, transcribePartial, turnOnScreenControl, wakeMuted, type HeardClip } from '@/lib/steelmanWakeActions';
 import { WAKE_SENSITIVITIES, WAKE_SENSITIVITY_LABEL, WAKE_START_RMS, wakeBarLine, type WakeSensitivity } from '@/lib/steelmanWakeDisplay';
 import { setWakeLiveLevel } from '@/lib/wakeOrb';
 import { WakeCalledOrb, WakeLevelMeter, WakeOrb } from '@/features/shell/WakeOrb';
@@ -30,6 +31,11 @@ import { useSteelmanWakeStore, voiceApprovalAllowed } from '@/stores/useSteelman
 const NOTICE_MS = 4_000;
 /** 소리 처리 묶음 크기 (48kHz면 약 43ms) */
 const FRAME_SIZE = 2048;
+/**
+ * 명령을 말하는 동안 지금까지의 덩어리를 다시 받아써 중간 글을 보이는 간격 (이슈 #494, 가정값).
+ * 음성 서버가 2~12초 조각을 길이와 거의 상관없이 0.3초 안팎에 받아써(2026-10-22 측정) 30초 말에도 15번이면 된다
+ */
+const PARTIAL_INTERVAL_MS = 2_000;
 
 const store = () => useSteelmanWakeStore.getState();
 
@@ -78,7 +84,7 @@ export function SteelmanWake() {
     let processor: ScriptProcessorNode | null = null;
     // 멈춘 AudioContext 깨우기를 그만두는 함수 (마이크를 연 뒤 정해진다)
     let stopUnlock: (() => void) | null = null;
-    const uploads = new ClipUploadQueue<Blob>((wav) => transcribe(wav, () => cancelled, () => screenControlRef.current), () => cancelled);
+    const uploads = new ClipUploadQueue<{ wav: Blob; clip: HeardClip }>((item) => transcribe(item.wav, () => cancelled, () => screenControlRef.current, item.clip), () => cancelled);
     store().setStatus('starting');
     (async () => {
       try {
@@ -99,19 +105,41 @@ export function SteelmanWake() {
       processor = audio.createScriptProcessor(FRAME_SIZE, 1, 1);
       const segmenter = new VoiceSegmenter({ sampleRate: audio.sampleRate, minStartRms: WAKE_START_RMS[store().sensitivity] });
       const rate = audio.sampleRate;
+      let partialAt = 0;
+      let quietSince: number | null = null;
       processor.onaudioprocess = (event) => {
         if (wakeMuted()) {
           segmenter.reset();
           return;
         }
+        const wake = store();
         // 민감도는 듣는 중에도 바꿀 수 있다 (마이크를 다시 열지 않는다)
-        segmenter.minStartRms = WAKE_START_RMS[store().sensitivity];
+        segmenter.minStartRms = WAKE_START_RMS[wake.sensitivity];
+        // "철강맨"을 들었거나(대답·이어 말하기) 잘린 명령을 이어 듣는 중이면 말이 끝날 때까지 한 덩어리로 듣는다 (이슈 #494)
+        segmenter.mode = wake.called || wake.commandPrefix ? 'command' : 'wake';
         const clip = segmenter.feed(new Float32Array(event.inputBuffer.getChannelData(0)));
-        if (store().hearing !== segmenter.speaking) store().setHearing(segmenter.speaking);
+        if (wake.hearing !== segmenter.speaking) wake.setHearing(segmenter.speaking);
         // 원·막대는 이 값을 화면 그리기 때마다 읽는다 (스토어를 바꾸지 않아 다시 그리지 않는다)
         setWakeLiveLevel(segmenter.lastRms, segmenter.startThreshold);
+        const now = performance.now();
+        // 명령을 말하는 동안 2초마다 지금까지의 덩어리를 받아써 띠에 보인다 (1초보다 짧으면 보내지 않는다)
+        if (segmenter.speaking && segmenter.mode === 'command') {
+          if (now - partialAt >= PARTIAL_INTERVAL_MS) {
+            partialAt = now;
+            const soFar = segmenter.snapshot();
+            if (soFar && soFar.length >= rate) void transcribePartial(clipToWav(soFar, rate), () => cancelled);
+          }
+        } else partialAt = now;
+        // 잘린 명령 뒤 말이 더 없으면(조용하고 받아쓸 것도 없음) 들은 데까지 묻는다
+        if (wake.commandPrefix && !segmenter.speaking && !wake.transcribing && uploads.size === 0) {
+          quietSince ??= now;
+          if (now - quietSince >= COMMAND_QUIET_MS) {
+            quietSince = null;
+            flushCommandPrefix(screenControlRef.current);
+          }
+        } else quietSince = null;
         if (!clip) return;
-        uploads.push(clipToWav(clip, rate));
+        uploads.push({ wav: clipToWav(clip, rate), clip: { ...segmenter.lastClip } });
       };
       source.connect(processor);
       processor.connect(audio.destination);
@@ -136,7 +164,7 @@ export function SteelmanWake() {
   }, [active, visible]);
 
   useSpeakVoiceAnswers();
-  useExpireTimers();
+  useExpireTimers(screenControlRef);
 
   if (!active) return null;
   return (
@@ -150,8 +178,9 @@ export function SteelmanWake() {
 }
 
 /** "철강맨"만 부른 뒤 기다리기·말로 승인·안내가 제때 사라지게 한다 */
-function useExpireTimers(): void {
+function useExpireTimers(screenControlRef: { readonly current: boolean }): void {
   const called = useSteelmanWakeStore((state) => state.called);
+  const commandPrefix = useSteelmanWakeStore((state) => state.commandPrefix);
   const approval = useSteelmanWakeStore((state) => state.approval);
   const notice = useSteelmanWakeStore((state) => state.notice);
   const screenConfirm = useSteelmanWakeStore((state) => state.screenConfirm);
@@ -172,11 +201,24 @@ function useExpireTimers(): void {
   }, [screenConfirm]);
   useEffect(() => {
     if (!called) return;
-    const timer = window.setTimeout(() => {
-      if (store().called === called) store().setCalled(null);
-    }, Math.max(0, called.until - Date.now()));
+    let timer = 0;
+    const expire = () => {
+      if (store().called !== called) return;
+      // 말하는 중이거나 받아쓰는 중이면 그 말이 끝날 때까지 기다린다 (마감 직전에 시작한 질문이 버려지지 않게)
+      if (store().hearing || store().transcribing) {
+        timer = window.setTimeout(expire, 300);
+        return;
+      }
+      store().setCalled(null);
+    };
+    timer = window.setTimeout(expire, Math.max(0, called.until - Date.now()));
     return () => window.clearTimeout(timer);
   }, [called]);
+  useEffect(() => {
+    if (!commandPrefix) return;
+    const timer = window.setTimeout(() => flushCommandPrefix(screenControlRef.current), Math.max(0, commandPrefix.until - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [commandPrefix, screenControlRef]);
   useEffect(() => {
     if (!approval) return;
     const timer = window.setTimeout(() => {
@@ -202,6 +244,8 @@ function useSpeakVoiceAnswers(): void {
         if (!voiceId || previous.pendingId !== voiceId || state.pendingId === voiceId) return;
         store().setVoiceQuestionId(null);
         store().showActivity({ kind: 'answered' });
+        // 이어 말하기: 답이 끝나면 잠깐 부르는 말 없이 다음 질문을 받는다 ("그만·고마워·됐어"면 끝, 이슈 #494)
+        store().setCalled({ reply: FOLLOW_UP_REPLY, until: Date.now() + CONVERSATION_FOLLOW_UP_MS, followUp: true });
         const last = state.entries.at(-1);
         if (last?.role === 'assistant') speakSteelmanReply(last.content);
       }),
@@ -218,9 +262,11 @@ export function useWakeBarLine(): ReturnType<typeof wakeBarLine> {
   const called = useSteelmanWakeStore((state) => state.called);
   const activity = useSteelmanWakeStore((state) => state.activity);
   const voiceQuestionId = useSteelmanWakeStore((state) => state.voiceQuestionId);
+  const partialText = useSteelmanWakeStore((state) => state.partialText);
+  const continuing = useSteelmanWakeStore((state) => state.commandPrefix !== null);
   const answering = useAiChatStore((state) => voiceQuestionId !== null && state.pendingId === voiceQuestionId);
   const now = useTicking(called !== null);
-  return wakeBarLine({ status, audioBlocked, hearing, transcribing, called, activity, answering, now });
+  return wakeBarLine({ status, audioBlocked, hearing, transcribing, called, activity, answering, partialText, continuing, now });
 }
 
 /** ticking이면 0.25초마다 지금 시각을 바꾼다 */
