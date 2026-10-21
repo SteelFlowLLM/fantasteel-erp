@@ -7,6 +7,7 @@ import { AuthUserService } from '../../common/auth/auth-user.service';
 import { AppException } from '../../common/errors/app.exception';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SalesOrderService } from '../sales-order/sales-order.service';
+import { ProductionResultRepository } from './production-result.repository';
 import { ProductionResultService } from './production-result.service';
 import { ProductionService } from './production.service';
 
@@ -262,5 +263,53 @@ describe('작업 실적 입력 기준: 히트 1개 몫·투입 순서·설비 �
     expect(await codeOf(results.register(producer, { processType: 'CONTINUOUS_CASTING', productionPlanId: planId, heatLotId: heatId, startedAt: on('04:30') }))).toBe('COM-004');
     const cast = await results.register(producer, { processType: 'CONTINUOUS_CASTING', productionPlanId: planId, heatLotId: heatId, startedAt: on('05:00'), completedAt: on('07:00'), slabQty: 10 });
     expect(cast.outputQty).toBe(10);
+  });
+});
+
+describe('동시 요청: 같은 실적을 두 번 완료하거나 같은 고로에서 둘을 시작하지 않는다', () => {
+  // 고로 BF3·BF5와 2018-01은 이 묶음만 쓴다
+  const on = (hhmm: string) => `2018-01-02T${hhmm}:00.000Z`;
+
+  it('완료 확인 뒤 다른 요청이 먼저 완료하면 COM-001이고 원료 차감·용선 LOT을 모두 되돌린다', async () => {
+    const started = await results.register(producer, { processType: 'IRONMAKING', blastFurnaceCode: 'BF3', startedAt: on('01:00') });
+    // 가장 오래된 원료라 다른 테스트의 FIFO 차감에 섞일 수 있어, 바로 넣고 끝나면 남은 양을 지운다
+    const materials: number[] = [];
+    for (const code of ['ORE01', 'COL01', 'LIM01']) materials.push((await receive(code, '10.000', '2018-01-01')).id);
+    const repository = moduleRef.get(ProductionResultRepository);
+    const completeResult = repository.completeResult.bind(repository);
+    // 계획 없는 제선은 잠금이 없다: 이 요청이 '이미 완료'를 확인하고 원료를 차감한 뒤, 완료로 바꾸기 직전에 같은 실적의 다른 완료 요청이 커밋된 상황
+    const spy = jest.spyOn(repository, 'completeResult').mockImplementationOnce(async (tx, id, data) => {
+      await prisma.productionResult.update({ where: { id: started.id }, data: { completedAt: new Date(on('02:00')) } });
+      return completeResult(tx, id, data);
+    });
+    try {
+      expect(await codeOf(results.complete(producer, started.id, { completedAt: on('02:00'), hotMetalTon: '1' }))).toBe('COM-001');
+      expect(await prisma.lot.count({ where: { productionResultId: started.id } })).toBe(0);
+      expect((await lotOf(materials[0])).remainingTon?.toFixed(3)).toBe('10.000');
+    } finally {
+      spy.mockRestore();
+      await prisma.lot.updateMany({ where: { id: { in: materials } }, data: { remainingTon: '0', lotStatus: 'CONSUMED' } });
+    }
+  });
+
+  it('같은 고로에 시작 요청 둘이 겹치면 하나만 만들고 나머지는 COM-001', async () => {
+    const repository = moduleRef.get(ProductionResultRepository);
+    const findOpenResults = repository.findOpenResults.bind(repository);
+    let second: Promise<string> | undefined;
+    // 첫 요청이 '작업 중 없음'을 확인하는 순간 두 번째 요청이 들어온다. 고로 잠금이 없으면 두 번째도 '없음'을 보고 만든다
+    const slowFind = async (...args: Parameters<typeof findOpenResults>) => {
+      second = codeOf(results.register(producer, { processType: 'IRONMAKING', blastFurnaceCode: 'BF5', startedAt: on('05:00') }));
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      return findOpenResults(...args);
+    };
+    // repository는 PrismaPromise를 돌려주지만 서비스는 await만 하므로 보통 Promise로 바꿔 끼운다
+    const spy = jest.spyOn(repository, 'findOpenResults').mockImplementationOnce(slowFind as unknown as typeof findOpenResults);
+    try {
+      await results.register(producer, { processType: 'IRONMAKING', blastFurnaceCode: 'BF5', startedAt: on('04:00') });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await second).toBe('COM-001');
+    expect(await prisma.productionResult.count({ where: { blastFurnaceCode: 'BF5' } })).toBe(1);
   });
 });

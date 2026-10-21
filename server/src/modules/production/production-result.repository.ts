@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ALLOCATION_PURPOSE, ALLOCATION_STATUS, BUSINESS_EVENT_TYPE, LOT_STATUS, LOT_TYPE, type LotRelationEvidence, type LotStatus, type LotType, type ProcessType } from '@fantasteel/shared';
 import { Prisma } from '../../generated/prisma/client';
-import { lockHotMetalLotsForFifo, lockRawMaterialLotsForFifo } from '../../generated/prisma/sql';
+import { lockBlastFurnace, lockHotMetalLotsForFifo, lockRawMaterialLotsForFifo } from '../../generated/prisma/sql';
 import type { Tx } from '../../prisma/prisma.service';
 
 /** 작업 실적 화면 한 줄: 산출 LOT과 그 투입(부모) LOT */
@@ -83,8 +83,14 @@ export class ProductionResultRepository {
     return tx.productionResult.create({ data });
   }
 
-  completeResult(tx: Tx, id: number, data: { completedAt: Date; simulatedLossRate?: string | null }) {
-    return tx.productionResult.update({ where: { id }, data });
+  /** 아직 완료하지 않은 실적만 완료한다. 바꾼 행 수(0이면 이미 완료됨) */
+  async completeResult(tx: Tx, id: number, data: { completedAt: Date; simulatedLossRate?: string | null }): Promise<number> {
+    const { count } = await tx.productionResult.updateMany({ where: { id, completedAt: null }, data });
+    return count;
+  }
+
+  async lockBlastFurnace(tx: Tx, blastFurnaceCode: string): Promise<void> {
+    await tx.$queryRawTyped(lockBlastFurnace(blastFurnaceCode));
   }
 
   findResult(tx: Tx, id: number) {
