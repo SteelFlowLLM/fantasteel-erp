@@ -581,7 +581,7 @@ describe('심층 조사 — 실패해도 모은 것을 버리지 않는다 · �
     expect(done.events.find((e) => e.type === 'report.ready')?.payload).toMatchObject({ fallback: 'ERROR', incomplete: true });
   });
 
-  it('보고서 LLM 시간 제한은 기본 10분이고, 시간 초과면 한 번 더 부탁해 그 보고서를 쓴다 (report.retry)', async () => {
+  it('보고서 LLM 시간 제한은 기본 10분이고, 시간 초과면 30초 쉬고 다시 부탁해 그 보고서를 쓴다 (report.retry)', async () => {
     const run = await queued('보고서 시간 초과 한 번');
     turns = [{ action: 'search', query: '시간 초과 전 검색', sourceId: 0, researchState: state('메모') }];
     reportFailures = [{ message: '600초 안에 응답이 없어요', kind: 'TIMEOUT' }];

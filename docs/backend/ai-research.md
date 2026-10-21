@@ -48,7 +48,7 @@
 | DELETE | `ai-research/runs/:id/schedule` | | 200 `AiResearchScheduleView`(`enabled: false`, `nextRunAt: null`). 지우지 않고 끈다. 반복이 없으면 404 `RES-001`. 반복이 만든 조사의 id도 받는다 |
 | POST | `ai-research/runs/:id/cancel` | | 200. 끝나지 않은 조사만 CANCELLED(+ `cancelled` 이벤트). 이미 끝났으면 409 `RES-002` |
 
-`AiResearchRunView` 주요 칸 (이슈 #521: `reportFallback`·`schedule`·`notionExportedVersion`·`repeating`·`fromSchedule` 더함): `status`, `plan`, `planRevision`, `budget`, `stepsUsed`, `researchState`, `searchedQueries`, `sources: { id, title, url, snippet, read }[]`(읽은 본문은 보내지 않는다), `audit`, `report`, `reportTruncated`, `incompleteReason`, `failureReason`, `canExtend`, `charts`, `notionPageUrl`, `versions`(판 `{version, instruction, search, createdAt}` 오래된 것부터, 본문 없음), `pendingRevision`(대기·조사 중인 고치기 `{version, instruction, search}`, 아니면 null), `canRevise`, `reportFallback`(지금 보고서가 대체본이면 `{reason: TIMEOUT|ERROR|EMPTY|LLM_DOWN, previous}`, 아니면 null), `schedule`(이 조사의 반복: 반복을 건 조사면 그 반복, 반복이 만든 조사면 만든 반복. `runId`가 반복을 건 조사), `notionExportedVersion`, `repeating`(켜진 반복이 걸려 있음)·`fromSchedule`(반복이 만든 조사, 목록 줄에도 있다), `events`, `lastSeq`.
+`AiResearchRunView` 주요 칸 (이슈 #521: `reportFallback`·`auditFailure`·`schedule`·`notionExportedVersion`·`repeating`·`fromSchedule` 더함): `status`, `plan`, `planRevision`, `budget`, `stepsUsed`, `researchState`, `searchedQueries`, `sources: { id, title, url, snippet, read }[]`(읽은 본문은 보내지 않는다), `audit`, `report`, `reportTruncated`, `incompleteReason`, `failureReason`, `canExtend`, `charts`, `notionPageUrl`, `versions`(판 `{version, instruction, search, createdAt}` 오래된 것부터, 본문 없음), `pendingRevision`(대기·조사 중인 고치기 `{version, instruction, search}`, 아니면 null), `canRevise`, `reportFallback`(지금 보고서가 대체본이면 `{reason: TIMEOUT|NO_MODEL|CONNECT|ERROR|EMPTY, previous, attempts}`, 아니면 null), `auditFailure`(점검 없이 쓴 보고서면 그 까닭), `schedule`(이 조사의 반복: 반복을 건 조사면 그 반복, 반복이 만든 조사면 만든 반복. `runId`가 반복을 건 조사), `notionExportedVersion`, `repeating`(켜진 반복이 걸려 있음)·`fromSchedule`(반복이 만든 조사, 목록 줄에도 있다), `events`, `lastSeq`.
 
 **보고서에 대해 묻기**: `POST ai-assistant/messages`(·`messages/stream`)에 `researchRunId`를 넣으면 그 조사의 보고서·출처 목록을 참고 자료로 넣는다(아래 4장 '보고서에 대해 묻기'). 남의 조사 404 `RES-001`, 보고서가 없으면 409 `RES-002`.
 
@@ -209,7 +209,7 @@ COMPLETED·FAILED·CANCELLED ─(rerun)→ 새 조사: 계획이 있으면 AWAIT
 | `state.updated` | `summary`(300자), `gapCount, unsupportedCount` |
 | `budget.exhausted` | `stepsUsed, maxSteps, gapCount`, 검색이 연달아 3번 빈손이라 멈췄을 때만 `reason` |
 | `audit.ready` | `claimCount, contradictionCount, missingCount, ok`, 점검 LLM이 다시 해도 실패했으면 `failure`(이슈 #521) |
-| `report.ready` | `chars, truncated, citedCount, incomplete`, 대체본이면 `fallback`(TIMEOUT·ERROR·EMPTY·LLM_DOWN, 이슈 #521) |
+| `report.ready` | `chars, truncated, citedCount, incomplete`, 대체본이면 `fallback`(TIMEOUT·NO_MODEL·CONNECT·ERROR·EMPTY, 이슈 #521) |
 | `report.retry` | `phase`(audit·report), `reason`(TIMEOUT·CONNECT·NO_MODEL·SERVER), `attempt`(1부터), `waitSeconds` — 점검·보고서 LLM이 잠깐 실패해 쉬었다 다시 부탁한다 (이슈 #521) |
 | `failed` | `reason` |
 | `cancelled` | `{}` |
