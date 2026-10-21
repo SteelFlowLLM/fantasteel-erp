@@ -13,12 +13,14 @@ DB가 아니라 `storage/settings/stt.json`에 저장한다. 파일이 없으면
 | --- | --- | --- |
 | `GET /stt/settings` | VIEW | `{ baseUrl, model, hasApiKey }` |
 | `PUT /stt/settings` | USE | `apiKey`를 보내지 않으면 유지, 빈 문자열이면 삭제 |
-| `POST /stt/connection-test` | USE | `{ baseUrl, apiKey? }`. 1초 무음 WAV(16kHz·모노·16비트)를 실제로 보내 HTTP 성공이면 연결됨 |
+| `POST /stt/connection-test` | USE | `{ baseUrl, model?, apiKey? }`. 화면에 입력한(저장 전) 모델·키로 1초 무음 WAV(16kHz·모노·16비트)를 실제로 보내 HTTP 성공이면 연결됨. `model`·`apiKey`를 보내지 않으면 저장된 값을 쓴다(`model: null`은 모델 이름 없이) |
 | `POST /stt/transcribe-test` | USE | multipart `file`(오디오, 100MB까지). `{ ok, text, segmentCount, durationSec, latencyMs, error }` |
 
 `SttClient.transcribe`는 `POST {baseUrl}/audio/transcriptions`(multipart: file, model, language=ko, response_format=verbose_json, temperature=0)를 부르고, OpenAI·whisper.cpp의 `verbose_json`과 `{ text }`만 오는 json을 모두 `{ text, segments[{ start, end, text }], durationSec }`로 바꾼다. 제한 시간은 변환 **60분**(VibeVoice처럼 느린 화자 분리 엔진 대비), 연결 확인 30초.
 
 응답 구간에 `speaker`(문자열)가 있으면 `SttSegment.speaker`로 남기고, 없거나 문자열이 아니면 null이다. 일반 whisper.cpp·OpenAI는 주지 않는다.
+
+주소는 관리자가 넣는 서버 설정이라 `localhost`·`127.0.0.1`·같은 망(`192.168.x.x`·`10.x`·`172.16~31.x`)·Tailscale(`100.64~127.x`·`*.ts.net`)·인터넷 주소를 모두 받고(`http://`·`https://`만), 철강맨AI 웹 도구의 사설 주소 차단과는 별개다. 연결 실패는 오류가 아니라 이유가 담긴 결과로 돌려주며, 원인(거절·길 없음·이름 못 찾음·인증서·404)별로 문구를 나눈다.
 
 ## whisper.cpp 실행 예
 
@@ -29,6 +31,8 @@ whisper-server -m ~/models/ggml-large-v3-turbo.bin --host 127.0.0.1 --port 8000 
   --inference-path /v1/audio/transcriptions --convert -l ko \
   --vad --vad-model ~/models/ggml-silero-v5.1.2.bin
 ```
+
+다른 PC에서 붙을 때는 `--host 0.0.0.0`으로 띄운다([voice2erp/voice-server-connect.md](../voice2erp/voice-server-connect.md)).
 
 `--convert`는 ffmpeg로 mp3·m4a·webm 등을 WAV로 바꾸므로 ffmpeg가 PATH에 있어야 한다. ERP 서버가 부르므로 `127.0.0.1`은 ERP 서버를 돌리는 컴퓨터다.
 
@@ -41,7 +45,10 @@ whisper-server -m ~/models/ggml-large-v3-turbo.bin --host 127.0.0.1 --port 8000 
 
 ## 화면
 
-`/admin/llm`(AI 연결)의 두 번째 카드 "음성 인식 (STT)": 서버 주소·모델·API 키 저장, 연결 확인, 파일로 시험.
+`/admin/llm`(AI 연결)의 "음성 인식 (STT)" 카드와 오른쪽 "음성 연결 안내" 카드:
+- **방식**: 내 음성 서버(whisper.cpp·화자 분리) / OpenAI 방식 음성 API. 서버에는 저장하지 않고 주소로 짐작(인터넷 주소면 API)하며, 바꾸면 주소·모델 기본값만 채운다(API: `https://api.openai.com/v1`·`whisper-1`).
+- 서버 주소(입력칸 아래에 이 서버 컴퓨터·같은 망·Tailscale·인터넷 중 어디인지 안내, 암호화 없는 인터넷 주소·`0.0.0.0`은 경고), 모델, API 키(저장 후 가림), 연결 확인, 파일로 시험.
+- 안내 카드: "LLM을 API로 바꿔도 음성은 여기 설정을 써요", 다른 PC의 음성 서버에 붙는 법(0.0.0.0·방화벽·Tailscale).
 
 ## 테스트
 

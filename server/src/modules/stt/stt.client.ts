@@ -69,9 +69,12 @@ export class SttClient {
       if (error instanceof Error && error.name === 'TimeoutError') {
         throw new SttRequestError(`${Math.round(timeoutMs / 1000)}초 안에 응답이 없어요. Whisper 서버 상태를 확인해 주세요`);
       }
-      throw new SttRequestError(`${url}에 연결할 수 없어요. Whisper 서버가 켜져 있는지, 주소가 맞는지 확인해 주세요`);
+      throw new SttRequestError(connectFailureMessage(url, error));
     }
     if (res.status === 401 || res.status === 403) throw new SttRequestError('API 키가 맞지 않거나 권한이 없어요');
+    if (res.status === 404) {
+      throw new SttRequestError(`서버는 응답했지만 ${url} 경로가 없어요. 주소 끝이 …/v1인지, 이 서버가 OpenAI 호환 음성 인식(/audio/transcriptions)을 여는지 확인해 주세요`);
+    }
     if (!res.ok) throw new SttRequestError(`음성 인식 서버 오류 (HTTP ${res.status}): ${await errorMessageOf(res)}`);
     let body: unknown;
     try {
@@ -93,6 +96,50 @@ export class SttClient {
       CONNECTION_TEST_TIMEOUT_MS,
     );
   }
+}
+
+/**
+ * fetch 실패의 원인 코드(error.cause.code)로 이유를 나눈다. 같은 망·Tailscale 서버는 꺼짐·방화벽·주소 오타가 흔해서 한 문장으로 뭉뚱그리지 않는다.
+ * 연결 시간 초과는 방화벽이 조용히 버리거나 PC가 꺼졌거나 Tailscale이 끊긴 경우다.
+ */
+export function connectFailureMessage(url: string, error: unknown): string {
+  const code = causeCode(error);
+  switch (code) {
+    case 'ECONNREFUSED':
+      return `${url}에서 연결을 거절했어요. 그 컴퓨터에서 음성 서버가 켜져 있는지, 포트가 맞는지 확인해 주세요${isLoopback(url) ? '' : '. 다른 PC라면 서버를 127.0.0.1이 아니라 0.0.0.0으로 띄워야 해요'}`;
+    case 'ENOTFOUND':
+    case 'EAI_AGAIN':
+      return `${url}의 주소를 찾을 수 없어요. 주소 철자를 확인해 주세요. Tailscale 이름(…ts.net)이면 이 서버에서도 Tailscale이 켜져 있어야 해요`;
+    case 'EHOSTUNREACH':
+    case 'ENETUNREACH':
+    case 'ETIMEDOUT':
+    case 'UND_ERR_CONNECT_TIMEOUT':
+      return `${url}까지 길이 닿지 않아요. 그 컴퓨터가 켜져 있고 같은 망(또는 Tailscale)에 있는지, 방화벽이 포트를 막지 않는지 확인해 주세요`;
+    case 'ERR_INVALID_URL':
+      return `${url}은 올바른 주소가 아니에요`;
+    default:
+      if (code?.startsWith('ERR_TLS') || code?.startsWith('CERT_') || code === 'DEPTH_ZERO_SELF_SIGNED_CERT' || code === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE') {
+        return `${url}의 보안(https) 인증서를 믿을 수 없어요. 사내 서버라면 http://로 시작하는 주소를 쓰거나 인증서를 확인해 주세요`;
+      }
+      return `${url}에 연결할 수 없어요. 음성 서버가 켜져 있는지, 주소가 맞는지 확인해 주세요`;
+  }
+}
+
+function isLoopback(url: string): boolean {
+  try {
+    const host = new URL(url).hostname;
+    return host === 'localhost' || host === '[::1]' || host.startsWith('127.');
+  } catch {
+    return false;
+  }
+}
+
+function causeCode(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null) return undefined;
+  const cause = (error as { cause?: unknown }).cause;
+  const source = typeof cause === 'object' && cause !== null ? cause : error;
+  const code = (source as { code?: unknown }).code;
+  return typeof code === 'string' ? code : undefined;
 }
 
 /** 무음 PCM WAV (16kHz·모노·16비트). 44바이트 RIFF 머리글 + 0으로 채운 샘플 */

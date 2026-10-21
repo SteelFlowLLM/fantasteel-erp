@@ -33,14 +33,15 @@ export class SttService {
     return toView(next);
   }
 
-  /** 저장하기 전 주소로 무음 파일을 보내 연결을 확인한다. 실패도 오류가 아니라 결과로 돌려준다 */
+  /** 저장하기 전 주소·모델로 무음 파일을 보내 연결을 확인한다. 실패도 오류가 아니라 결과로 돌려준다 */
   async testConnection(input: SttConnectionTestInput): Promise<SttConnectionView> {
     const baseUrl = normalizeBaseUrl(input.baseUrl);
     const current = await this.store.read();
     const apiKey = input.apiKey === undefined ? current.apiKey : input.apiKey || null;
+    const model = input.model === undefined ? current.model : input.model;
     const started = Date.now();
     try {
-      await this.client.checkConnection({ baseUrl, apiKey }, current.model);
+      await this.client.checkConnection({ baseUrl, apiKey }, model);
       return { connected: true, baseUrl, latencyMs: Date.now() - started, error: null };
     } catch (error) {
       return { connected: false, baseUrl, latencyMs: null, error: messageOf(error) };
