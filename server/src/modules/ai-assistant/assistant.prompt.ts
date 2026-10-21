@@ -3,6 +3,9 @@ import type { ChatMessage } from '../llm/llm.client';
 import { RESEARCH_QUESTION_RULES } from './assistant-research.context';
 import { DEFAULT_HISTORY_BUDGET, fitHistory, type HistoryBudget } from './history/chat-memory';
 import type { GlossaryTerm } from './knowledge/glossary.types';
+import { KS_SECTIONS } from './knowledge/ks.generated';
+import { KS_SKIP } from './knowledge/ks.search';
+import type { KsSection } from './knowledge/ks.types';
 import type { ManualGuide } from './knowledge/manual.types';
 import { MANUAL_GUIDES } from './knowledge/manual.generated';
 import type { ProcessStep } from './knowledge/process.types';
@@ -177,7 +180,7 @@ export function buildAssistantMessages(input: AssistantPromptInput): ChatMessage
     '10. 참고 자료의 "사용 금지 동의어"는 쓰지 않고 한글명으로 말해요. 상태는 결과에 있는 한글 표시명으로 말하고, 영문 코드 값(예: REQUESTED, CONVERTED)은 참고 자료나 도구 결과에 있어도 답에 쓰지 않고 뜻만 한글로 말해요.',
     '11. "이 수주"처럼 화면을 가리키면 [보고 있는 화면]의 주소에서 번호·id를 찾아 도구에 넘겨요. 없으면 어떤 것인지 되물어요.',
     '12. [업무 매뉴얼 자료]가 있으면 화면에서 어디를 눌러 하는지는 그 자료의 절차만 근거로, 순서대로 풀어서 설명해요. 메뉴·버튼·칸 이름은 자료에 적힌 글자 그대로 쓰고, 쓴 문장 끝에는 [MAN-SO-01]처럼 그 매뉴얼 ID를 붙여요. 자료에 없는 화면 조작은 확인할 수 없다고 답하고, 직접 눌러 줄 수는 없어요. 매뉴얼은 검수 전 초안이라 화면과 다를 수 있다고 한 번 덧붙여요.',
-    '13. 아래 [지식 목록]의 업무 매뉴얼·업무 프로세스·용어는 read_knowledge 도구로 전체 내용을 읽을 수 있어요. 위 자료에 없는 업무 절차나 용어 뜻을 물으면 먼저 읽고, 읽은 내용만 근거로 답해요. 읽은 문장 끝에는 그 ID([MAN-SO-01]·[BP-SO-01]·[TRM-056])를 붙여요.',
+    '13. 아래 [지식 목록]의 업무 매뉴얼·업무 프로세스·용어·KS 규격은 read_knowledge 도구로 전체 내용을 읽을 수 있어요. 위 자료에 없는 업무 절차나 용어 뜻을 물으면 먼저 읽고, 읽은 내용만 근거로 답해요. 강종의 인장강도·항복강도·연신율·성분 기준, 코일 치수 허용차, KS 규격 번호처럼 검사 기준을 물으면 kind를 ks로 읽고 읽은 표의 숫자와 단위만 말해요. 읽은 문장 끝에는 그 ID([MAN-SO-01]·[BP-SO-01]·[TRM-056]·[KS-8])를 붙여요.',
     '',
     '[사용자]',
     `${input.employeeName} · 역할 ${input.roleLabel}`,
@@ -214,12 +217,14 @@ export function buildAssistantMessages(input: AssistantPromptInput): ChatMessage
  * 지식 목록 (REQ-AST-003). 매뉴얼·업무 프로세스는 ID와 이름만 알리고, 전체 내용은 read_knowledge로 읽게 한다.
  * 용어 117개는 나열하지 않는다(프롬프트가 길어져 작은 모델이 흐려진다). 이름이나 TRM ID로 찾는다.
  */
-export function knowledgeCatalog(guides: readonly ManualGuide[] = MANUAL_GUIDES, steps: readonly ProcessStep[] = PROCESS_STEPS): string {
+export function knowledgeCatalog(guides: readonly ManualGuide[] = MANUAL_GUIDES, steps: readonly ProcessStep[] = PROCESS_STEPS, ksSections: readonly KsSection[] = KS_SECTIONS): string {
   return [
     '[지식 목록] (read_knowledge 도구로 전체 내용을 읽어요)',
     `- 업무 매뉴얼(kind: manual): ${guides.map((guide) => `${guide.id} ${guide.name}`).join(', ')}`,
     `- 업무 프로세스(kind: process): ${steps.map((step) => `${step.id} ${step.name}`).join(', ')}`,
     '- 용어(kind: glossary): id에 용어 이름이나 TRM ID를 넣어 찾아요(예: id "예약 매수").',
+    // 문서 작업 메모(미결정 사항·후속 작업)는 근거가 아니라 목록에서 뺀다
+    `- KS 규격·검사 기준(kind: ks): ${ksSections.filter((section) => !KS_SKIP.has(section.id)).map((section) => `${section.id} ${section.title}`).join(', ')}. id에 절 번호나 강종 이름(SS275)·KS 규격 번호를 넣어 읽어요.`,
   ].join('\n');
 }
 

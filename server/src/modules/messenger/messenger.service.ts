@@ -217,7 +217,7 @@ const EMIT_RETRY_DELAYS_MS = [100, 300, 1000, 3000, 10_000, 30_000];
 const SYSTEM_SENDER_NAME = '시스템';
 
 /** AI 답의 출처 줄에 쓰는 종류 이름 */
-const AI_SOURCE_KIND_LABEL: Record<AiAssistantSourceKind, string> = { GLOSSARY: '용어 사전', PROCESS: '업무 프로세스', MANUAL: '업무 매뉴얼', DATA: '조회 데이터' };
+const AI_SOURCE_KIND_LABEL: Record<AiAssistantSourceKind, string> = { GLOSSARY: '용어 사전', PROCESS: '업무 프로세스', MANUAL: '업무 매뉴얼', KS: 'KS 규격', DATA: '조회 데이터' };
 
 /** @AI 호출에 함께 넘기는 직전 대화 수의 최대. 실제로 넣는 양은 AI 어시스턴트가 모델 문맥 길이로 줄인다 (이슈 #412) */
 const AI_HISTORY_MESSAGES = 50;

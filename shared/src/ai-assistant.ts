@@ -165,6 +165,9 @@ export type AiReasoningLevel = (typeof AI_REASONING_LEVELS)[number];
 export const AI_REASONING_LABEL: Record<AiReasoningLevel, string> = { off: '끔', low: '낮게', medium: '보통', high: '깊게' };
 export const AI_REASONING_DEFAULT: AiReasoningLevel = 'medium';
 
+/** 아침 브리핑 (이슈 #506): /브리핑 명령과 첫 화면의 '오늘 브리핑' 단추가 보내는 질문. 서버가 이 질문에는 get_my_briefing을 먼저 부르게 한다 */
+export const AI_BRIEFING_QUESTION = '오늘 브리핑 해 줘';
+
 /** 조회 도구의 한글 제목. 도구를 부르는 순간(결과가 오기 전) 화면에 보인다 */
 export const AI_ASSISTANT_TOOL_TITLE: Record<string, string> = {
   get_inventory: '재고 조회',
@@ -233,12 +236,12 @@ export interface AiWebSource {
   url: string;
 }
 
-/** 답의 출처 종류 (REQ-AST-009): 용어 사전, 업무 프로세스 정의서, 업무 매뉴얼(화면 절차), 조회 데이터. 사례 번호는 다음 단계 */
-export type AiAssistantSourceKind = 'GLOSSARY' | 'PROCESS' | 'MANUAL' | 'DATA';
+/** 답의 출처 종류 (REQ-AST-009): 용어 사전, 업무 프로세스 정의서, 업무 매뉴얼(화면 절차), KS 규격 정리(검사 기준의 근거), 조회 데이터. 사례 번호는 다음 단계 */
+export type AiAssistantSourceKind = 'GLOSSARY' | 'PROCESS' | 'MANUAL' | 'KS' | 'DATA';
 
 export interface AiAssistantSource {
   kind: AiAssistantSourceKind;
-  /** 용어 사전이면 용어 ID (TRM-056), 업무 프로세스면 업무 ID (BP-SO-01), 조회 데이터면 도구 이름 (get_inventory) */
+  /** 용어 사전이면 용어 ID (TRM-056), 업무 프로세스면 업무 ID (BP-SO-01), KS 규격이면 절 번호 (KS-8), 조회 데이터면 도구 이름 (get_inventory. 위젯처럼 범위가 있는 도구는 get_dashboard_summary:process_yield) */
   id: string;
   /** 용어 사전이면 한글명 (예약), 업무 프로세스면 업무 이름 (수주 등록·예약·계획), 조회 데이터면 조회 대상 (재고 · SS275) */
   label: string;
