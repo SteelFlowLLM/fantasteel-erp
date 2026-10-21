@@ -9,6 +9,8 @@ export const NOTION_CREATE_DATABASE_TOOL = 'notion-create-database';
 export const NOTION_CREATE_VIEW_TOOL = 'notion-create-view';
 export const NOTION_UPDATE_PAGE_TOOL = 'notion-update-page';
 export const NOTION_FETCH_TOOL = 'notion-fetch';
+/** 페이지를 Notion 휴지통으로 옮긴다 (Notion에서 되살릴 수 있다). Notion에 넣지 않기로 바꾼 일정에만 쓴다 (이슈 #434) */
+export const NOTION_DELETE_PAGES_TOOL = 'notion-delete-pages';
 
 /** Notion 글 속성 한 칸의 상한 (rich text 조각 하나가 2000자) */
 const TEXT_MAX = 2000;
@@ -328,6 +330,18 @@ export function buildReplaceContentArgs(tool: ToolShape, pageId: string, content
 
 export function readUpdateResult(result: CallToolResult): void {
   failIfError(result, '페이지를 고치지 못했어요');
+}
+
+/** 사용자가 그 일정을 Notion에 넣지 않기로 바꿨으므로 확인을 마친 것으로 보낸다(user_confirmed). 도구가 그 칸을 받지 않으면 빼고 보낸다 */
+export function buildDeletePagesArgs(tool: ToolShape, pageIds: string[]): Record<string, unknown> {
+  const properties = requireInputs(tool, ['page_ids']);
+  return { page_ids: pageIds, ...('user_confirmed' in properties ? { user_confirmed: true } : {}) };
+}
+
+/** 이미 없는 페이지(누가 Notion에서 지웠다)는 옮긴 것으로 본다 */
+export function readDeleteResult(result: CallToolResult): void {
+  if (result.isError && isNotionNotFound(textsOf(result).join(' '))) return;
+  failIfError(result, '페이지를 휴지통으로 옮기지 못했어요');
 }
 
 /** Date → 서울 시각 ISO (`2026-10-21T14:00:00+09:00`) */

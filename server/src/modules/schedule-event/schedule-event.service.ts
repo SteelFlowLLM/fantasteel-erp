@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { AuthUser, ScheduleEventInput, ScheduleEventView, ScheduleNotionStatus } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
 import { seoulToday } from '../../common/time/seoul-date';
-import { PrismaService } from '../../prisma/prisma.service';
+import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { NotionWorkspaceService } from '../integration/notion/notion-workspace.service';
 import { notionPageUrlOf } from '../integration/notion/notion.tools';
 import type { ListScheduleEventsQuery } from './dto/schedule-event.dto';
@@ -92,14 +92,33 @@ export class ScheduleEventService {
     return view;
   }
 
+  /**
+   * Notion에 넣을지만 바꾼다 (이슈 #434). 내용은 고칠 수 없는 회의록 일정도 등록자(회의록 작성자)는 바꿀 수 있다.
+   * 끄면 다음 반영 때 Notion 페이지를 휴지통으로 옮기고 캘린더 일정을 취소한다(NotionWorkspaceService). 반영 실패는 이 요청에 알리지 않는다
+   */
+  async updateNotionSync(user: AuthUser, id: number, notionSync: boolean): Promise<ScheduleEventView> {
+    const view = await this.prisma.$transaction(async (tx) => {
+      await this.requireOwn(tx, user, id);
+      return toView(await this.repository.updateNotionSync(tx, id, notionSync));
+    });
+    this.notionWorkspace.kick();
+    return view;
+  }
+
+  /** 볼 수 없는 일정은 없는 것처럼 COM-003, 참석만 한 일정은 COM-002 */
+  private async requireOwn(tx: Tx, user: AuthUser, id: number): Promise<ScheduleEventRow> {
+    const event = await this.repository.findById(tx, id);
+    const visible = event && (event.creatorId === user.employeeId || event.attendees.some((a) => a.employeeId === user.employeeId));
+    if (!event || !visible) throw new AppException('COM-003', '일정을 찾을 수 없어요');
+    if (event.creatorId !== user.employeeId) throw new AppException('COM-002', '내가 등록한 일정만 고칠 수 있어요');
+    return event;
+  }
+
   /** 내가 직접 등록한 일정만 고친다. 볼 수 없는 일정은 없는 것처럼 COM-003 */
   async update(user: AuthUser, id: number, input: ScheduleEventInput): Promise<ScheduleEventView> {
     const fields = fieldsOf(input);
     const view = await this.prisma.$transaction(async (tx) => {
-      const event = await this.repository.findById(tx, id);
-      const visible = event && (event.creatorId === user.employeeId || event.attendees.some((a) => a.employeeId === user.employeeId));
-      if (!event || !visible) throw new AppException('COM-003', '일정을 찾을 수 없어요');
-      if (event.creatorId !== user.employeeId) throw new AppException('COM-002', '내가 등록한 일정만 고칠 수 있어요');
+      const event = await this.requireOwn(tx, user, id);
       if (event.meetingMinutesId !== null) throw new AppException('COM-004', '회의록에서 등록한 일정은 여기서 고칠 수 없어요', 409);
       return toView(await this.repository.update(tx, id, fields));
     });

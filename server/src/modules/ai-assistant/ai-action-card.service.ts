@@ -150,8 +150,8 @@ export class AiActionCardService {
     // 업무·일정이면 Notion 업무 공간(이슈 #391) 반영을 커밋 뒤에 깨운다
     if (registered.type !== 'action_draft') this.notionWorkspace.kick();
     if (registered.type === 'schedule_event' && notionSyncOf(card)) {
-      const status = await this.notionWorkspace.scheduleStatus();
-      if (!status.ready) return { kind, registered: { ...registered, note: `${status.reason}. 일정은 ERP에만 넣었고, Notion이 준비되면 자동으로 올라가요` } };
+      const note = await this.notionWorkspace.scheduleNotice();
+      if (note) return { kind, registered: { ...registered, note } };
     }
     return { kind, registered };
   }

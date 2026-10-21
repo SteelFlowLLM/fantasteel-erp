@@ -27,11 +27,14 @@ import { NOTION_CREATE_PAGES_TOOL, notionPageUrlOf, parentPageNotFound } from '.
 import { NotionPageService } from './notion-page.service';
 import { NotionSyncRepository, type NotionMeetingRow, type NotionScheduleEventRow, type NotionTaskRow } from './notion-sync.repository';
 import {
+  buildCancelCalendarEventArgs,
   buildCreateCalendarEventArgs,
   buildUpdateCalendarEventArgs,
+  NOTION_CALENDAR_CANCEL_TOOL,
   NOTION_CALENDAR_CREATE_TOOL,
   NOTION_CALENDAR_LIST_TOOL,
   NOTION_CALENDAR_UPDATE_TOOL,
+  readCalendarCancelResult,
   readCalendarList,
   readCalendarUpdateResult,
   readCreatedCalendarEvents,
@@ -40,6 +43,9 @@ import {
 import {
   buildCreateDatabaseArgs,
   buildCreateRowsArgs,
+  buildDeletePagesArgs,
+  NOTION_DELETE_PAGES_TOOL,
+  readDeleteResult,
   buildCreateViewArgs,
   buildFetchDataSourceArgs,
   missingViews,
@@ -84,7 +90,16 @@ const REPAIR_RETRY_MS = 60 * 60_000;
 type SyncKind = NotionWorkspaceDatabaseKey;
 type ReadyWorkspace = ReadyNotionWorkspace;
 /** 캘린더 도구는 Notion 캘린더를 쓰지 않는 계정에는 없을 수 있어 고른 캘린더가 있을 때만 확인한다 */
-type SyncTools = { createPages: McpToolInfo; updatePage: McpToolInfo; createEvents: McpToolInfo | undefined; updateEvents: McpToolInfo | undefined };
+type SyncTools = {
+  createPages: McpToolInfo;
+  updatePage: McpToolInfo;
+  createEvents: McpToolInfo | undefined;
+  updateEvents: McpToolInfo | undefined;
+  /** Notion에 넣지 않기로 바꾼 일정을 치울 때만 본다 (이슈 #434) */
+  deletePages: McpToolInfo | undefined;
+  cancelEvents: McpToolInfo | undefined;
+};
+type ScheduleEventToRemove = { id: number; notionPageId: string | null; notionCalendarEventId: string | null };
 
 /** 성공으로 답했지만 만든 페이지를 읽지 못함: 만들어졌을 수 있다 */
 class UncertainCreateError extends Error {}
@@ -188,6 +203,20 @@ export class NotionWorkspaceService implements OnApplicationBootstrap, OnApplica
     const ws = readyWorkspace(readSettings(row.settings));
     if (!ws) return { ready: false, reason: '관리자가 아직 Notion 업무 공간을 만들지 않았어요', calendarName: null };
     return { ready: true, reason: null, calendarName: ws.calendar?.name ?? null };
+  }
+
+  /**
+   * Notion에 넣기로 한 일정을 저장한 뒤 결과에 붙일 안내: 지금 넣을 수 없으면 그 이유, 넣을 수 있으면 null.
+   * 일정은 이미 커밋됐으므로 상태를 읽다 실패해도 던지지 않고 null로 둔다(요청이 500이 되지 않게)
+   */
+  async scheduleNotice(): Promise<string | null> {
+    try {
+      const status = await this.scheduleStatus();
+      return status.ready ? null : `${status.reason}. 일정은 ERP에만 넣었고, Notion이 준비되면 자동으로 올라가요`;
+    } catch (error) {
+      this.logger.warn(`일정 Notion 안내를 만들지 못했어요: ${messageOf(error)}`);
+      return null;
+    }
   }
 
   private async readyContext(): Promise<ReadyWorkspace | null> {
@@ -354,6 +383,8 @@ export class NotionWorkspaceService implements OnApplicationBootstrap, OnApplica
       updatePage: tools.get(NOTION_UPDATE_PAGE_TOOL) as McpToolInfo,
       createEvents: tools.get(NOTION_CALENDAR_CREATE_TOOL),
       updateEvents: tools.get(NOTION_CALENDAR_UPDATE_TOOL),
+      deletePages: tools.get(NOTION_DELETE_PAGES_TOOL),
+      cancelEvents: tools.get(NOTION_CALENDAR_CANCEL_TOOL),
     };
   }
 
@@ -538,7 +569,8 @@ export class NotionWorkspaceService implements OnApplicationBootstrap, OnApplica
     const meetings = (await this.repository.findMeetingIdsToUpdate(this.prisma, skip.meetingMinutes, ROWS_PER_RUN)).map((m) => m.id);
     const events = await this.repository.findDirtyScheduleEvents(this.prisma, since, skip.scheduleEvents, ROWS_PER_RUN);
     const tasks = await this.repository.findDirtyTasks(this.prisma, since, skip.tasks, ROWS_PER_RUN);
-    if (meetingIds.length + meetings.length + events.length + tasks.length === 0 && !repair) {
+    const removals = await this.repository.findScheduleEventsToRemove(this.prisma, skip.scheduleEvents, ROWS_PER_RUN);
+    if (meetingIds.length + meetings.length + events.length + tasks.length + removals.length === 0 && !repair) {
       this.lastSyncedAt = new Date();
       return;
     }
@@ -557,6 +589,7 @@ export class NotionWorkspaceService implements OnApplicationBootstrap, OnApplica
         }
         for (const id of meetings) progressed = (await this.updateMeeting(session, tools, id)) || progressed;
         progressed = (await this.syncScheduleEvents(session, tools, ws, events)) || progressed;
+        progressed = (await this.removeScheduleEvents(session, tools, ws.calendar, removals)) || progressed;
         progressed = (await this.syncTasks(session, tools, ws, tasks)) || progressed;
       });
       this.lastSyncedAt = new Date();
@@ -567,7 +600,7 @@ export class NotionWorkspaceService implements OnApplicationBootstrap, OnApplica
       return;
     }
     // 한 번에 다 읽지 못했으면 이어서 돈다 (실패만 남았으면 다음 주기에)
-    const full = [meetingIds, meetings, events, tasks].some((rows) => rows.length >= ROWS_PER_RUN);
+    const full = [meetingIds, meetings, events, tasks, removals].some((rows) => rows.length >= ROWS_PER_RUN);
     if (full && progressed) this.kick();
   }
 
@@ -661,6 +694,32 @@ export class NotionWorkspaceService implements OnApplicationBootstrap, OnApplica
       }
     }
     await this.repository.markScheduleEventSynced(this.prisma, row.id, row.updatedAt);
+  }
+
+  /**
+   * Notion에 넣지 않기로 바꾼 일정 (이슈 #434): 캘린더 일정은 취소하고, 일정 데이터베이스 페이지는 휴지통으로 옮긴 뒤 id를 지운다.
+   * 취소를 먼저 적어 두어 페이지에서 실패해도 다음에 같은 일정을 또 취소하지 않는다. 고른 캘린더가 없으면(관리자가 뺐다) 캘린더 일정 id만 지운다.
+   * 실패는 그 일정만 미루고 관리 화면의 마지막 오류로 남는다. ERP 저장은 이미 끝났다.
+   */
+  private async removeScheduleEvents(session: McpSession, tools: SyncTools, calendar: NotionCalendarSettings | null, rows: ScheduleEventToRemove[]): Promise<boolean> {
+    let progressed = false;
+    for (const row of rows) {
+      const removed = await this.guard('scheduleEvents', [row.id], false, async () => {
+        const eventId = row.notionCalendarEventId;
+        if (eventId && calendar) {
+          const tool = this.calendarTool(tools.cancelEvents, NOTION_CALENDAR_CANCEL_TOOL);
+          readCalendarCancelResult(await session.callTool(tool.name, buildCancelCalendarEventArgs(tool, calendar, eventId)));
+          await this.repository.clearScheduleEventNotion(this.prisma, row.id, false, true);
+        }
+        if (row.notionPageId) {
+          if (!tools.deletePages) throw new AppException('INT-005', `Notion MCP 서버에 ${NOTION_DELETE_PAGES_TOOL} 도구가 없어 일정 페이지를 휴지통으로 옮기지 못했어요`);
+          readDeleteResult(await session.callTool(tools.deletePages.name, buildDeletePagesArgs(tools.deletePages, [row.notionPageId])));
+        }
+        await this.repository.clearScheduleEventNotion(this.prisma, row.id, true, true);
+      });
+      progressed = removed || progressed;
+    }
+    return progressed;
   }
 
   private calendarTool(tool: McpToolInfo | undefined, name: string): McpToolInfo {

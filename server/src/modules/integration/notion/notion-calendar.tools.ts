@@ -9,6 +9,7 @@ import { seoulIso } from './notion-workspace.tools';
 export const NOTION_CALENDAR_LIST_TOOL = 'notion-calendar-list-calendars';
 export const NOTION_CALENDAR_CREATE_TOOL = 'notion-calendar-create-events';
 export const NOTION_CALENDAR_UPDATE_TOOL = 'notion-calendar-update-events';
+export const NOTION_CALENDAR_CANCEL_TOOL = 'notion-calendar-cancel-events';
 
 export const CALENDAR_TIME_ZONE = 'Asia/Seoul';
 /** 일정 설명 상한 (Google 캘린더 설명은 길게 받지만 목록에서 읽히는 길이로 자른다) */
@@ -243,4 +244,14 @@ export function readCreatedCalendarEvents(result: CallToolResult, expected: numb
 
 export function readCalendarUpdateResult(result: CallToolResult): void {
   failIfError(result, '일정을 고치지 못했어요');
+}
+
+/** 일정 하나 취소 (Notion에 넣지 않기로 바꾼 일정, 이슈 #434). 초대를 보냈던 일정이면 참석자에게 취소 알림이 갈 수 있다 */
+export function buildCancelCalendarEventArgs(tool: ToolShape, calendar: Pick<NotionCalendarSettings, 'accountId' | 'calendarId'>, eventId: string): Record<string, unknown> {
+  requireInputs(tool, ['events']);
+  return { events: [{ calendar: calendarRef(calendar), eventId }] };
+}
+
+export function readCalendarCancelResult(result: CallToolResult): void {
+  failIfError(result, '일정 취소');
 }

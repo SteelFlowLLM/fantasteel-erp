@@ -444,13 +444,8 @@ export class MeetingMinutesService {
     // 확정한 회의록과 거기서 만든 일정·업무를 Notion 업무 공간에 반영한다 (커밋 뒤, 기다리지 않음)
     this.notionWorkspace.kick();
     const wantsNotion = approved.some((c) => c.kind === 'EVENT' && notionSyncOf(c));
-    return { meetingMinutes: await this.get(id), ...created, notionNotice: wantsNotion ? await this.notionNoticeOf() : null };
-  }
-
-  /** Notion에 넣기로 한 일정을 지금 넣을 수 없는 이유 (이슈 #434). 일정은 넣기 표시를 남겨 Notion이 준비되면 그때 올라간다 */
-  private async notionNoticeOf(): Promise<string | null> {
-    const status = await this.notionWorkspace.scheduleStatus();
-    return status.ready ? null : `${status.reason}. 일정은 ERP에만 넣었고, Notion이 준비되면 자동으로 올라가요`;
+    // 일정은 넣기 표시를 남겨 Notion이 준비되면 그때 올라간다 (이슈 #434)
+    return { meetingMinutes: await this.get(id), ...created, notionNotice: wantsNotion ? await this.notionWorkspace.scheduleNotice() : null };
   }
 
   /**

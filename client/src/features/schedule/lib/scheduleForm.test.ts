@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ScheduleEventView } from '@fantasteel/shared';
-import { canEditEvent, emptyForm, endOptions, formOf, formProblem, inputOf, seoulIso, shiftEnd, startOptions } from '@/features/schedule/lib/scheduleForm';
+import { canEditEvent, canToggleNotion, emptyForm, notionRemovalPending, endOptions, formOf, formProblem, inputOf, seoulIso, shiftEnd, startOptions } from '@/features/schedule/lib/scheduleForm';
 
 const event = (over: Partial<ScheduleEventView> = {}): ScheduleEventView => ({
   id: 1,
@@ -66,5 +66,21 @@ describe('내 일정 직접 등록·수정 입력', () => {
     expect(canEditEvent(event(), 3)).toBe(true);
     expect(canEditEvent(event(), 5)).toBe(false);
     expect(canEditEvent(event({ meetingMinutes: { id: 9, title: '주간 회의' } }), 3)).toBe(false);
+  });
+});
+
+describe('Notion에 넣을지 바꾸기 (이슈 #434)', () => {
+  it('회의록 일정은 내용은 못 고쳐도 등록자는 Notion 넣기를 바꾼다', () => {
+    const fromMeeting = event({ meetingMinutes: { id: 9, title: '회의' } });
+    expect(canEditEvent(fromMeeting, 3)).toBe(false);
+    expect(canToggleNotion(fromMeeting, 3)).toBe(true);
+    expect(canToggleNotion(fromMeeting, 4)).toBe(false);
+    expect(canToggleNotion(event(), 3)).toBe(false);
+  });
+
+  it('껐는데 Notion 페이지가 남아 있으면 빼는 중', () => {
+    expect(notionRemovalPending({ notionSync: false, notionPageUrl: 'https://www.notion.so/a' })).toBe(true);
+    expect(notionRemovalPending({ notionSync: true, notionPageUrl: 'https://www.notion.so/a' })).toBe(false);
+    expect(notionRemovalPending({ notionSync: false, notionPageUrl: null })).toBe(false);
   });
 });

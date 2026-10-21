@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Query } from '@nestjs/common';
 import type { AuthUser, ScheduleEventView, ScheduleNotionStatus } from '@fantasteel/shared';
 import { CurrentUser } from '../../common/auth/auth.decorators';
-import { ListScheduleEventsQuery, ScheduleEventInputDto } from './dto/schedule-event.dto';
+import { ListScheduleEventsQuery, ScheduleEventInputDto, ScheduleEventNotionSyncDto } from './dto/schedule-event.dto';
 import { ScheduleEventService } from './schedule-event.service';
 
 /** 라우팅·DTO 검증만 둔다. 내 일정은 전 역할이라 권한 코드 없이 로그인만 본다 (등록·수정은 service가 등록자 본인인지 본다) */
@@ -28,5 +28,10 @@ export class ScheduleEventController {
   @Patch('schedule-events/:id')
   update(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Body() dto: ScheduleEventInputDto): Promise<ScheduleEventView> {
     return this.service.update(user, id, dto);
+  }
+
+  @Patch('schedule-events/:id/notion-sync')
+  updateNotionSync(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Body() dto: ScheduleEventNotionSyncDto): Promise<ScheduleEventView> {
+    return this.service.updateNotionSync(user, id, dto.notionSync);
   }
 }

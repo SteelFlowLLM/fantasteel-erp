@@ -36,9 +36,15 @@
 ## Notion에 넣을지 (`schedule_event.notion_sync`, 이슈 #434, 문서에 없는 칸)
 
 - 일정마다 Notion 업무 공간(일정 데이터베이스와 관리자가 고른 Notion 캘린더, [integration.md](integration.md) 12장)에 넣을지 정한다. 🟡 기본은 넣는다(기존 일정도 `true`): 지금까지의 자동 반영 동작을 그대로 두고 일정마다 뺄 수 있게 했다.
-- 정하는 곳: 내 일정 등록·수정(`notionSync`), 회의록 일정 후보(`PATCH …/candidates/:key`의 `notionSync`, 확정 때 저장), 철강맨AI 일정 카드(`notionSync`, 모델이 "Notion에는 넣지 마"를 들으면 false).
+- 정하는 곳: 내 일정 등록·수정(`notionSync`), `PATCH …/notion-sync`(회의록 일정 포함), 회의록 일정 후보(`PATCH …/candidates/:key`의 `notionSync`, 확정 때 저장), 철강맨AI 일정 카드(`notionSync`, 모델이 "Notion에는 넣지 마"를 들으면 false).
 - Notion 업무 공간이 아직 준비되지 않았어도 값은 그대로 저장한다: 켜 둔 일정은 준비된 뒤 다음 반영 때 올라간다(지난 30일 규칙은 같다). 회의록 확정·일정 카드 결과는 이때 이유를 돌려준다(`notionNotice`·`note`).
-- 끄면 반영에서 빠진다. 이미 만든 Notion 페이지·캘린더 일정은 지우지 않고 더 고치지 않는다(지우기 기능은 없다). 다시 켜면 그 사이 바뀐 내용이 다음 반영 때 간다.
+- 끄면 반영에서 빠지고, 이미 올라간 일정은 **다음 반영 때** Notion 캘린더 일정을 취소(`notion-calendar-cancel-events`, 초대를 보냈던 일정이면 참석자에게 취소 알림이 갈 수 있다)하고 일정 데이터베이스 페이지를 **Notion 휴지통으로 옮긴다**(`notion-delete-pages`, Notion에서 되살릴 수 있다). 그 뒤 페이지·캘린더 일정 id와 반영 시각을 지운다(TypedSQL `clearScheduleEventNotion`, `updated_at`은 그대로). 다시 켜면 새로 만든다.
+- 치우기는 ERP 저장과 따로 돈다: Notion이 실패해도 끄기는 성공하고, 그 일정만 미뤄 다시 해 보며 이유는 관리 > 외부 연결의 마지막 반영 오류에 남는다. 화면은 꺼졌는데 페이지가 남은 일정을 'Notion (빼는 중)'으로 보인다.
+
+`PATCH /schedule-events/:id/notion-sync` — Notion에 넣을지만 바꾸기 (이슈 #434, 200)
+
+- 본문 `{ notionSync: boolean }`(빠지거나 boolean이 아니면 400). 등록자만(참석만 한 일정 `COM-002`, 볼 수 없는 일정 `COM-003`).
+- **회의록에서 등록한 일정도 된다**: 내용(제목·시각)은 회의록 쪽 기록이라 `PATCH /schedule-events/:id`가 409지만, Notion에 넣을지는 회의록 작성자(= 등록자)가 내 일정 화면의 'Notion에서 빼기/넣기'로 바꾼다.
 
 ## 알림
 
@@ -46,4 +52,4 @@
 
 ## 테스트
 
-`schedule-event.spec.ts` (묶음 `fs_collab`): 참석자·등록자·무관한 사원, 기간 거르기(끝 날짜 포함·다음 날 00:00 제외), 정렬, 기본 기간, 잘못된 기간, 62일 경계, 비로그인. 직접 등록(본인만 참석자, 다른 사원에게 안 보임, 빈 메모 null, 같은·앞선 끝 시각·빈 제목 COM-004), 수정(본인 수정, 다른 사원 COM-003, 참석만 한 사원 COM-002, 회의록 일정 COM-004 409). Notion 칸(기본 넣음, 끄기, 수정에서 안 보내면 유지, 잘못된 값 400, 연결 없을 때 상태 이유). 반영에서 빠지는지·다시 켜면 만들어지는지·`notionPageUrl`은 `integration.spec.ts`의 'Notion 업무 공간'.
+`schedule-event.spec.ts` (묶음 `fs_collab`): 참석자·등록자·무관한 사원, 기간 거르기(끝 날짜 포함·다음 날 00:00 제외), 정렬, 기본 기간, 잘못된 기간, 62일 경계, 비로그인. 직접 등록(본인만 참석자, 다른 사원에게 안 보임, 빈 메모 null, 같은·앞선 끝 시각·빈 제목 COM-004), 수정(본인 수정, 다른 사원 COM-003, 참석만 한 사원 COM-002, 회의록 일정 COM-004 409). Notion 칸(기본 넣음, 끄기, 수정에서 안 보내면 유지, 잘못된 값 400), `notion-sync`(회의록 일정 등록자 가능, 참석자 COM-002, 남 COM-003, 빈 본문 400). 상태의 세 갈래와 읽기 실패는 `integration/notion/notion-schedule-status.unit.spec.ts`. 반영에서 빠지는지·다시 켜면 만들어지는지·`notionPageUrl`·끄면 페이지를 휴지통으로(실패 시 id 유지·이유)·캘린더 일정 취소는 `integration.spec.ts`의 'Notion 업무 공간'·'Notion 캘린더'.

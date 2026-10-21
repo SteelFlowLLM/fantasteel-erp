@@ -42,3 +42,9 @@ export class ScheduleEventInputDto implements ScheduleEventInput {
   @IsBoolean()
   notionSync?: boolean;
 }
+
+/** PATCH schedule-events/:id/notion-sync. 회의록에서 만든 일정도 Notion에 넣을지는 바꿀 수 있다 (이슈 #434) */
+export class ScheduleEventNotionSyncDto {
+  @IsBoolean({ message: 'Notion에 넣을지를 true·false로 보내 주세요' })
+  notionSync!: boolean;
+}
