@@ -2,6 +2,8 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { AppException } from '../../../common/errors/app.exception';
 import {
+  buildDeletePagesArgs,
+  readDeleteResult,
   buildCreateDatabaseArgs,
   buildCreateRowsArgs,
   buildCreateViewArgs,
@@ -221,5 +223,21 @@ describe('행 → 속성', () => {
     const base = { id: 1, title: '원료 회의', meetingDate: new Date('2026-10-14T00:00:00.000Z'), attendeeNames: ['정다은'], creatorName: '정다은', erpUrl: 'http://client.test/meetings?id=1' };
     expect(meetingProperties({ ...base, confirmedAt: null })).not.toHaveProperty('date:확정:start');
     expect(meetingProperties({ ...base, confirmedAt: new Date('2026-10-15T05:00:00.000Z') })).toMatchObject({ 'date:회의일:start': '2026-10-14', 'date:확정:start': '2026-10-15T14:00:00+09:00' });
+  });
+});
+
+describe('넣지 않기로 바꾼 일정 페이지를 휴지통으로 (이슈 #434)', () => {
+  const text = (value: string, isError = false): CallToolResult => ({ content: [{ type: 'text', text: value }], ...(isError ? { isError: true } : {}) });
+
+  it('사용자가 고른 것이라 확인을 마친 것으로 보내고, 도구가 그 칸을 받지 않으면 뺀다', () => {
+    expect(buildDeletePagesArgs(tool('notion-delete-pages', ['page_ids', 'user_confirmed']), ['p1'])).toEqual({ page_ids: ['p1'], user_confirmed: true });
+    expect(buildDeletePagesArgs(tool('notion-delete-pages', ['page_ids']), ['p1'])).toEqual({ page_ids: ['p1'] });
+    expect(() => buildDeletePagesArgs(tool('notion-delete-pages', ['ids']), ['p1'])).toThrow(AppException);
+  });
+
+  it('이미 없는 페이지는 옮긴 것으로 보고, 다른 오류는 INT-004', () => {
+    expect(() => readDeleteResult(text('ok'))).not.toThrow();
+    expect(() => readDeleteResult(text('API error: {"status":404,"code":"object_not_found"}', true))).not.toThrow();
+    expect(() => readDeleteResult(text('Rate limited', true))).toThrow('휴지통');
   });
 });

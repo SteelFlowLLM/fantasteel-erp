@@ -48,7 +48,7 @@ function setup(options: { canRequestPurchase?: boolean; inactiveIds?: number[]; 
   const notionReady = options.notionReady ?? true;
   const notionWorkspace = {
     kick: () => undefined,
-    scheduleStatus: async () => (notionReady ? { ready: true, reason: null, calendarName: null } : { ready: false, reason: '관리자가 아직 Notion 업무 공간을 만들지 않았어요', calendarName: null }),
+    scheduleNotice: async () => (notionReady ? null : '관리자가 아직 Notion 업무 공간을 만들지 않았어요. 일정은 ERP에만 넣었고, Notion이 준비되면 자동으로 올라가요'),
   } as unknown as NotionWorkspaceService;
   const recorder = { record: record('record', { id: 41, businessEventNo: 'BE-1' }) } as unknown as BusinessEventRecorder;
   return { service: new AiActionCardService(prisma, repository, tasks, notifications, messageActions, notionWorkspace, recorder), calls };

@@ -40,6 +40,10 @@ export class ScheduleEventRepository {
     return tx.scheduleEvent.create({ data: { ...fields, creatorId, attendees: { create: [{ employeeId: creatorId }] } }, include });
   }
 
+  updateNotionSync(tx: Tx, id: number, notionSync: boolean): Promise<ScheduleEventRow> {
+    return tx.scheduleEvent.update({ where: { id }, data: { notionSync }, include });
+  }
+
   update(tx: Tx, id: number, fields: ScheduleEventFields): Promise<ScheduleEventRow> {
     return tx.scheduleEvent.update({ where: { id }, data: fields, include });
   }

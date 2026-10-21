@@ -6,26 +6,59 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import type { ScheduleEventView } from '@fantasteel/shared';
+import { scheduleEventApi, scheduleEventKeys } from '@/api/scheduleEvents';
 import type { TaskView } from '@/api/tasks';
 import { Button } from '@/components/Button';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { PageHead, PageMain } from '@/components/Page';
 import { QueryBoundary } from '@/components/QueryBoundary';
 import { Spinner } from '@/components/StateView';
+import { NOTION_REMOVAL_HINT } from '@/features/schedule/NotionSyncToggle';
 import { ScheduleEventModal } from '@/features/schedule/ScheduleEventModal';
-import { canEditEvent } from '@/features/schedule/lib/scheduleForm';
+import { canEditEvent, canToggleNotion, notionRemovalPending } from '@/features/schedule/lib/scheduleForm';
 import { addDays, mondayOf, seoulDayOf, weekDays, weekFromParam } from '@/features/schedule/lib/week';
 import { useShellTitle } from '@/features/shell/useShellTitle';
 import { useUrlParams } from '@/features/purchasing/hooks/useUrlParams';
+import { useAction } from '@/hooks/useAction';
 import { useMe } from '@/hooks/useMe';
 import { useScheduleEvents } from '@/hooks/useScheduleEvents';
 import { useTaskList } from '@/hooks/useTasks';
 import { cn } from '@/lib/cn';
+import { safeExternalUrl } from '@/lib/integrations';
 import { fmtHM, fmtMD, fmtMDdow, todayStr } from '@/lib/format';
 
 /** 열린 창: 새 일정(그날) 또는 고칠 일정 */
 type Editing = { date: string; event?: ScheduleEventView } | null;
 
-function EventRow({ event, onEdit }: { event: ScheduleEventView; onEdit: (() => void) | null }) {
+/** 회의록 일정의 등록자가 Notion에 넣을지 바꾸는 단추 (이슈 #434). 끌 때는 이미 올라간 Notion 일정을 치운다고 확인받는다 */
+function NotionSyncButton({ event }: { event: ScheduleEventView }) {
+  const [confirming, setConfirming] = useState(false);
+  const toggle = useAction(scheduleEventApi.updateNotionSync, {
+    success: (e) => (e.notionSync ? 'Notion에 넣기로 했어요. 다음 반영 때 올라가요' : 'Notion에서 빼기로 했어요'),
+    invalidate: [scheduleEventKeys.all],
+    onSuccess: () => setConfirming(false),
+    onError: () => setConfirming(false),
+  });
+  const flip = () => {
+    if (event.notionSync && event.notionPageUrl) setConfirming(true);
+    else toggle.mutate({ id: event.id, notionSync: !event.notionSync });
+  };
+  return (
+    <>
+      <button type="button" onClick={flip} disabled={toggle.isPending} className="text-xs text-brand hover:underline disabled:opacity-50">
+        {event.notionSync ? 'Notion에서 빼기' : 'Notion에 넣기'}
+      </button>
+      {confirming ? (
+        <ConfirmDialog title="Notion에서 뺄까요?" confirmLabel="Notion에서 빼기" pending={toggle.isPending} onConfirm={() => toggle.mutate({ id: event.id, notionSync: false })} onCancel={() => setConfirming(false)}>
+          <p>{NOTION_REMOVAL_HINT}.</p>
+        </ConfirmDialog>
+      ) : null}
+    </>
+  );
+}
+
+function EventRow({ event, onEdit, canToggle }: { event: ScheduleEventView; onEdit: (() => void) | null; canToggle: boolean }) {
+  const notionUrl = safeExternalUrl(event.notionPageUrl);
   return (
     <li className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-sm">
       <span className="w-28 flex-none font-mono text-xs text-ink-2">
@@ -36,16 +69,17 @@ function EventRow({ event, onEdit }: { event: ScheduleEventView; onEdit: (() => 
       </span>
       {event.scheduleEventDescription ? <span className="max-w-80 truncate text-cap text-ink-2">{event.scheduleEventDescription}</span> : null}
       <span className="text-cap text-ink-3">{event.attendees.map((a) => a.employeeName).join(', ')}</span>
-      {event.notionPageUrl ? (
-        <a href={event.notionPageUrl} target="_blank" rel="noreferrer" className="ml-auto text-xs text-brand hover:underline">
-          Notion
+      {notionUrl ? (
+        <a href={notionUrl} target="_blank" rel="noreferrer" className="ml-auto text-xs text-brand hover:underline">
+          {notionRemovalPending(event) ? 'Notion (빼는 중)' : 'Notion'}
         </a>
       ) : null}
       {event.meetingMinutes ? (
-        <Link href={`/meetings?id=${event.meetingMinutes.id}`} className={cn('text-xs text-brand hover:underline', !event.notionPageUrl && 'ml-auto')}>
+        <Link href={`/meetings?id=${event.meetingMinutes.id}`} className={cn('text-xs text-brand hover:underline', !notionUrl && 'ml-auto')}>
           회의록
         </Link>
       ) : null}
+      {canToggle ? <NotionSyncButton event={event} /> : null}
       {onEdit ? (
         <button type="button" onClick={onEdit} className="ml-auto text-xs text-brand hover:underline">
           고치기
@@ -121,7 +155,7 @@ export function ScheduleScreen() {
                   ) : (
                     <ul className="flex flex-col gap-1.5">
                       {dayEvents.map((event) => (
-                        <EventRow key={`e${event.id}`} event={event} onEdit={canEditEvent(event, me.employeeId) ? () => setEditing({ date: day, event }) : null} />
+                        <EventRow key={`e${event.id}`} event={event} onEdit={canEditEvent(event, me.employeeId) ? () => setEditing({ date: day, event }) : null} canToggle={canToggleNotion(event, me.employeeId)} />
                       ))}
                       {dayTasks.map((task) => (
                         <TaskRow key={`t${task.id}`} task={task} />

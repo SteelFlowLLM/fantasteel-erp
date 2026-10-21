@@ -17,6 +17,8 @@ export const scheduleEventApi = {
   create: (input: ScheduleEventInput): Promise<ScheduleEventView> => serverScheduleEventApi.create(input),
   /** 내가 직접 등록한 일정만 고칠 수 있다 (회의록 일정은 안 됨) */
   update: ({ id, input }: { id: number; input: ScheduleEventInput }): Promise<ScheduleEventView> => serverScheduleEventApi.update(id, input),
+  /** Notion에 넣을지만 바꾼다. 내가 등록한 일정이면 회의록 일정도 된다 (이슈 #434) */
+  updateNotionSync: ({ id, notionSync }: { id: number; notionSync: boolean }): Promise<ScheduleEventView> => serverScheduleEventApi.updateNotionSync(id, notionSync),
   /** 일정을 Notion에 넣을 수 있는지 (이슈 #434) */
   notionStatus: (): Promise<ScheduleNotionStatus> => serverScheduleEventApi.notionStatus(),
 };

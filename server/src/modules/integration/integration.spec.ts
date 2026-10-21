@@ -44,6 +44,8 @@ const fake = {
   calendarResponse: 'ok' as 'ok' | 'error',
   /** notion-update-page 답 */
   updateResponse: 'ok' as 'ok' | 'error',
+  /** notion-delete-pages 답 (Notion에 넣지 않기로 바꾼 일정, 이슈 #434) */
+  deleteResponse: 'ok' as 'ok' | 'error',
   /** 데이터베이스·페이지 id를 새로 매길 때 쓰는 수 */
   serial: 0,
   /** 도구 목록·도구 호출을 받을 때 시험이 끼워 넣는 일 */
@@ -81,6 +83,16 @@ const fake = {
       name: 'notion-calendar-update-events',
       description: '일정 고치기',
       inputSchema: { type: 'object', properties: { timeZone: { type: 'string' }, updates: { type: 'array' } }, required: ['timeZone', 'updates'] },
+    },
+    {
+      name: 'notion-calendar-cancel-events',
+      description: '일정 취소',
+      inputSchema: { type: 'object', properties: { events: { type: 'array' } }, required: ['events'] },
+    },
+    {
+      name: 'notion-delete-pages',
+      description: '페이지를 휴지통으로',
+      inputSchema: { type: 'object', properties: { page_ids: { type: 'array' }, user_confirmed: { type: 'boolean' } }, required: ['page_ids'] },
     },
     {
       name: 'notion-update-page',
@@ -132,6 +144,8 @@ function callFakeTool(name: string, args: Record<string, unknown>): ToolAnswer {
     return answer(JSON.stringify({ events: (args.events as unknown[]).map(() => ({ eventId: `evt-${nextId('f')}` })) }));
   }
   if (name === 'notion-calendar-update-events') return fake.calendarResponse === 'error' ? answer('Event not found', true) : answer(JSON.stringify({ updated: 1 }));
+  if (name === 'notion-calendar-cancel-events') return fake.calendarResponse === 'error' ? answer('Event not found', true) : answer(JSON.stringify({ cancelled: 1 }));
+  if (name === 'notion-delete-pages') return fake.deleteResponse === 'error' ? answer('Rate limited', true) : answer(JSON.stringify({ trashed: args.page_ids }));
   if (name === 'notion-create-database') {
     if (fake.databaseResponse === 'not-found') return answer(notFound, true);
     const db = nextId('d');
@@ -463,6 +477,8 @@ describe('OAuth 연결', () => {
         'notion-calendar-list-calendars',
         'notion-calendar-create-events',
         'notion-calendar-update-events',
+        'notion-calendar-cancel-events',
+        'notion-delete-pages',
         'notion-update-page',
       ],
       missingTools: [],
@@ -706,6 +722,8 @@ describe('Notion 업무 공간 (이슈 #391)', () => {
     expect(fake.calls).toEqual([]);
     expect((await prisma.task.findUniqueOrThrow({ where: { id } })).notionSyncedAt).toBeNull();
     expect((await notionView()).notionWorkspace).toBeNull();
+    const status = await call('GET', '/schedule-events/notion-status', purchaseCookie);
+    expect(status.body.data).toEqual({ ready: false, reason: '관리자가 아직 Notion 업무 공간을 만들지 않았어요', calendarName: null });
   });
 
   it('관리자가 아니면 만들 수 없다', async () => {
@@ -877,6 +895,43 @@ describe('Notion 업무 공간 (이슈 #391)', () => {
     const day = new Date(start.getTime() + 9 * 3_600_000).toISOString().slice(0, 10);
     const mine = await call<{ id: number; notionPageUrl: string | null }[]>('GET', `/schedule-events?from=${day}&to=${day}`, purchaseCookie);
     expect(mine.body.data.find((e) => e.id === id)?.notionPageUrl).toMatch(/^https:\/\/www\.notion\.so\/[0-9a-f]{32}$/);
+
+    // 올라간 뒤 다시 끄면 다음 반영 때 그 페이지를 휴지통으로 옮기고 id를 지운다. 그 뒤로는 부르지 않는다
+    const pageId = (await prisma.scheduleEvent.findUniqueOrThrow({ where: { id } })).notionPageId;
+    expect((await call('PATCH', `/schedule-events/${id}/notion-sync`, purchaseCookie, { notionSync: false })).status).toBe(200);
+    fake.calls = [];
+    await sync();
+    expect(fake.calls.filter((c) => c.name === 'notion-delete-pages').map((c) => c.args)).toEqual([{ page_ids: [pageId], user_confirmed: true }]);
+    const cleared = await prisma.scheduleEvent.findUniqueOrThrow({ where: { id } });
+    expect([cleared.notionPageId, cleared.notionSyncedAt]).toEqual([null, null]);
+    const after = await call<{ id: number; notionSync: boolean; notionPageUrl: string | null }[]>('GET', `/schedule-events?from=${day}&to=${day}`, purchaseCookie);
+    expect(after.body.data.find((e) => e.id === id)).toMatchObject({ notionSync: false, notionPageUrl: null });
+    fake.calls = [];
+    await sync();
+    expect(fake.calls.filter((c) => c.name === 'notion-delete-pages' || c.name === 'notion-create-pages')).toEqual([]);
+  });
+
+  it('Notion에서 빼다 실패하면 ERP 값은 그대로 두고 페이지 id를 남겨 다시 해 보며, 이유를 관리 화면에 남긴다 (이슈 #434)', async () => {
+    const start = new Date(Date.now() + 4 * DAY);
+    const created = await call<{ id: number }>('POST', '/schedule-events', purchaseCookie, {
+      scheduleEventTitle: '빼다 실패할 일정',
+      scheduleEventDescription: null,
+      startAt: start.toISOString(),
+      endAt: new Date(start.getTime() + 3_600_000).toISOString(),
+    });
+    const id = created.body.data.id;
+    scheduleEventIds.push(id);
+    await sync();
+    const pageId = (await prisma.scheduleEvent.findUniqueOrThrow({ where: { id } })).notionPageId;
+    expect(pageId).toMatch(HEX32);
+    const off = await call<{ notionSync: boolean }>('PATCH', `/schedule-events/${id}/notion-sync`, purchaseCookie, { notionSync: false });
+    expect([off.status, off.body.data.notionSync]).toEqual([200, false]);
+    fake.deleteResponse = 'error';
+    await sync();
+    fake.deleteResponse = 'ok';
+    const row = await prisma.scheduleEvent.findUniqueOrThrow({ where: { id } });
+    expect([row.notionSync, row.notionPageId]).toEqual([false, pageId]);
+    expect((await notionView()).notionWorkspace?.lastSyncError).toContain('휴지통');
   });
 
   it('업무: 완료하면(조건부 updateMany) 같은 페이지의 상태를 고친다', async () => {
@@ -1094,6 +1149,20 @@ describe('Notion 캘린더 (이슈 #391 2단계)', () => {
     expect(createdEvents()).toEqual([]);
     expect(pageCreatesFor(id)).toEqual([]);
     expect((await prisma.scheduleEvent.findUniqueOrThrow({ where: { id } })).notionCalendarEventId).toBe(row.notionCalendarEventId);
+  });
+
+  it('Notion에 넣지 않기로 바꾸면 캘린더 일정을 취소하고 페이지를 휴지통으로 옮긴다 (이슈 #434)', async () => {
+    const id = await makeEvent('뺄 캘린더 일정');
+    await sync();
+    const row = await prisma.scheduleEvent.findUniqueOrThrow({ where: { id } });
+    expect(row.notionCalendarEventId).toMatch(/^evt-/);
+    expect((await call('PATCH', `/schedule-events/${id}/notion-sync`, purchaseCookie, { notionSync: false })).status).toBe(200);
+    fake.calls = [];
+    await sync();
+    expect(calendarCalls().filter((c) => c.name === 'notion-calendar-cancel-events').map((c) => c.args)).toEqual([{ events: [{ calendar: CAL, eventId: row.notionCalendarEventId }] }]);
+    expect(fake.calls.filter((c) => c.name === 'notion-delete-pages').map((c) => c.args.page_ids)).toEqual([[row.notionPageId]]);
+    const cleared = await prisma.scheduleEvent.findUniqueOrThrow({ where: { id } });
+    expect([cleared.notionPageId, cleared.notionCalendarEventId]).toEqual([null, null]);
   });
 
   it('초대를 켜면 참석자 중 메일이 있는 사원만 보낸다 (이미 만든 일정도 다시 보낸다)', async () => {

@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { MEETING_MINUTES_STATUS, TASK_STATUS } from '@fantasteel/shared';
 import type { Prisma } from '../../../generated/prisma/client';
 import {
+  clearScheduleEventNotion,
   finishMeetingMinutesNotionPage,
   markMeetingMinutesNotionSynced,
   markScheduleEventNotionSynced,
@@ -79,6 +80,20 @@ export class NotionSyncRepository {
    */
   findDirtyScheduleEvents(tx: Tx, since: Date, skipIds: number[], take: number) {
     return tx.scheduleEvent.findMany({ where: { AND: [this.scheduleEventWhere(tx, since), { id: { notIn: skipIds } }] }, select: scheduleEventSelect, orderBy: { id: 'asc' }, take });
+  }
+
+  /** Notion에 넣지 않기로 바꿨는데 아직 Notion 페이지나 캘린더 일정이 남은 일정 (이슈 #434) */
+  findScheduleEventsToRemove(tx: Tx, skipIds: number[], take: number) {
+    return tx.scheduleEvent.findMany({
+      where: { notionSync: false, id: { notIn: skipIds }, OR: [{ notionPageId: { not: null } }, { notionCalendarEventId: { not: null } }] },
+      select: { id: true, notionPageId: true, notionCalendarEventId: true },
+      orderBy: { id: 'asc' },
+      take,
+    });
+  }
+
+  clearScheduleEventNotion(tx: Tx, id: number, clearPage: boolean, clearEvent: boolean) {
+    return tx.$queryRawTyped(clearScheduleEventNotion(id, clearPage, clearEvent));
   }
 
   countDirtyScheduleEvents(tx: Tx, since: Date) {

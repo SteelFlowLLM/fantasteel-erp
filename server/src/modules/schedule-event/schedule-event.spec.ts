@@ -183,12 +183,33 @@ describe('내 일정 직접 등록·수정 (POST·PATCH /schedule-events, 2026-1
     const bad = await send<unknown>('POST', '/schedule-events', salesCookie, { ...input('잘못된 값'), notionSync: 'yes' });
     expect(bad.status).toBe(400);
 
-    const notion = await prisma.integrationConnection.findFirst({ where: { providerKey: 'notion' }, select: { oauthTokens: true } });
-    if (notion?.oauthTokens) return;
+    // 상태의 갈래(연결 없음·업무 공간 없음·준비됨)는 notion-schedule-status.unit.spec.ts와 integration.spec.ts가 본다. 여기서는 누구나 부를 수 있는지만
     const status = await get<{ ready: boolean; reason: string | null }>('/schedule-events/notion-status', outsiderCookie);
     expect(status.status).toBe(200);
-    expect(status.body.data.ready).toBe(false);
-    expect(status.body.data.reason).toContain('Notion');
+    expect(status.body.data.ready ? status.body.data.reason : status.body.data.reason?.length).toBeTruthy();
+  });
+
+  it('Notion에 넣을지만 바꾸기: 회의록 일정도 등록자는 바꾸고, 참석만 한 사원은 COM-002, 잘못된 값은 400 (이슈 #434)', async () => {
+    const minutes = await prisma.meetingMinutes.findFirst({ select: { id: true } });
+    const event = await prisma.scheduleEvent.create({
+      data: {
+        scheduleEventTitle: '회의 후속 (Notion)',
+        startAt: new Date('2026-11-06T13:00:00+09:00'),
+        endAt: new Date('2026-11-06T14:00:00+09:00'),
+        creatorId: ids['2207005'],
+        meetingMinutesId: minutes?.id ?? null,
+        attendees: { create: [{ employeeId: ids['2207005'] }, { employeeId: ids['2103003'] }] },
+      },
+    });
+    created.push(event.id);
+    const off = await send<ScheduleEventView>('PATCH', `/schedule-events/${event.id}/notion-sync`, purchaseCookie, { notionSync: false });
+    expect([off.status, off.body.data.notionSync]).toEqual([200, false]);
+    const attendee = await send<unknown>('PATCH', `/schedule-events/${event.id}/notion-sync`, salesCookie, { notionSync: true });
+    expect([attendee.status, attendee.body.error?.code]).toEqual([403, 'COM-002']);
+    const outsider = await send<unknown>('PATCH', `/schedule-events/${event.id}/notion-sync`, outsiderCookie, { notionSync: true });
+    expect([outsider.status, outsider.body.error?.code]).toEqual([404, 'COM-003']);
+    expect((await send<unknown>('PATCH', `/schedule-events/${event.id}/notion-sync`, purchaseCookie, {})).status).toBe(400);
+    expect((await prisma.scheduleEvent.findUniqueOrThrow({ where: { id: event.id } })).notionSync).toBe(false);
   });
 
   it('회의록에서 등록한 일정은 등록자라도 여기서 고칠 수 없다 (COM-004 409)', async () => {

@@ -77,3 +77,13 @@ export function inputOf(form: ScheduleForm): ScheduleEventInput {
 export function canEditEvent(event: ScheduleEventView, employeeId: number): boolean {
   return event.creator.id === employeeId && event.meetingMinutes === null;
 }
+
+/** 회의록에서 등록한 일정은 내용은 못 고치지만, 등록자는 Notion에 넣을지 바꿀 수 있다 (이슈 #434) */
+export function canToggleNotion(event: ScheduleEventView, employeeId: number): boolean {
+  return event.creator.id === employeeId && event.meetingMinutes !== null;
+}
+
+/** 넣지 않기로 바꿨는데 Notion 페이지가 아직 남아 있으면: 다음 반영 때 치운다 */
+export function notionRemovalPending(event: Pick<ScheduleEventView, 'notionSync' | 'notionPageUrl'>): boolean {
+  return !event.notionSync && event.notionPageUrl !== null;
+}

@@ -35,4 +35,10 @@ describe('내 일정 서버 모드 (api/server/scheduleEvents.ts)', () => {
     expect(await scheduleEventApi.notionStatus()).toEqual(status);
     expect(calls[0].method).toBe('GET');
   });
+
+  it('Notion 넣기만 바꾸기: PATCH notion-sync에 notionSync만 보낸다', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.sales, (c: ServerCall) => (c.method === 'PATCH' && c.path === '/schedule-events/1/notion-sync' ? ok({ ...event, notionSync: false }) : undefined));
+    expect((await scheduleEventApi.updateNotionSync({ id: 1, notionSync: false })).notionSync).toBe(false);
+    expect(calls[0].body).toEqual({ notionSync: false });
+  });
 });

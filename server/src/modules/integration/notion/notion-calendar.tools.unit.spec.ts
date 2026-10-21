@@ -3,6 +3,8 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { AppException } from '../../../common/errors/app.exception';
 import {
+  buildCancelCalendarEventArgs,
+  readCalendarCancelResult,
   buildCreateCalendarEventArgs,
   buildUpdateCalendarEventArgs,
   readCalendarList,
@@ -153,5 +155,15 @@ describe('상위 페이지를 찾지 못한 답', () => {
     expect(parentPageNotFound(new McpError(ErrorCode.InvalidParams, 'object_not_found: Could not find page'))?.code).toBe('INT-004');
     expect(parentPageNotFound(new McpError(ErrorCode.InvalidParams, 'bad schema'))).toBeNull();
     expect(parentPageNotFound(new Error('object_not_found'))).toBeNull();
+  });
+});
+
+describe('넣지 않기로 바꾼 일정의 캘린더 일정 취소 (이슈 #434)', () => {
+  it('고른 캘린더와 일정 id로 하나를 취소하고, 오류 답은 INT-004', () => {
+    const calendar = { accountId: 'acc-1', calendarId: 'erp-cal' };
+    expect(buildCancelCalendarEventArgs(tool('notion-calendar-cancel-events', ['events']), calendar, 'evt-1')).toEqual({ events: [{ calendar, eventId: 'evt-1' }] });
+    expect(() => buildCancelCalendarEventArgs(tool('notion-calendar-cancel-events', ['ids']), calendar, 'evt-1')).toThrow(AppException);
+    expect(() => readCalendarCancelResult({ content: [{ type: 'text', text: 'Event not found' }], isError: true })).toThrow(AppException);
+    expect(() => readCalendarCancelResult({ content: [{ type: 'text', text: '{"cancelled":1}' }] })).not.toThrow();
   });
 });

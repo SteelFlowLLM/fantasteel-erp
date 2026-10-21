@@ -69,7 +69,7 @@ export function ScheduleEventModal({ event, date, onClose }: { event?: ScheduleE
         <Field label="메모" hint="다른 사원에게 알림을 보내지 않아요. Notion에 넣으면 회사 Notion에서 함께 볼 수 있어요.">
           <Textarea rows={3} maxLength={DESCRIPTION_MAX} value={form.description} onChange={(e) => set('description', e.target.value)} />
         </Field>
-        <NotionSyncToggle id="schedule-notion-sync" checked={form.notionSync} onChange={(checked) => set('notionSync', checked)} />
+        <NotionSyncToggle id="schedule-notion-sync" checked={form.notionSync} published={!!event?.notionPageUrl} onChange={(checked) => set('notionSync', checked)} />
       </form>
     </Modal>
   );

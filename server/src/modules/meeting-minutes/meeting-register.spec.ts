@@ -318,15 +318,34 @@ describe('확정하고 등록 (POST register, API-261)', () => {
     const id = await reviewMinutes([eventCandidate('c1', { title: 'Notion에 넣을 회의' }), eventCandidate('c2', { title: 'ERP에만 둘 회의' })]);
     await service.updateCandidate(author, id, 'c2', { notionSync: false });
     for (const key of ['c1', 'c2']) await decide(id, key, 'APPROVED');
+    // 같은 DB를 쓰는 integration.spec이 Notion을 연결해 둘 수 있어 이 갈래는 상태를 정해 둔다
+    const status = jest.spyOn(moduleRef.get(NotionWorkspaceService), 'scheduleStatus').mockResolvedValueOnce({ ready: false, reason: 'Notion이 연결되지 않았어요', calendarName: null });
     const result = await service.register(author, id);
+    status.mockRestore();
     const events = await prisma.scheduleEvent.findMany({ where: { id: { in: result.scheduleEventIds } }, orderBy: { id: 'asc' } });
     expect(events.map((e) => [e.scheduleEventTitle, e.notionSync])).toEqual([
       ['Notion에 넣을 회의', true],
       ['ERP에만 둘 회의', false],
     ]);
-    const status = await moduleRef.get(NotionWorkspaceService).scheduleStatus();
-    if (status.ready) expect(result.notionNotice).toBeNull();
-    else expect(result.notionNotice).toContain('ERP에만 넣었고');
+    expect(result.notionNotice).toBe('Notion이 연결되지 않았어요. 일정은 ERP에만 넣었고, Notion이 준비되면 자동으로 올라가요');
+  });
+
+  it('Notion이 준비돼 있으면 안내가 없고, 상태를 읽다 실패해도 확정은 성공한다 (이슈 #434)', async () => {
+    const notion = moduleRef.get(NotionWorkspaceService);
+    const ready = jest.spyOn(notion, 'scheduleStatus').mockResolvedValueOnce({ ready: true, reason: null, calendarName: null });
+    const first = await reviewMinutes([eventCandidate('c1', { title: '준비된 Notion 회의' })]);
+    await decide(first, 'c1', 'APPROVED');
+    expect((await service.register(author, first)).notionNotice).toBeNull();
+    ready.mockRestore();
+
+    const broken = jest.spyOn(notion, 'scheduleStatus').mockRejectedValueOnce(new Error('설정을 읽지 못함'));
+    const second = await reviewMinutes([eventCandidate('c1', { title: '상태를 못 읽은 회의' })]);
+    await decide(second, 'c1', 'APPROVED');
+    const result = await service.register(author, second);
+    broken.mockRestore();
+    expect(result.notionNotice).toBeNull();
+    expect(result.scheduleEventIds).toHaveLength(1);
+    expect(result.meetingMinutes.meetingMinutesStatus).toBe('CONFIRMED');
   });
 
   it('Notion에 넣는 일정이 없으면 Notion 안내가 없다', async () => {

@@ -113,7 +113,7 @@
 
 - **후보 고치기** `PATCH candidates/:key` (body는 보낸 칸만, 모두 선택): `title`, `description`, `assigneeId`·`dueDate`(TASK), `startAt`·`endAt`·`attendeeIds`(EVENT), `purchase {itemId, requestedTon, desiredReceiptDate}`(PURCHASE), `decision`(`PENDING`·`APPROVED`·`EXCLUDED`). 다른 종류의 칸을 보내면 `COM-004`.
   - 검증은 분석과 같다: 날짜는 회의일부터 1년 안, 시각은 서울 `YYYY-MM-DDTHH:mm`(또는 `+09:00` ISO)이고 `endAt > startAt`, 톤은 0보다 크고 소수 3자리까지, `itemId`는 `RAW_MATERIAL`, 담당자·참석자는 **재직 중인 아무 사원**(회의 참석자가 아니어도 된다, 없으면 `VOC-002`).
-  - EVENT 후보는 `notionSync`(boolean)로 Notion 업무 공간에도 넣을지 정한다(이슈 #434, 기본 넣음, 다른 종류에 보내면 `COM-004`). 자세한 규칙은 [schedule-event.md](schedule-event.md) 'Notion에 넣을지'.
+  - EVENT 후보는 `notionSync`(boolean)로 Notion 업무 공간에도 넣을지 정한다(이슈 #434, 기본 넣음, 다른 종류에 보내면 `COM-004`). 확정 뒤에는 내 일정 화면에서 작성자가 `PATCH schedule-events/:id/notion-sync`로 바꾼다. 자세한 규칙은 [schedule-event.md](schedule-event.md) 'Notion에 넣을지'. `notionNotice`는 확정이 커밋된 뒤 상태를 읽어 만들고, 읽다 실패하면 null로 둔다(확정은 성공).
   - 직접 정한 칸은 AI가 붙인 확인 사유(`issues`)를 지운다: 담당자 → 담당자, 마감일 → 마감일·당일 경고, 끝 시각 → 가정 경고(`endAssumed` false), 참석자, 시작 시각, 원료·수량·희망 입고일. 끝 시각을 가정한 일정은 시작만 옮기면 끝도 1시간 뒤로 따라간다.
   - **허가(`APPROVED`)** 는 필수 칸이 찬 후보만: TASK 제목·담당자·마감일 / EVENT 제목·시작·끝(시작보다 뒤)·참석자 1명 이상 / PURCHASE 원료·수량·희망 입고일. 모자라면 `VOC-006`(모자란 칸 이름을 문구에 담는다). 남은 경고(끝 시각 가정, 마감일 당일)는 막지 않는다: 허가가 곧 확인했다는 뜻이다.
   - 저장은 `WHERE status = REVIEW AND updated_at = 읽은 값`인 조건부 UPDATE다. 상태가 바뀌었으면 `VOC-004`, 같은 회의록을 동시에 고쳤으면 `COM-001`. `summary`도 같다(`summary` 칸과 `analysis_result.summary`를 같이 바꾼다).
