@@ -45,6 +45,7 @@ const OFF_DRIVE: DriveSource = {
   assertReady: () => Promise.reject(new AppException('INT-002', 'Google Drive가 연결되어 있지 않아요. 관리자가 먼저 연결해 주세요')),
   searchFiles: () => Promise.reject(new Error('찾지 않음')),
   readForAssistant: () => Promise.reject(new Error('읽지 않음')),
+  checkFile: () => Promise.reject(new Error('확인하지 않음')),
 };
 
 const OFF_NOTION: NotionReader = {
@@ -1777,6 +1778,10 @@ describe('AiAssistantService', () => {
         id === 'imagePhoto0005'
           ? { file: { ...meta, id, name: '현장.png', mimeType: 'image/png', kind: 'image', contentType: 'image/png', contentName: '현장.png' }, plan: { mode: 'image', maxBytes: 2_000_000, mediaType: 'image/png' }, buffer: Buffer.from('png') }
           : { file: { ...meta, id, name: '점검 메모.txt', mimeType: 'text/plain', kind: 'document', contentType: 'text/plain', contentName: '점검 메모.txt' }, plan: { mode: 'text', maxBytes: 1_000, exportMimeType: null }, buffer: Buffer.from('라인 점검 10/24 완료') },
+      checkFile: async (id) => {
+        if (id === 'imagePhoto0005') return { id, name: '현장.png' };
+        throw new AppException('INT-012', '설정한 Drive 폴더에 그 파일이 없어요');
+      },
     };
     const driveCall = (id: string, name: string, args: unknown): LlmToolReply => ({ content: '', toolCalls: [{ id, name, arguments: JSON.stringify(args) }] });
     const run = async (service: AiAssistantService, input: Parameters<AiAssistantService['prepare']>[1]) => (await service.prepare(user, input, { interactive: true })).run(() => undefined);
@@ -1796,6 +1801,24 @@ describe('AiAssistantService', () => {
         { title: '점검 메모.txt', url: 'https://drive.google.com/file/d/docNotes00001/view' },
         { title: '현장.png', url: 'https://drive.google.com/file/d/imagePhoto0005/view' },
       ]);
+    });
+
+    it('찾기만 하고 읽지 않아도 답에 나온 파일은 Drive 출처가 되고, 답에 쓰지 않은 찾기 결과는 붙지 않는다', async () => {
+      const { service } = withDrive(async (_call, index) => [driveCall('c1', 'drive_search', { query: '메모' }), answer('찾은 파일은 점검 메모예요.')][index]);
+      const reply = await run(service, { question: '메모 찾아줘', drive: true });
+      expect(reply.webSources).toEqual([{ title: '점검 메모.txt', url: 'https://drive.google.com/file/d/docNotes00001/view' }]);
+      const unrelated = withDrive(async (_call, index) => [driveCall('c1', 'drive_search', { query: '메모' }), answer('관련 자료를 찾지 못했어요.')][index]);
+      expect((await run(unrelated.service, { question: '메모 찾아줘', drive: true })).webSources).toBeUndefined();
+    });
+
+    it('사진 칸에 붙인 Drive 사진은 읽지 않고 폴더 안 파일일 때만 Drive 출처로 보인다', async () => {
+      const { service, calls } = withDrive(async () => answer('사진을 봤어요.'));
+      const reply = await run(service, { question: '이 사진 설명해줘', images: [{ mediaType: 'image/png', dataBase64: Buffer.from('png').toString('base64') }], driveImageIds: ['imagePhoto0005', 'outsideFile0001'] });
+      expect(reply.webSources).toEqual([{ title: '현장.png', url: 'https://drive.google.com/file/d/imagePhoto0005/view' }]);
+      expect(calls[0].messages.at(-1)).toMatchObject({ role: 'user', images: [{ mediaType: 'image/png' }] });
+      // 실시간 답 API가 아니면(사내 채팅 @AI) 쓰지 않는다
+      const chat = withDrive(async () => answer('네'));
+      expect((await chat.service.ask(user, { question: '봐줘', driveImageIds: ['imagePhoto0005'] })).webSources).toBeUndefined();
     });
 
     it(`도구 호출 상한은 ${MAX_DRIVE_TOOL_ROUNDS}번이고, 끄거나 한 번에 답(@AI)이면 도구가 없다`, async () => {

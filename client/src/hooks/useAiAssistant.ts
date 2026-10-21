@@ -67,6 +67,8 @@ export interface AiAskVariables {
   drive?: boolean;
   /** 입력칸에서 @로 붙인 Drive 문서 id (이슈 #398 2단계) */
   driveFileIds?: string[];
+  /** 사진 칸에 붙인 사진 가운데 Drive에서 가져온 것의 파일 id (답의 Drive 출처로 보인다) */
+  driveImageIds?: string[];
   /** 브라우저·화면 조작을 멈출 수 있게 답마다 만든 열쇠 (이슈 #425) */
   controlId?: string;
 }
@@ -171,7 +173,7 @@ export function useOpenBrowserWindow() {
 }
 
 /** 스트림으로 답을 받아 대화 저장소에 쌓는다. 이미 addQuestion을 한 질문에 대해 부른다. 실행 카드는 done 이벤트의 답에 담겨 온다 */
-export async function runAiAsk({ questionId, question, screen, threadId, reasoning, images, webSearch, browser, screenControl, researchRunId, notion, drive, driveFileIds, controlId }: AiAskVariables): Promise<void> {
+export async function runAiAsk({ questionId, question, screen, threadId, reasoning, images, webSearch, browser, screenControl, researchRunId, notion, drive, driveFileIds, driveImageIds, controlId }: AiAskVariables): Promise<void> {
   const chat = () => useAiChatStore.getState();
   const controller = new AbortController();
   activeController = controller;
@@ -187,7 +189,7 @@ export async function runAiAsk({ questionId, question, screen, threadId, reasoni
     await aiAssistantApi.askStream(
       // 철강맨AI 패널만 이 함수를 쓰므로 실행 카드를 받는다 (사내 채팅 @AI는 카드 없음)
       // 지난 대화는 보내지 않는다: 서버가 저장한 대화에서 읽는다
-      { question, screen, saveThread: true, ...(threadId !== null ? { threadId } : {}), actionCards: true, ...(reasoning ? { reasoning } : {}), ...(images?.length ? { images } : {}), ...(webSearch ? { webSearch: true } : {}), ...(browser ? { browser: true, browserSessionId } : {}), ...(controlId ? { agentControlId: controlId } : {}), ...(screenControl ? { screenControl: true, screenMap: currentScreenMap() } : {}), ...(researchRunId ? { researchRunId } : {}), ...(notion ? { notion: true } : {}), ...(drive ? { drive: true } : {}), ...(driveFileIds?.length ? { driveFileIds } : {}) },
+      { question, screen, saveThread: true, ...(threadId !== null ? { threadId } : {}), actionCards: true, ...(reasoning ? { reasoning } : {}), ...(images?.length ? { images } : {}), ...(webSearch ? { webSearch: true } : {}), ...(browser ? { browser: true, browserSessionId } : {}), ...(controlId ? { agentControlId: controlId } : {}), ...(screenControl ? { screenControl: true, screenMap: currentScreenMap() } : {}), ...(researchRunId ? { researchRunId } : {}), ...(notion ? { notion: true } : {}), ...(drive ? { drive: true } : {}), ...(driveFileIds?.length ? { driveFileIds } : {}), ...(driveImageIds?.length ? { driveImageIds } : {}) },
       (event) => {
         if (event.type === 'ui_action') {
           void answerUiAction(event);
@@ -216,7 +218,7 @@ export async function runAiAsk({ questionId, question, screen, threadId, reasoni
 
 /** 질문을 보내는 함수. `.stop()`은 받고 있는 답을 멈춘다 */
 export function useAskAiAssistant() {
-  const ask = (question: string, screen: AiAssistantScreenContext, reasoning?: AiReasoningLevel, images?: AiAssistantImageInput[], webSearch?: boolean, browser?: boolean, screenControl?: boolean, researchRunId?: number, notion?: boolean, extra: { drive?: boolean; driveFileIds?: string[] } = {}) => {
+  const ask = (question: string, screen: AiAssistantScreenContext, reasoning?: AiReasoningLevel, images?: AiAssistantImageInput[], webSearch?: boolean, browser?: boolean, screenControl?: boolean, researchRunId?: number, notion?: boolean, extra: { drive?: boolean; driveFileIds?: string[]; driveImageIds?: string[] } = {}) => {
     const text = question.trim();
     const chat = useAiChatStore.getState();
     if (!text || chat.pendingId) return;

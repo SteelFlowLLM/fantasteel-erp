@@ -12,6 +12,8 @@ const JPEG_RETRY_QUALITY = 0.6;
 export interface PreparedAiImage extends AiAssistantImageInput {
   width: number;
   height: number;
+  /** Drive에서 가져온 사진이면 그 파일 id. 서버가 답의 Drive 출처로 보이게 함께 보낸다 (사진 내용은 images로 간다) */
+  driveFileId?: string;
 }
 
 export class AiImageError extends Error {}

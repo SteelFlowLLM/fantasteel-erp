@@ -32,6 +32,8 @@ export interface DriveSource {
   /** content: 이름뿐 아니라 내용으로도 찾는다 (기본 true) */
   searchFiles(query: string | null, kind: DriveFileListKind, limit: number, content?: boolean): Promise<DriveFileView[]>;
   readForAssistant(fileId: string): Promise<{ file: CheckedDriveFile; plan: DriveReadPlan; buffer: Buffer | null }>;
+  /** 내용을 받지 않고 폴더 안 파일인지와 이름만 확인한다 (폴더 밖·없는 파일은 INT-012) */
+  checkFile(fileId: string): Promise<Pick<CheckedDriveFile, 'id' | 'name'>>;
 }
 
 export type PdfTextExtractor = (body: Buffer, name: string) => Promise<string>;

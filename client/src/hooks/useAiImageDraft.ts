@@ -83,7 +83,7 @@ export function useAiImageDraft() {
         } catch (error) {
           throw new AiImageError(error instanceof Error ? error.message : 'Drive에서 사진을 받지 못했어요');
         }
-        return prepareAiImage(driveBlobToFile(blob, file));
+        return { ...(await prepareAiImage(driveBlobToFile(blob, file))), driveFileId: file.id };
       });
     },
     [add],

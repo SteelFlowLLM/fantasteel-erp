@@ -65,6 +65,20 @@ export function openableWebSources(sources: readonly AiWebSource[] | undefined):
   return result;
 }
 
+/** 출처 한 줄의 종류: 회사 Drive 파일, Notion 페이지, 그 밖의 웹 페이지 */
+function sourceKindOfHost(host: string): 'Drive' | 'Notion' | '웹' {
+  if (host === 'drive.google.com') return 'Drive';
+  if (host === 'notion.so' || host.endsWith('.notion.so') || host.endsWith('.notion.site')) return 'Notion';
+  return '웹';
+}
+
+/** 답 아래 출처 줄 제목: 모두 Drive 파일이면 'Drive 출처', 모두 Notion 페이지면 'Notion 출처', 웹 페이지뿐이면 '웹 출처', 섞였으면 '출처' */
+export function webSourcesHeading(items: readonly { host: string }[]): string {
+  const kinds = new Set(items.map((item) => sourceKindOfHost(item.host)));
+  const only = kinds.size === 1 ? [...kinds][0] : null;
+  return only ? `${only} 출처` : '출처';
+}
+
 export type AnswerToken = { kind: 'text'; text: string } | { kind: 'link'; text: string; href: string };
 
 interface Parsed {

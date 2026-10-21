@@ -84,6 +84,11 @@ export interface AiAssistantMessageInput {
    * 실시간 답 API에서만 쓴다. 지난 대화에는 남지 않는다
    */
   driveFileIds?: string[];
+  /**
+   * 사진 칸에 붙인 사진 가운데 Drive에서 가져온 것의 파일 id (AI_IMAGE_MAX_COUNT개까지). 사진 내용은 images로 보내므로 서버는 읽지 않고,
+   * 폴더 안 파일이면 답의 Drive 출처로 보인다. 실시간 답 API에서만 쓴다
+   */
+  driveImageIds?: string[];
 }
 
 /** 질문 하나에 @로 붙이는 Drive 파일 수 (가정값) */

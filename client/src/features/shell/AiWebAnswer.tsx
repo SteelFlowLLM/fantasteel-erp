@@ -6,7 +6,7 @@
 import type { AiWebSource } from '@fantasteel/shared';
 import { useMemo, useState } from 'react';
 import { Icon } from '@/components/Icon';
-import { openableWebSources, tokenizeAnswerLinks } from '@/lib/aiWebLinks';
+import { openableWebSources, tokenizeAnswerLinks, webSourcesHeading } from '@/lib/aiWebLinks';
 
 /** 이 개수를 넘으면 앞의 몇 개만 보이고 나머지는 펼친다 */
 export const WEB_SOURCES_COLLAPSED = 3;
@@ -32,7 +32,7 @@ export function AiAnswerText({ content, webSources, className }: { content: stri
   );
 }
 
-/** 답 아래 '웹 출처': 제목은 글로, 주소 호스트를 함께 보이고, 새 탭으로 연다 */
+/** 답 아래 출처(웹·Drive·Notion): 제목은 글로, 주소 호스트를 함께 보이고, 새 탭으로 연다 */
 export function AiWebSources({ sources }: { sources: AiWebSource[] | undefined }) {
   const items = useMemo(() => openableWebSources(sources), [sources]);
   const [expanded, setExpanded] = useState(false);
@@ -41,7 +41,7 @@ export function AiWebSources({ sources }: { sources: AiWebSource[] | undefined }
   const hidden = items.length - shown.length;
   return (
     <div className="flex flex-col gap-1 border-t border-line pt-2 text-cap">
-      <span className="font-semibold text-ink-2">웹 출처 · {items.length}건</span>
+      <span className="font-semibold text-ink-2">{webSourcesHeading(items)} · {items.length}건</span>
       <ul className="flex flex-col gap-1">
         {shown.map((item) => (
           <li key={item.href} className="flex min-w-0 items-start gap-1.5">
