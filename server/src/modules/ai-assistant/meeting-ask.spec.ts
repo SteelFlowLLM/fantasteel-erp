@@ -225,7 +225,7 @@ describe('GET ai-assistant/capabilities', () => {
     llmClient.modelCapabilities.mockResolvedValue({ vision: true, reasoning: false });
     const res = await call<AiAssistantCapabilitiesView>('GET', '/ai-assistant/capabilities');
     expect(res.status).toBe(200);
-    expect(res.body.data).toEqual({ model: 'test-model', vision: true, reasoning: false, webSearch: { engines: expect.arrayContaining(['duckduckgo', 'wikipedia']), placeSearch: expect.any(Boolean) }, browser: expect.objectContaining({ available: expect.any(Boolean) }), deepResearch: { available: true }, screenControl: { available: expect.any(Boolean) }, notion: expect.objectContaining({ available: expect.any(Boolean) }), drive: expect.objectContaining({ available: expect.any(Boolean) }) });
+    expect(res.body.data).toEqual({ model: 'test-model', vision: true, reasoning: false, webSearch: { engines: expect.arrayContaining(['duckduckgo', 'wikipedia']), placeSearch: expect.any(Boolean) }, browser: expect.objectContaining({ available: expect.any(Boolean) }), deepResearch: { available: true }, screenControl: { available: expect.any(Boolean) }, notion: expect.objectContaining({ available: expect.any(Boolean) }), drive: expect.objectContaining({ available: expect.any(Boolean) }), steelmanWake: { available: expect.any(Boolean), voiceApproval: expect.any(Boolean) } });
     expect(llmClient.modelCapabilities.mock.calls[0][1]).toBe('test-model');
   });
 
@@ -233,14 +233,14 @@ describe('GET ai-assistant/capabilities', () => {
     llmSettings.read.mockResolvedValueOnce({ baseUrl: 'http://llm.test/v1', model: null, apiKey: null });
     const res = await call<AiAssistantCapabilitiesView>('GET', '/ai-assistant/capabilities');
     expect(res.status).toBe(200);
-    expect(res.body.data).toEqual({ model: null, vision: null, reasoning: null, webSearch: { engines: expect.arrayContaining(['duckduckgo', 'wikipedia']), placeSearch: expect.any(Boolean) }, browser: expect.objectContaining({ available: expect.any(Boolean) }), deepResearch: { available: false }, screenControl: { available: expect.any(Boolean) }, notion: expect.objectContaining({ available: expect.any(Boolean) }), drive: expect.objectContaining({ available: expect.any(Boolean) }) });
+    expect(res.body.data).toEqual({ model: null, vision: null, reasoning: null, webSearch: { engines: expect.arrayContaining(['duckduckgo', 'wikipedia']), placeSearch: expect.any(Boolean) }, browser: expect.objectContaining({ available: expect.any(Boolean) }), deepResearch: { available: false }, screenControl: { available: expect.any(Boolean) }, notion: expect.objectContaining({ available: expect.any(Boolean) }), drive: expect.objectContaining({ available: expect.any(Boolean) }), steelmanWake: { available: expect.any(Boolean), voiceApproval: expect.any(Boolean) } });
     expect(llmClient.modelCapabilities).not.toHaveBeenCalled();
   });
 
   it('외부 LLM처럼 알 수 없으면 vision·reasoning이 null로 나간다', async () => {
     llmClient.modelCapabilities.mockResolvedValue({ vision: null, reasoning: null });
     const res = await call<AiAssistantCapabilitiesView>('GET', '/ai-assistant/capabilities');
-    expect(res.body.data).toEqual({ model: 'test-model', vision: null, reasoning: null, webSearch: { engines: expect.arrayContaining(['duckduckgo', 'wikipedia']), placeSearch: expect.any(Boolean) }, browser: expect.objectContaining({ available: expect.any(Boolean) }), deepResearch: { available: true }, screenControl: { available: expect.any(Boolean) }, notion: expect.objectContaining({ available: expect.any(Boolean) }), drive: expect.objectContaining({ available: expect.any(Boolean) }) });
+    expect(res.body.data).toEqual({ model: 'test-model', vision: null, reasoning: null, webSearch: { engines: expect.arrayContaining(['duckduckgo', 'wikipedia']), placeSearch: expect.any(Boolean) }, browser: expect.objectContaining({ available: expect.any(Boolean) }), deepResearch: { available: true }, screenControl: { available: expect.any(Boolean) }, notion: expect.objectContaining({ available: expect.any(Boolean) }), drive: expect.objectContaining({ available: expect.any(Boolean) }), steelmanWake: { available: expect.any(Boolean), voiceApproval: expect.any(Boolean) } });
   });
 });
 
