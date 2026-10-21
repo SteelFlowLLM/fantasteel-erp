@@ -86,7 +86,7 @@ export const BUSINESS_EVENT_TYPE_LABEL: Record<BusinessEventType, string> = {
   TASK_CREATED: '업무 등록',
 };
 
-export const BUSINESS_EVENT_AREAS = ['수주', '생산', '품질', '재고', '구매', '출하', '초안', '회의록', '일정'] as const;
+export const BUSINESS_EVENT_AREAS = ['수주', '생산', '품질', '재고', '구매', '출하', '초안', '회의록', '일정', '업무'] as const;
 export type BusinessEventArea = (typeof BUSINESS_EVENT_AREAS)[number];
 export const BUSINESS_EVENT_AREA: Record<BusinessEventType, BusinessEventArea> = {
   SALES_ORDER_CREATED: '수주',

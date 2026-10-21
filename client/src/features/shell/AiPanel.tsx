@@ -21,6 +21,7 @@ import { AiActionCards } from '@/features/shell/AiActionCards';
 import { AiChatThreadList } from '@/features/shell/AiChatThreadList';
 import { SteelmanAiMark } from '@/features/shell/SteelmanAiMark';
 import { SteelmanAiStatus } from '@/features/shell/SteelmanAiStatus';
+import { SteelmanWakeToggle } from '@/features/shell/SteelmanWake';
 import { AFTER_ANSWER_MS, finishedSteelmanStatus, liveSteelmanStatus, type SteelmanStatus, type ToolTimes } from '@/lib/steelmanStatus';
 import { useAction } from '@/hooks/useAction';
 import { controlAiAgent, sendAiAgentInput, sendAiAgentNote, useAiCapabilities, useOpenBrowserWindow, useAiSuggestedQuestions, useAskAiAssistant, useOpenAiChatThread, useRememberAiChatThread } from '@/hooks/useAiAssistant';
@@ -42,6 +43,7 @@ import { AI_SCREEN_CONTROL_TITLE, readAiScreenControlPreference, writeAiScreenCo
 import { AI_WEB_SEARCH_TITLE, AI_WEB_SEARCH_UNAVAILABLE_HINT, readAiWebSearchPreference, webSearchEngineHint, writeAiWebSearchPreference } from '@/lib/aiWebSearch';
 import { AI_CHAT_STOPPED_REASON, useAiChatStore, type AiChatEntry, type AiChatLive } from '@/stores/useAiChatStore';
 import { useShellStore } from '@/stores/useShellStore';
+import { useSteelmanWakeStore } from '@/stores/useSteelmanWakeStore';
 
 /** 서버 DTO와 같은 상한 (가정값) */
 const MAX_QUESTION_LENGTH = 1000;
@@ -171,7 +173,9 @@ export function AiPanel() {
     const timer = window.setTimeout(() => setGreeting(false), AFTER_ANSWER_MS);
     return () => window.clearTimeout(timer);
   }, []);
-  const headerStatus: SteelmanStatus | null = pending ? null : greeting ? 'greet' : draft.trim() ? 'listening' : null;
+  // "철강맨"만 불러 다음 말을 기다리는 동안도 듣는 중 (이슈 #457)
+  const wakeCalled = useSteelmanWakeStore((state) => state.called !== null);
+  const headerStatus: SteelmanStatus | null = pending ? null : wakeCalled ? 'listening' : greeting ? 'greet' : draft.trim() ? 'listening' : null;
   const [afterAnswer, setAfterAnswer] = useState<{ entryId: string } | null>(null);
   const wasPending = useRef(false);
   const afterTimer = useRef<number | undefined>(undefined);
@@ -345,6 +349,24 @@ export function AiPanel() {
       writeAiReasoningPreference({ level: next, oneShot });
     }
   };
+
+  // 철강맨 부르기로 들은 질문·화면 조작 켜기 (이슈 #457): 입력칸에서 보낸 것과 같게 켜 둔 칩 그대로 보낸다. 붙여 둔 사진·문서는 함께 보내지 않는다
+  const panelRequest = useSteelmanWakeStore((state) => state.panelRequest);
+  const voiceHandler = useRef<(request: NonNullable<typeof panelRequest>) => void>(() => undefined);
+  voiceHandler.current = (request) => {
+    if (request.kind === 'screenControl') {
+      changeScreenControl(request.on);
+      return;
+    }
+    send(request.question, false);
+    const asked = useAiChatStore.getState().pendingId;
+    if (asked) useSteelmanWakeStore.getState().setVoiceQuestionId(asked);
+  };
+  useEffect(() => {
+    if (!panelRequest) return;
+    useSteelmanWakeStore.getState().takePanelRequest(panelRequest.id);
+    voiceHandler.current(panelRequest);
+  }, [panelRequest]);
 
   const startNewChat = () => {
     clear();
@@ -528,11 +550,13 @@ export function AiPanel() {
           <b className="text-base leading-tight font-bold">철강맨AI</b>
           <small className="truncate text-cap text-ink-3">화면 도우미 철강맨이 답해요</small>
         </div>
+        <span className="ml-auto" />
+        <SteelmanWakeToggle />
         <IconButton
           icon="history"
           label={showThreads ? '대화로 돌아가기' : '대화 목록'}
           size="sm"
-          className={`ml-auto ${showThreads ? 'bg-steelman-soft text-steelman-ink' : ''}`}
+          className={` ${showThreads ? 'bg-steelman-soft text-steelman-ink' : ''}`}
           aria-pressed={showThreads}
           onClick={() => setShowThreads((open) => !open)}
         />
