@@ -58,20 +58,20 @@ export class AiAssistantController {
    */
   @Post('ai-assistant/messages/stream')
   async askStream(@CurrentUser() user: AuthUser, @Body() dto: AskAiAssistantDto, @Res() res: Response): Promise<void> {
-    const prepared = await this.service.prepare(user, dto, { interactive: true });
+    // 끊김은 준비(회의록·대화·모델 정보 읽기)보다 먼저 듣는다: 그 사이 끊으면 LLM·브라우저를 시작하지 않는다 (이슈 #479)
     const abort = new AbortController();
     res.on('close', () => {
       if (!res.writableFinished) abort.abort();
     });
+    const prepared = await this.service.prepare(user, dto, { interactive: true });
+    if (abort.signal.aborted) return;
     res.status(200);
     res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     // 프록시가 모아 보내지 않게 한다
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders();
-    const write = (event: AiAssistantStreamEvent) => {
-      if (!res.writableEnded && !abort.signal.aborted) res.write(`${JSON.stringify(event)}\n`);
-    };
+    const write = ndjsonWriter(res, abort);
     try {
       const reply = await prepared.run(write, abort.signal);
       // 저장은 답이 다 만들어진 뒤에 (실패·멈춘 질문은 저장하지 않는다, 이슈 #399)
@@ -179,4 +179,28 @@ export class AiAssistantController {
   executeActionCard(@CurrentUser() user: AuthUser, @Body() dto: ExecuteAiActionCardDto): Promise<AiActionCardExecuteResult> {
     return this.service.executeActionCard(user, dto);
   }
+}
+
+/** 🟡 화면이 읽지 않아 서버에 쌓인 스트림이 이만큼 넘으면 답을 멈춘다 (멈춘 탭이 서버 메모리를 채우지 않게) */
+export const STREAM_BUFFER_MAX_BYTES = 16 * 1024 * 1024;
+
+/** 쓰기 대상 중 쓰는 것 (express Response) */
+export interface NdjsonOut {
+  write(chunk: string): boolean;
+  readonly writableEnded: boolean;
+  readonly writableNeedDrain: boolean;
+  readonly writableLength: number;
+}
+
+/**
+ * 실시간 답 이벤트를 한 줄씩 쓴다. 화면이 늦게 읽어 버퍼가 차 있으면(역압) 브라우저 화면 사진은 건너뛴다: 다음 사진이 곧 오고 글 이벤트만 빠짐없이 가면 된다.
+ * 그래도 버퍼가 STREAM_BUFFER_MAX_BYTES를 넘으면 화면이 읽지 않는 것이므로 답을 멈춘다
+ */
+export function ndjsonWriter(out: NdjsonOut, abort: AbortController): (event: AiAssistantStreamEvent) => void {
+  return (event) => {
+    if (out.writableEnded || abort.signal.aborted) return;
+    if (out.writableNeedDrain && (event.type === 'browser_frame' || event.type === 'browser_live')) return;
+    out.write(`${JSON.stringify(event)}\n`);
+    if (out.writableLength > STREAM_BUFFER_MAX_BYTES) abort.abort();
+  };
 }

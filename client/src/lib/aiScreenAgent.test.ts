@@ -130,6 +130,20 @@ describe('누르지 않는 것·넣지 않는 칸', () => {
     expect(refused(h('a', { href: '/sales-orders' }, '수주 목록'))).toBeNull();
   });
 
+  it('되돌리기 어려운 버튼(취소·완료·만들기·해제·사용 안 함·연결 끊기)을 막고, 이름이 "취소"뿐이면 대화상자 안일 때만 누른다 (이슈 #479)', () => {
+    const refused = (node: FakeElement) => clickRefusal(node, nameOf(node));
+    for (const label of ['출하요청 취소', '완료', '만들기', '해제', '사용 안 함', '연결 끊기', '작업 시작']) expect(refused(h('button', { type: 'button' }, label))).toMatch(/^막았어요/);
+    const rowCancel = h('button', { type: 'button' }, '취소');
+    h('tr', {}, rowCancel);
+    expect(refused(rowCancel)).toContain('대화상자 밖의 취소 버튼');
+    const dialogCancel = h('button', { type: 'button' }, '취소');
+    h('div', { role: 'dialog' }, h('div', {}, dialogCancel));
+    expect(refused(dialogCancel)).toBeNull();
+    const modalCancel = h('button', { type: 'button', 'aria-label': 'Cancel' }, '취소');
+    h('div', { 'aria-modal': 'true' }, modalCancel);
+    expect(refused(modalCancel)).toBeNull();
+  });
+
   it('비밀번호·고르기 칸·읽기 전용 칸에는 넣지 않는다', () => {
     const password = h('input', { type: 'password' });
     expect(fillRefusal(password, roleOf(password))).toMatch(/^막았어요/);

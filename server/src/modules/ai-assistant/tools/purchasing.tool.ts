@@ -11,10 +11,8 @@ import {
   type PurchaseRequisitionSummary,
 } from '@fantasteel/shared';
 import type { PurchasingService } from '../../purchasing/purchasing.service';
-import { codeLabelList, limitRows, looseIncludes, optionalEnum, optionalString, TOOL_ROW_LIMIT, type AssistantTool } from './assistant-tool';
+import { codeLabelList, limitRows, looseIncludes, optionalEnum, optionalString, scanFiltered, TOOL_ROW_LIMIT, unscannedField, type AssistantTool } from './assistant-tool';
 
-/** 번호·원료로 거를 때 한 번에 읽는 수 (API 상한 100) */
-const SCAN_SIZE = 100;
 const REQUISITION_STATUSES = Object.values(PURCHASE_REQUISITION_STATUS) as PurchaseRequisitionStatus[];
 const ORDER_STATUSES = Object.values(PURCHASE_ORDER_STATUS) as PurchaseOrderStatus[];
 
@@ -36,12 +34,19 @@ export function purchaseRequisitionTool(purchasing: PurchasingService): Assistan
     async run(args, user) {
       const status = optionalEnum(args, 'status', REQUISITION_STATUSES);
       const keyword = optionalString(args, 'keyword');
-      const page = await purchasing.listRequisitions(user, { purchaseRequisitionStatus: status, page: 1, size: SCAN_SIZE });
-      const rows = keyword ? page.items.filter((r) => looseIncludes([r.purchaseRequisitionNo, r.itemCode, r.itemName], keyword)) : page.items;
-      const limited = limitRows(rows);
+      // 번호·원료는 API에 거를 칸이 없어 쪽을 읽어 거른다. 거르지 않으면 전체 수는 API의 total
+      const scan = keyword
+        ? await scanFiltered((page, size) => purchasing.listRequisitions(user, { purchaseRequisitionStatus: status, page, size }), (r) => looseIncludes([r.purchaseRequisitionNo, r.itemCode, r.itemName], keyword))
+        : await purchasing.listRequisitions(user, { purchaseRequisitionStatus: status, page: 1, size: TOOL_ROW_LIMIT }).then((page) => ({ rows: page.items, total: page.total, unscanned: 0 }));
+      const limited = limitRows(scan.rows);
       return {
         label: `구매요청${status ? ` · ${PURCHASE_REQUISITION_STATUS_LABEL[status]}` : ''}${keyword ? ` · ${keyword}` : ''}`,
-        data: { '구매요청 수': rows.length, 구매요청: limited.rows.map(requisitionRow), '생략 줄 수': limited.omitted },
+        data: {
+          '구매요청 수': keyword ? scan.rows.length : scan.total,
+          구매요청: limited.rows.map(requisitionRow),
+          '생략 줄 수': keyword ? limited.omitted : Math.max(0, scan.total - limited.rows.length),
+          ...unscannedField('구매요청', scan.unscanned),
+        },
       };
     },
   };
@@ -65,14 +70,21 @@ export function purchaseOrderTool(purchasing: PurchasingService): AssistantTool 
     async run(args) {
       const status = optionalEnum(args, 'status', ORDER_STATUSES);
       const keyword = optionalString(args, 'keyword');
-      const page = await purchasing.listPurchaseOrders({ purchaseOrderStatus: status, page: 1, size: SCAN_SIZE });
-      const rows = keyword
-        ? page.items.filter((o) => looseIncludes([o.purchaseOrderNo, o.supplierName, ...o.items.flatMap((i) => [i.itemCode, i.itemName])], keyword))
-        : page.items;
-      const limited = limitRows(rows);
+      const scan = keyword
+        ? await scanFiltered(
+            (page, size) => purchasing.listPurchaseOrders({ purchaseOrderStatus: status, page, size }),
+            (o) => looseIncludes([o.purchaseOrderNo, o.supplierName, ...o.items.flatMap((i) => [i.itemCode, i.itemName])], keyword),
+          )
+        : await purchasing.listPurchaseOrders({ purchaseOrderStatus: status, page: 1, size: TOOL_ROW_LIMIT }).then((page) => ({ rows: page.items, total: page.total, unscanned: 0 }));
+      const limited = limitRows(scan.rows);
       return {
         label: `발주·입고예정${status ? ` · ${PURCHASE_ORDER_STATUS_LABEL[status]}` : ''}${keyword ? ` · ${keyword}` : ''}`,
-        data: { '발주 수': rows.length, 발주: limited.rows.map(orderRow), '생략 줄 수': limited.omitted },
+        data: {
+          '발주 수': keyword ? scan.rows.length : scan.total,
+          발주: limited.rows.map(orderRow),
+          '생략 줄 수': keyword ? limited.omitted : Math.max(0, scan.total - limited.rows.length),
+          ...unscannedField('발주', scan.unscanned),
+        },
       };
     },
   };
@@ -92,12 +104,18 @@ export function goodsReceiptTool(purchasing: PurchasingService): AssistantTool {
     },
     async run(args) {
       const keyword = optionalString(args, 'keyword');
-      const page = await purchasing.listGoodsReceipts({ page: 1, size: keyword ? SCAN_SIZE : TOOL_ROW_LIMIT });
-      const rows = keyword ? page.items.filter((g) => looseIncludes([g.goodsReceiptNo, g.purchaseOrderNo, g.itemCode, g.itemName], keyword)) : page.items;
-      const limited = limitRows(rows);
+      const scan = keyword
+        ? await scanFiltered((page, size) => purchasing.listGoodsReceipts({ page, size }), (g) => looseIncludes([g.goodsReceiptNo, g.purchaseOrderNo, g.itemCode, g.itemName], keyword))
+        : await purchasing.listGoodsReceipts({ page: 1, size: TOOL_ROW_LIMIT }).then((page) => ({ rows: page.items, total: page.total, unscanned: 0 }));
+      const limited = limitRows(scan.rows);
       return {
         label: `입고${keyword ? ` · ${keyword}` : ''}`,
-        data: { '입고 수': keyword ? rows.length : page.total, 입고: limited.rows.map(receiptRow), '생략 줄 수': keyword ? limited.omitted : Math.max(0, page.total - limited.rows.length) },
+        data: {
+          '입고 수': keyword ? scan.rows.length : scan.total,
+          입고: limited.rows.map(receiptRow),
+          '생략 줄 수': keyword ? limited.omitted : Math.max(0, scan.total - limited.rows.length),
+          ...unscannedField('입고', scan.unscanned),
+        },
       };
     },
   };

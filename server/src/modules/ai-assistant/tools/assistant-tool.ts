@@ -106,6 +106,37 @@ export function limitRows<T>(rows: readonly T[], limit = TOOL_ROW_LIMIT): { rows
   return { rows: rows.slice(0, limit), omitted: Math.max(0, rows.length - limit) };
 }
 
+/** API 한 쪽의 상한(100)과 거르기 위해 읽는 쪽 수. 🟡 1,000건까지 읽어 세고, 그보다 많으면 확인하지 못한 수를 알린다 (이슈 #479) */
+export const SCAN_PAGE_SIZE = 100;
+export const SCAN_MAX_PAGES = 10;
+
+/**
+ * 거를 조건이 API에 없을 때 쪽을 차례로 읽어 거른다(최대 SCAN_MAX_PAGES쪽). 한 쪽만 읽고 세면 100건이 넘을 때 모델이 개수를 틀리게 말한다.
+ * unscanned = 읽지 못한 행 수 (0이면 전부 봤다). first를 주면 그 조건에 맞는 행을 찾는 즉시 멈춘다
+ */
+export async function scanFiltered<T>(
+  read: (page: number, size: number) => Promise<{ items: T[]; total: number }>,
+  keep: (row: T) => boolean,
+  options: { first?: boolean } = {},
+): Promise<{ rows: T[]; total: number; unscanned: number }> {
+  const rows: T[] = [];
+  let scanned = 0;
+  let total = 0;
+  for (let page = 1; page <= SCAN_MAX_PAGES; page += 1) {
+    const result = await read(page, SCAN_PAGE_SIZE);
+    total = result.total;
+    scanned += result.items.length;
+    rows.push(...result.items.filter(keep));
+    if ((options.first && rows.length > 0) || result.items.length < SCAN_PAGE_SIZE || scanned >= total) break;
+  }
+  return { rows, total, unscanned: Math.max(0, total - scanned) };
+}
+
+/** 다 읽지 못했을 때 결과에 더하는 칸: "확인하지 못한 ○○ 수" */
+export function unscannedField(noun: string, unscanned: number): Record<string, number> {
+  return unscanned > 0 ? { [`확인하지 못한 ${noun} 수`]: unscanned } : {};
+}
+
 const SEOUL = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 
 /** ISO 시각 → 서울 'YYYY-MM-DD HH:mm' */

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import {
   AI_VOICE_APPROVABLE_KINDS,
@@ -62,6 +63,7 @@ import { AiUpdateCardService } from './ai-update-card.service';
 import { AssistantDriveToolbox, type DriveToolSession } from './drive/assistant-drive-toolbox';
 import { DRIVE_UNTRUSTED_NOTE, driveTextBlock, type DriveReadOutcome } from './drive/drive-file-reader';
 import { AiChatThreadService } from './chat/ai-chat-thread.service';
+import { AiActionCardRunLedger, cardRunKeyOf } from './action-card-run';
 import { SteelmanWakeSettingsStore } from '../stt/steelman-wake-settings.store';
 import { historyBudget, HistorySearchSession, type HistorySearchSource } from './history/chat-memory';
 import { AiResearchCardService } from './ai-research-card.service';
@@ -154,6 +156,7 @@ export class AiAssistantService {
     private readonly researchCards: AiResearchCardService,
     private readonly browserSettings: BrowserSettingsStore,
     private readonly wakeSettings: SteelmanWakeSettingsStore,
+    private readonly cardRuns: AiActionCardRunLedger,
   ) {}
 
   /** 화면 조작 결과 (이슈 #382). 묻는 사원 본인의 기다리는 자리만, 처음 온 결과만 받는다 */
@@ -221,7 +224,42 @@ export class AiAssistantService {
     return this.runActionCard(user, dto);
   }
 
+  /**
+   * 같은 카드는 한 번만 실행한다 (이슈 #479): 실행 중이면 COM-001, 이미 실행한 카드면 처음 결과를 그대로 돌려준다.
+   * 실행이 확실히 실패(거절·롤백)하면 잡기를 풀어 다시 실행할 수 있게 하고, 결과를 모르는 실패(Notion INT-009)는 남긴다
+   */
   private async runActionCard(user: AuthUser, dto: ExecuteAiActionCardDto): Promise<AiActionCardExecuteResult> {
+    const runKey = cardRunKeyOf(dto);
+    if (runKey === null) throw new AppException('COM-004', '카드 번호가 없어요. 다시 물어 카드를 새로 받아 주세요');
+    const claim = await this.cardRuns.claim(runKey, user.employeeId, dto.kind);
+    if (claim.state === 'running') throw new AppException('COM-001', '이 카드를 실행하는 중이에요. 잠시 뒤 결과를 확인해 주세요');
+    if (claim.state === 'other-kind') throw new AppException('COM-001', '이미 실행한 다른 카드의 번호예요');
+    if (claim.state === 'done') {
+      await this.markChatCard(user, dto, claim.result);
+      return claim.result;
+    }
+    let result: AiActionCardExecuteResult;
+    try {
+      result = await this.dispatchActionCard(user, dto);
+    } catch (error) {
+      if (!(error instanceof AppException && error.code === 'INT-009')) await this.cardRuns.release(runKey, user.employeeId);
+      throw error;
+    }
+    // 업무는 이미 만들었으므로 기록이 실패해도 실행은 성공으로 돌려준다 (그동안은 RUNNING이 남아 상한 시간 뒤 다시 잡힌다)
+    await this.cardRuns.finish(runKey, user.employeeId, result).catch((error: unknown) => this.logger.warn(`실행한 카드를 기록하지 못함: ${error instanceof Error ? error.message : String(error)}`));
+    await this.markChatCard(user, dto, result);
+    return result;
+  }
+
+  /** 저장한 대화의 카드면 실행됨으로 남긴다 (이슈 #399). 실패해도 실행은 성공으로 돌려준다 */
+  private async markChatCard(user: AuthUser, dto: ExecuteAiActionCardDto, result: AiActionCardExecuteResult): Promise<void> {
+    if (!dto.chat) return;
+    await this.chatThreads.markCardDone(user, dto.chat, result.registered).catch((error: unknown) => {
+      this.logger.warn(`실행한 카드를 대화에 남기지 못함 (답 ${dto.chat?.messageId}): ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }
+
+  private async dispatchActionCard(user: AuthUser, dto: ExecuteAiActionCardDto): Promise<AiActionCardExecuteResult> {
     // 업무·일정·구매요청은 회의록 등록과 같은 규칙, 일정·업무 고치기는 일정·업무 화면과 같은 service, Notion은 상위 페이지 아래만, 심층 조사는 조사 화면과 같은 service, 나머지는 각 모듈의 확정 기능을 그대로 부른다
     const result = WORK_KINDS.includes(dto.kind)
       ? await this.cards.execute(user, dto)
@@ -232,12 +270,6 @@ export class AiAssistantService {
           : dto.kind === 'RESEARCH'
             ? await this.researchCards.execute(user, dto)
             : await this.opsCards.execute(user, dto);
-    // 저장한 대화의 카드면 실행됨으로 남긴다 (이슈 #399). 업무는 이미 만들었으므로 이것이 실패해도 실행은 성공으로 돌려준다
-    if (dto.chat) {
-      await this.chatThreads.markCardDone(user, dto.chat, result.registered).catch((error: unknown) => {
-        this.logger.warn(`실행한 카드를 대화에 남기지 못함 (답 ${dto.chat?.messageId}): ${error instanceof Error ? error.message : String(error)}`);
-      });
-    }
     return result;
   }
 
@@ -421,6 +453,8 @@ export class AiAssistantService {
           ...(drive ? this.driveTools.definitions() : []),
           ...(historySearch ? [historySearch.definition] : []),
         ];
+        // 이번 답에 알린 도구만 실행한다: 모델이 알리지 않은 이름(카드 도구·패널 전용 도구 등)을 적어도 돌리지 않는다 (이슈 #479)
+        const offered = new Set(tools.map((tool) => tool.name));
         const maxRounds = Math.max(
           MAX_TOOL_ROUNDS,
           webSearch && web ? MAX_WEB_TOOL_ROUNDS : 0,
@@ -482,6 +516,8 @@ export class AiAssistantService {
               let result: ToolRunResult;
               if (passed === 'timeout') {
                 result = { content: JSON.stringify({ 오류: AGENT_PAUSE_TIMEOUT, 안내: '브라우저·화면 도구를 더 부르지 말고 지금까지 본 내용으로 답해요' }), source: null };
+              } else if (!offered.has(toolCall.name)) {
+                result = { content: JSON.stringify({ 오류: `없는 도구예요: ${toolCall.name}` }), source: null };
               } else if (redirected && gate) {
                 result = { content: NOTE_SKIPPED_ACTION, source: null };
               } else if (web?.has(toolCall.name)) {
@@ -534,7 +570,8 @@ export class AiAssistantService {
               if (result.source && !dataSources.some((s) => s.id === result.source?.id)) dataSources.push(result.source);
               // 카드를 보여 줄 수 없는 화면에는 모델이 도구를 불러도 카드를 담지 않는다
               for (const card of input.actionCards ? (result.cards ?? []) : []) {
-                if (actionCards.length < MAX_ACTION_CARDS) actionCards.push({ key: `a${actionCards.length + 1}`, ...card });
+                // 카드 번호는 서버가 붙인다: 실행할 때 이 번호로 한 번만 받는다 (이슈 #479)
+                if (actionCards.length < MAX_ACTION_CARDS) actionCards.push({ key: `a${actionCards.length + 1}`, cardId: randomUUID(), ...card });
               }
             }
             // tool 메시지는 글만 받아서, 읽은 Drive 사진은 그 뒤 user 메시지로 붙인다

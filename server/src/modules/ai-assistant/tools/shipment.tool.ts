@@ -7,10 +7,8 @@ import {
   type ShipmentRequestSummary,
 } from '@fantasteel/shared';
 import type { ShipmentService } from '../../shipment/shipment.service';
-import { codeLabelList, limitRows, looseIncludes, optionalEnum, optionalString, seoulDateTimeText, TOOL_ROW_LIMIT, type AssistantTool } from './assistant-tool';
+import { codeLabelList, limitRows, looseIncludes, optionalEnum, optionalString, scanFiltered, seoulDateTimeText, TOOL_ROW_LIMIT, unscannedField, type AssistantTool } from './assistant-tool';
 
-/** 번호로 거를 때 한 번에 읽는 수 (API 상한 100) */
-const SCAN_SIZE = 100;
 const REQUEST_STATUSES = Object.values(SHIPMENT_REQUEST_STATUS) as ShipmentRequestStatus[];
 
 /** 출하요청 (GET /shipment-requests). 권한이 "출하요청 관리 또는 출고 확정" VIEW라 service가 확인한다 */
@@ -34,12 +32,11 @@ export function shipmentRequestTool(shipments: ShipmentService): AssistantTool {
       const shipmentRequestNo = optionalString(args, 'shipmentRequestNo', 30);
       const customerName = optionalString(args, 'customerName');
       const label = `출하요청${status ? ` · ${SHIPMENT_REQUEST_STATUS_LABEL[status]}` : ''}${shipmentRequestNo ? ` · ${shipmentRequestNo}` : ''}${customerName ? ` · ${customerName}` : ''}`;
-      // API는 고객사 id로만 거른다. 이름은 100건을 읽어 서버에서 거른다
+      // API는 고객사 id로만 거른다. 이름은 쪽을 읽어 서버에서 거른다
       if (customerName) {
-        const page = await shipments.list(user, { shipmentRequestStatus: status, shipmentRequestNo, page: 1, size: SCAN_SIZE });
-        const rows = page.items.filter((r) => looseIncludes([r.customerName], customerName));
-        const limited = limitRows(rows);
-        return { label, data: { '출하요청 수': rows.length, 출하요청: limited.rows.map(requestRow), '생략 줄 수': limited.omitted } };
+        const scan = await scanFiltered((page, size) => shipments.list(user, { shipmentRequestStatus: status, shipmentRequestNo, page, size }), (r) => looseIncludes([r.customerName], customerName));
+        const limited = limitRows(scan.rows);
+        return { label, data: { '출하요청 수': scan.rows.length, 출하요청: limited.rows.map(requestRow), '생략 줄 수': limited.omitted, ...unscannedField('출하요청', scan.unscanned) } };
       }
       const page = await shipments.list(user, { shipmentRequestStatus: status, shipmentRequestNo, page: 1, size: TOOL_ROW_LIMIT });
       return {
@@ -64,12 +61,18 @@ export function millSheetTool(shipments: ShipmentService): AssistantTool {
     },
     async run(args) {
       const keyword = optionalString(args, 'keyword');
-      const page = await shipments.listMillSheets({ page: 1, size: keyword ? SCAN_SIZE : TOOL_ROW_LIMIT });
-      const rows = keyword ? page.items.filter((m) => looseIncludes([m.millSheetNo, m.shipmentRequestNo, m.salesOrderNo], keyword)) : page.items;
-      const limited = limitRows(rows);
+      const scan = keyword
+        ? await scanFiltered((page, size) => shipments.listMillSheets({ page, size }), (m) => looseIncludes([m.millSheetNo, m.shipmentRequestNo, m.salesOrderNo], keyword))
+        : await shipments.listMillSheets({ page: 1, size: TOOL_ROW_LIMIT }).then((page) => ({ rows: page.items, total: page.total, unscanned: 0 }));
+      const limited = limitRows(scan.rows);
       return {
         label: `밀시트${keyword ? ` · ${keyword}` : ''}`,
-        data: { '밀시트 수': keyword ? rows.length : page.total, 밀시트: limited.rows.map(millSheetRow), '생략 줄 수': keyword ? limited.omitted : Math.max(0, page.total - limited.rows.length) },
+        data: {
+          '밀시트 수': keyword ? scan.rows.length : scan.total,
+          밀시트: limited.rows.map(millSheetRow),
+          '생략 줄 수': keyword ? limited.omitted : Math.max(0, scan.total - limited.rows.length),
+          ...unscannedField('밀시트', scan.unscanned),
+        },
       };
     },
   };

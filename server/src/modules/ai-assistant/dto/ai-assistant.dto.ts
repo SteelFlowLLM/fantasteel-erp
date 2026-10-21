@@ -313,6 +313,11 @@ export class ExecuteAiActionCardDto extends UpdateMeetingCandidateDto {
   @Type(() => AiChatCardRefDto)
   chat?: AiChatCardRefDto;
 
+  /** 서버가 카드마다 붙인 번호 (이슈 #479). 같은 번호는 한 번만 실행한다. 없으면 chat 자리로 잡는다 */
+  @IsOptional()
+  @IsUUID('4', { message: '카드 번호가 올바르지 않아요' })
+  cardId?: string;
+
   /** 철강맨 부르기로 말로 승인했으면 true (이슈 #457). 작업 로그 사유에 표시가 남는다 */
   @IsOptional()
   @IsBoolean()

@@ -1,5 +1,6 @@
 // 심층 조사 API(이슈 #378)를 실제 앱과 DB(fs_collab)로 확인한다. LLM·웹 검색·페이지 읽기는 가짜로 바꾸고 네트워크는 쓰지 않는다.
 // 일꾼은 자동으로 돌지 않게 끄고(AI_RESEARCH_WORKER=off) 시험이 runner.processNext()를 직접 부른다.
+import { randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import { ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -967,7 +968,7 @@ describe('심층 조사 — 철강맨AI에서 이어 가기 (이슈 #408)', () =
   });
 
   it('철강맨AI의 심층 조사 카드를 실행하면 같은 규칙으로 조사를 만든다 (질문이 짧으면 ACT-001, 진행 중 3개면 RES-006)', async () => {
-    const executed = await call<AiActionCardExecuteResult>('POST', '/ai-assistant/action-cards/execute', ownerCookie, { kind: 'RESEARCH', question: '  카드로 만든 조사  ', seed });
+    const executed = await call<AiActionCardExecuteResult>('POST', '/ai-assistant/action-cards/execute', ownerCookie, { kind: 'RESEARCH', cardId: randomUUID(), question: '  카드로 만든 조사  ', seed });
     expect(executed.status).toBe(201);
     expect(executed.body.data).toMatchObject({ kind: 'RESEARCH', registered: { type: 'research' } });
     const run = await getRun(executed.body.data.registered.id);
@@ -975,12 +976,12 @@ describe('심층 조사 — 철강맨AI에서 이어 가기 (이슈 #408)', () =
     // 남의 조사로는 보이지 않는다
     expect((await call('GET', `/ai-research/runs/${run.id}`, otherCookie)).body.error?.code).toBe('RES-001');
 
-    const short = await call('POST', '/ai-assistant/action-cards/execute', ownerCookie, { kind: 'RESEARCH', question: ' x ' });
+    const short = await call('POST', '/ai-assistant/action-cards/execute', ownerCookie, { kind: 'RESEARCH', cardId: randomUUID(), question: ' x ' });
     expect(short.status).toBe(400);
     expect(short.body.error?.code).toBe('ACT-001');
 
-    for (let i = 0; i < 2; i += 1) expect((await call('POST', '/ai-assistant/action-cards/execute', ownerCookie, { kind: 'RESEARCH', question: `카드 조사 ${i}` })).status).toBe(201);
-    const full = await call('POST', '/ai-assistant/action-cards/execute', ownerCookie, { kind: 'RESEARCH', question: '네 번째 카드 조사' });
+    for (let i = 0; i < 2; i += 1) expect((await call('POST', '/ai-assistant/action-cards/execute', ownerCookie, { kind: 'RESEARCH', cardId: randomUUID(), question: `카드 조사 ${i}` })).status).toBe(201);
+    const full = await call('POST', '/ai-assistant/action-cards/execute', ownerCookie, { kind: 'RESEARCH', cardId: randomUUID(), question: '네 번째 카드 조사' });
     expect(full.body.error?.code).toBe('RES-006');
   });
 });
