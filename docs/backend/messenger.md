@@ -166,7 +166,7 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 - 이름 바꾸기: 그룹방만(1:1은 상대 이름, 업무방은 수주로 정해짐 → COM-004). 앞뒤 공백을 지우고 비우면 null(멤버 이름으로 보임), 100자까지. 끝나면 멤버에게 `room:updated`.
 
 **편의** (문서에 없는 기능, ERD 변경 없음)
-- 메시지별 안 읽은 사람 수: 응답의 `unreadMemberCount` = 보낸 사람을 뺀 멤버 중 `last_read_message_id < 메시지 id`인 수. 목록은 멤버 읽음 위치를 한 번 읽어 계산하고, 새 메시지는 (멤버 수 − 1). 누가 읽으면 다른 멤버에게 `member:read { chatRoomId, employeeId, lastReadMessageId }`를 보내 다시 읽게 한다.
+- 메시지별 안 읽은 사람 수: 응답의 `unreadMemberCount` = 보낸 사람을 뺀 **재직** 멤버 중 `last_read_message_id < 메시지 id`인 수. 퇴사자(사용 안 함 사원)는 읽을 수 없어 세지 않는다(2026-10-22, 이슈 #496). 목록은 재직 멤버 읽음 위치를 한 번 읽어 계산하고, 새 메시지는 (재직 멤버 수 − 1). 누가 읽으면 다른 멤버에게 `member:read { chatRoomId, employeeId, lastReadMessageId }`를 보내 다시 읽게 한다.
 - 접속 상태: 사원별 열린 소켓 수를 서버 메모리(`messenger.presence.ts`)에 센다. 탭·기기가 여러 개면 첫 연결에서 접속, 마지막이 끊길 때 나감. 서버를 여러 대로 늘리면 공유 저장소(Redis 등)가 필요하다. 사내 접속 상태는 방 멤버로 좁히지 않고 모든 사원에게 보인다.
 - 입력 중: 저장하지 않는다. 화면은 방마다 3초(`TYPING_SEND_INTERVAL_MS`, 가정값)에 한 번만 보내고, 받은 쪽은 6초(`TYPING_SHOW_MS`, 가정값) 뒤 또는 그 사람의 메시지가 오면 지운다. 서버도 소켓·방마다 1.5초(그 절반)보다 자주 오면 DB를 읽지 않고 버린다(이슈 #488).
 - 접속 처리 중(토큰·사원 확인, join) 소켓이 끊기면 접속 수에 세지 않는다(세면 끊김 처리가 이미 지나가 온라인으로 남는다). 끊김은 소켓마다 한 번만 센다.
