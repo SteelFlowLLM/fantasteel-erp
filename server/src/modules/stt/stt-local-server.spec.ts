@@ -21,6 +21,7 @@ describe('parseLaunchctlPrint', () => {
     expect(parseLaunchctlPrint(RUNNING)).toEqual({ running: true, pid: 4242 });
     expect(parseLaunchctlPrint(STOPPED)).toEqual({ running: false, pid: null });
     expect(parseLaunchctlPrint('')).toEqual({ running: false, pid: null });
+    expect(parseLaunchctlPrint('\tstate = not running\n\tpid = 4242\n')).toEqual({ running: false, pid: null });
   });
 });
 

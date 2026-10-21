@@ -22,7 +22,9 @@ const defaultRun: RunCommand = (file, args) => execFileAsync(file, args, { timeo
 export function parseLaunchctlPrint(output: string): { running: boolean; pid: number | null } {
   const state = /^\s*state = (\S+)/m.exec(output)?.[1];
   const pid = /^\s*pid = (\d+)/m.exec(output)?.[1];
-  return { running: state === 'running', pid: pid ? Number(pid) : null };
+  const running = state === 'running';
+  // 끄는 중에는 state가 바뀐 뒤에도 pid 줄이 잠시 남는다
+  return { running, pid: running && pid ? Number(pid) : null };
 }
 
 /**

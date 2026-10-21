@@ -10,7 +10,12 @@
 #   tools/voice-sidecar/start.sh --status              켜졌는지, ERP에 넣을 주소·키 위치
 set -eu
 
-ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+# 자동 켜기는 이 스크립트와 server.py를 APP_DIR에 복사해 그쪽을 돌린다:
+# launchd가 띄운 셸은 macOS 개인정보 보호 때문에 ~/Documents(저장소)와 다른 앱 폴더(~/Library/Containers)를 읽지 못한다
+APP_DIR="$HOME/Library/Application Support/fantasteel-voice"
+# shellcheck disable=SC1091 # 자동 켜기 때 --install이 만든 설정 (HF_TOKEN·WHISPER_MODEL)
+if [ -f "$SCRIPT_DIR/env" ]; then . "$SCRIPT_DIR/env"; fi
 PYTHON=${VOICE_PYTHON:-$HOME/voice-env/bin/python}
 WHISPER_PORT=${WHISPER_PORT:-8000}
 SIDECAR_PORT=${SIDECAR_PORT:-8001}
@@ -21,6 +26,14 @@ LOG="$HOME/Library/Logs/fantasteel-voice.log"
 KEY_FILE=${SIDECAR_API_KEY_FILE:-$HOME/.config/fantasteel-voice/api-key}
 DOMAIN="gui/$(id -u)"
 
+# 모델 파일: WHISPER_MODEL → ~/models → Spokenly 앱이 받아 둔 파일 순서로 찾는다
+find_model() {
+  if [ -n "${WHISPER_MODEL:-}" ]; then echo "$WHISPER_MODEL"; return; fi
+  for f in "$HOME"/models/ggml-large-v3-turbo*.bin "$HOME"/models/ggml-*.bin "$APP_DIR"/models/*ggml*.bin \
+    "$HOME/Library/Containers/app.spokenly/Data/Library/Application Support/Spokenly/Models/whisper-ggml-large-v3-turbo-q5_0.bin"; do
+    if [ -f "$f" ]; then echo "$f"; return; fi
+  done
+}
 print_addresses() {
   echo "ERP 음성 인식 카드에 넣을 주소 (방식: 내 음성 서버)"
   LAN=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)
@@ -37,8 +50,37 @@ case "${1:-}" in
   --install)
     MODE_ARG=""
     [ "${2:-}" = "--local" ] && MODE_ARG="<string>--local</string>"
-    mkdir -p "$(dirname "$PLIST")" "$(dirname "$LOG")"
-    # launchd는 로그인 셸의 PATH를 모른다: whisper-server·ffmpeg(Homebrew)와 lsof·ipconfig(/usr/sbin)를 찾게 적어 둔다
+    mkdir -p "$(dirname "$PLIST")" "$(dirname "$LOG")" "$APP_DIR/models"
+    if [ "$SCRIPT_DIR" != "$APP_DIR" ]; then
+      cp "$SCRIPT_DIR/start.sh" "$SCRIPT_DIR/server.py" "$APP_DIR/"
+    fi
+    MODEL=$(find_model)
+    if [ -z "$MODEL" ] || [ ! -f "$MODEL" ]; then
+      echo "whisper 모델 파일(ggml-*.bin)을 찾지 못했어요. ~/models에 두거나 WHISPER_MODEL=경로 로 알려 주세요" >&2
+      exit 1
+    fi
+    case "$MODEL" in
+      */Library/Containers/*)
+        # 다른 앱(Spokenly) 폴더는 자동 켜기에서 읽을 수 없어 한 번 복사해 둔다
+        echo "모델 파일을 복사해요 (한 번만): $(basename "$MODEL")"
+        cp "$MODEL" "$APP_DIR/models/"
+        MODEL="$APP_DIR/models/$(basename "$MODEL")"
+        ;;
+    esac
+    HF=${HF_TOKEN:-}
+    if [ -z "$HF" ] && [ -f "$SCRIPT_DIR/../../server/.env" ]; then
+      HF=$(sed -n 's/^HF_TOKEN=//p' "$SCRIPT_DIR/../../server/.env" | head -1 | tr -d "\"'")
+    fi
+    # 화자 분리용 토큰이 들어가므로 본인만 읽게 한다
+    umask 077
+    {
+      echo "WHISPER_MODEL='$MODEL'"
+      if [ -n "$HF" ]; then echo "export HF_TOKEN='$HF'"; fi
+    } > "$APP_DIR/env"
+    umask 022
+    if [ -z "$HF" ]; then echo "HF_TOKEN을 찾지 못했어요. 받아쓰기는 되지만 화자 분리는 안 돼요 (server/.env에 HF_TOKEN=…)"; fi
+    # launchd는 로그인 셸의 PATH를 모른다: whisper-server·ffmpeg(Homebrew)와 lsof·ipconfig(/usr/sbin)를 찾게 적어 둔다.
+    # 작업 폴더도 정한다: 기본값 /는 쓸 수 없어 whisper-server --convert가 변환 파일을 못 만들고 500을 낸다
     cat > "$PLIST" <<PLIST_END
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -46,9 +88,10 @@ case "${1:-}" in
 <dict>
   <key>Label</key><string>$LABEL</string>
   <key>ProgramArguments</key>
-  <array><string>/bin/sh</string><string>$ROOT/tools/voice-sidecar/start.sh</string>$MODE_ARG</array>
+  <array><string>/bin/sh</string><string>$APP_DIR/start.sh</string>$MODE_ARG</array>
   <key>EnvironmentVariables</key>
   <dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
+  <key>WorkingDirectory</key><string>$APP_DIR</string>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>10</integer>
@@ -58,16 +101,20 @@ case "${1:-}" in
 </plist>
 PLIST_END
     launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
+    # 내리는 중에 바로 올리면 bootstrap이 'Input/output error'로 실패한다: 다 내려갈 때까지 기다린다
+    i=0
+    while launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1 && [ $i -lt 20 ]; do sleep 0.5; i=$((i + 1)); done
     launchctl bootstrap "$DOMAIN" "$PLIST"
     echo "등록했어요. 이제 로그인하면 음성 서버가 저절로 켜져요 (로그: $LOG)"
+    echo "코드를 새로 받았으면 --install을 다시 하면 새 코드로 바뀌어요"
     echo "API 키: ${KEY_FILE} (처음 켜질 때 만들어져요. 보기: cat \"$KEY_FILE\")"
     print_addresses
     exit 0
     ;;
   --uninstall)
     launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
-    rm -f "$PLIST"
-    echo "음성 서버를 끄고 자동 켜기를 지웠어요"
+    rm -f "$PLIST" "$APP_DIR/start.sh" "$APP_DIR/server.py" "$APP_DIR/env"
+    echo "음성 서버를 끄고 자동 켜기를 지웠어요 (복사한 모델 파일은 $APP_DIR/models에 남겨 둬요)"
     exit 0
     ;;
   --status)
@@ -84,14 +131,6 @@ PLIST_END
   *) echo "모르는 옵션이에요: $1 (--local, --install, --uninstall, --status)" >&2; exit 2 ;;
 esac
 
-# 모델 파일: WHISPER_MODEL → ~/models → Spokenly 앱이 받아 둔 파일 순서로 찾는다
-find_model() {
-  if [ -n "${WHISPER_MODEL:-}" ]; then echo "$WHISPER_MODEL"; return; fi
-  for f in "$HOME"/models/ggml-large-v3-turbo*.bin "$HOME"/models/ggml-*.bin \
-    "$HOME/Library/Containers/app.spokenly/Data/Library/Application Support/Spokenly/Models/whisper-ggml-large-v3-turbo-q5_0.bin"; do
-    if [ -f "$f" ]; then echo "$f"; return; fi
-  done
-}
 MODEL=$(find_model)
 if [ -z "$MODEL" ] || [ ! -f "$MODEL" ]; then
   echo "whisper 모델 파일(ggml-*.bin)을 찾지 못했어요. ~/models에 두거나 WHISPER_MODEL=경로 로 알려 주세요" >&2
@@ -121,4 +160,4 @@ if [ "$SIDECAR_HOST" != "127.0.0.1" ]; then
 fi
 
 SIDECAR_HOST=$SIDECAR_HOST SIDECAR_PORT=$SIDECAR_PORT WHISPER_URL="http://127.0.0.1:$WHISPER_PORT/v1/audio/transcriptions" \
-  "$PYTHON" "$ROOT/tools/voice-sidecar/server.py"
+  "$PYTHON" "$SCRIPT_DIR/server.py"
