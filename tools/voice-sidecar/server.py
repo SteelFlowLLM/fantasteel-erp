@@ -519,8 +519,13 @@ def main() -> None:
     if API_KEY is None:
         log.info("API 키 없이 열었어요 (이 컴퓨터에서만 쓸 수 있어요)")
     else:
-        # 이 컴퓨터의 터미널에만 보인다. ERP의 음성 인식 카드 API 키 칸에 넣는다
-        print(f"\nERP에 넣을 API 키: {API_KEY}\n(저장 위치: {KEY_FILE if not os.environ.get('SIDECAR_API_KEY') else 'SIDECAR_API_KEY'})\n", file=sys.stderr, flush=True)
+        where = KEY_FILE if not os.environ.get("SIDECAR_API_KEY") else "SIDECAR_API_KEY"
+        if sys.stderr.isatty():
+            # 이 컴퓨터의 터미널에만 보인다. ERP의 음성 인식 카드 API 키 칸에 넣는다
+            print(f"\nERP에 넣을 API 키: {API_KEY}\n(저장 위치: {where})\n", file=sys.stderr, flush=True)
+        else:
+            # 자동 켜기(launchd)는 로그 파일로 나가므로 키를 남기지 않는다
+            log.info("API 키를 요구해요 (키: %s)", where)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

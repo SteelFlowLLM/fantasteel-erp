@@ -4,17 +4,85 @@
 #   tools/voice-sidecar/start.sh            다른 PC(같은 망·Tailscale)에서도 붙게 연다 (API 키 필요)
 #   tools/voice-sidecar/start.sh --local    이 Mac에서만 쓴다 (ERP 서버가 이 Mac일 때, 키 없음)
 # 끄기: 이 터미널에서 Ctrl+C (whisper.cpp도 같이 꺼진다)
+# 로그인 때 저절로 켜기 (macOS LaunchAgent, 멈추면 다시 켜진다. 로그는 ~/Library/Logs/fantasteel-voice.log)
+#   tools/voice-sidecar/start.sh --install [--local]   등록하고 바로 켠다
+#   tools/voice-sidecar/start.sh --uninstall           끄고 등록을 지운다
+#   tools/voice-sidecar/start.sh --status              켜졌는지, ERP에 넣을 주소·키 위치
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 PYTHON=${VOICE_PYTHON:-$HOME/voice-env/bin/python}
 WHISPER_PORT=${WHISPER_PORT:-8000}
 SIDECAR_PORT=${SIDECAR_PORT:-8001}
-if [ "${1:-}" = "--local" ]; then
-  SIDECAR_HOST=${SIDECAR_HOST:-127.0.0.1}
-else
-  SIDECAR_HOST=${SIDECAR_HOST:-0.0.0.0}
-fi
+# ERP 서버(server/src/modules/stt/stt-local-server.service.ts)가 같은 이름·경로로 켜고 끈다
+LABEL=com.fantasteel.voice
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+LOG="$HOME/Library/Logs/fantasteel-voice.log"
+KEY_FILE=${SIDECAR_API_KEY_FILE:-$HOME/.config/fantasteel-voice/api-key}
+DOMAIN="gui/$(id -u)"
+
+print_addresses() {
+  echo "ERP 음성 인식 카드에 넣을 주소 (방식: 내 음성 서버)"
+  LAN=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)
+  [ -n "$LAN" ] && echo "  같은 망:   http://$LAN:$SIDECAR_PORT/v1"
+  if command -v tailscale >/dev/null; then
+    TS=$(tailscale ip -4 2>/dev/null | head -1 || true)
+    [ -n "$TS" ] && echo "  Tailscale: http://$TS:$SIDECAR_PORT/v1"
+  fi
+  echo "  이 Mac:    http://127.0.0.1:$SIDECAR_PORT/v1"
+  return 0
+}
+
+case "${1:-}" in
+  --install)
+    MODE_ARG=""
+    [ "${2:-}" = "--local" ] && MODE_ARG="<string>--local</string>"
+    mkdir -p "$(dirname "$PLIST")" "$(dirname "$LOG")"
+    # launchd는 로그인 셸의 PATH를 모른다: whisper-server·ffmpeg(Homebrew)와 lsof·ipconfig(/usr/sbin)를 찾게 적어 둔다
+    cat > "$PLIST" <<PLIST_END
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$LABEL</string>
+  <key>ProgramArguments</key>
+  <array><string>/bin/sh</string><string>$ROOT/tools/voice-sidecar/start.sh</string>$MODE_ARG</array>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>$LOG</string>
+  <key>StandardErrorPath</key><string>$LOG</string>
+</dict>
+</plist>
+PLIST_END
+    launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
+    launchctl bootstrap "$DOMAIN" "$PLIST"
+    echo "등록했어요. 이제 로그인하면 음성 서버가 저절로 켜져요 (로그: $LOG)"
+    echo "API 키: ${KEY_FILE} (처음 켜질 때 만들어져요. 보기: cat \"$KEY_FILE\")"
+    print_addresses
+    exit 0
+    ;;
+  --uninstall)
+    launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
+    rm -f "$PLIST"
+    echo "음성 서버를 끄고 자동 켜기를 지웠어요"
+    exit 0
+    ;;
+  --status)
+    if [ ! -f "$PLIST" ]; then echo "자동 켜기: 등록 안 됨 (tools/voice-sidecar/start.sh --install)"; else echo "자동 켜기: 등록됨 ($PLIST)"; fi
+    if launchctl print "$DOMAIN/$LABEL" 2>/dev/null | grep -q "state = running"; then echo "상태: 켜짐"; else echo "상태: 꺼짐"; fi
+    if curl -s -m 2 "http://127.0.0.1:$SIDECAR_PORT/health" >/dev/null 2>&1; then echo "응답: 됨 (127.0.0.1:$SIDECAR_PORT)"; else echo "응답: 없음"; fi
+    echo "API 키 파일: $KEY_FILE"
+    echo "로그: $LOG"
+    print_addresses
+    exit 0
+    ;;
+  --local) SIDECAR_HOST=${SIDECAR_HOST:-127.0.0.1} ;;
+  "") SIDECAR_HOST=${SIDECAR_HOST:-0.0.0.0} ;;
+  *) echo "모르는 옵션이에요: $1 (--local, --install, --uninstall, --status)" >&2; exit 2 ;;
+esac
 
 # 모델 파일: WHISPER_MODEL → ~/models → Spokenly 앱이 받아 둔 파일 순서로 찾는다
 find_model() {
@@ -49,14 +117,7 @@ trap '[ -n "$WHISPER_PID" ] && kill "$WHISPER_PID" 2>/dev/null' EXIT INT TERM
 
 if [ "$SIDECAR_HOST" != "127.0.0.1" ]; then
   echo ""
-  echo "ERP 음성 인식 카드에 넣을 주소 (방식: 내 음성 서버)"
-  LAN=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)
-  [ -n "$LAN" ] && echo "  같은 망:   http://$LAN:$SIDECAR_PORT/v1"
-  if command -v tailscale >/dev/null; then
-    TS=$(tailscale ip -4 2>/dev/null | head -1 || true)
-    [ -n "$TS" ] && echo "  Tailscale: http://$TS:$SIDECAR_PORT/v1"
-  fi
-  echo "  이 Mac:    http://127.0.0.1:$SIDECAR_PORT/v1"
+  print_addresses
 fi
 
 SIDECAR_HOST=$SIDECAR_HOST SIDECAR_PORT=$SIDECAR_PORT WHISPER_URL="http://127.0.0.1:$WHISPER_PORT/v1/audio/transcriptions" \

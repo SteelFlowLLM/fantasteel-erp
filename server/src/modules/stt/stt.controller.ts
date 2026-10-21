@@ -1,8 +1,9 @@
 import { Body, Controller, Get, HttpCode, Post, Put, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { PERMISSION, type SttConnectionView, type SttSettingsView, type SttTranscribeTestView } from '@fantasteel/shared';
+import { PERMISSION, type SttConnectionView, type SttLocalServerView, type SttSettingsView, type SttTranscribeTestView } from '@fantasteel/shared';
 import { RequirePermission } from '../../common/auth/auth.decorators';
 import { TestSttConnectionDto, UpdateSttSettingsDto } from './dto/stt-settings.dto';
+import { SttLocalServerService } from './stt-local-server.service';
 import { SttService, type UploadedAudio } from './stt.service';
 
 const AUDIO_TEST_MAX_BYTES = 100 * 1024 * 1024;
@@ -13,7 +14,10 @@ const AUDIO_TEST_MAX_BYTES = 100 * 1024 * 1024;
  */
 @Controller()
 export class SttController {
-  constructor(private readonly service: SttService) {}
+  constructor(
+    private readonly service: SttService,
+    private readonly localServer: SttLocalServerService,
+  ) {}
 
   @Get('stt/settings')
   @RequirePermission(PERMISSION.ORG_MANAGE, 'VIEW')
@@ -41,5 +45,27 @@ export class SttController {
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: AUDIO_TEST_MAX_BYTES, files: 1 } }))
   testTranscribe(@UploadedFile() file: UploadedAudio | undefined): Promise<SttTranscribeTestView> {
     return this.service.testTranscribe(file);
+  }
+
+  /** ERP 서버와 같은 Mac의 음성 서버(LaunchAgent) 상태 (이슈 #450). macOS가 아니면 supported: false */
+  @Get('stt/local-server')
+  @RequirePermission(PERMISSION.ORG_MANAGE, 'VIEW')
+  getLocalServer(): Promise<SttLocalServerView> {
+    return this.localServer.status();
+  }
+
+  @Post('stt/local-server/start')
+  @HttpCode(200)
+  @RequirePermission(PERMISSION.ORG_MANAGE, 'USE')
+  startLocalServer(): Promise<SttLocalServerView> {
+    return this.localServer.start();
+  }
+
+  /** 지금만 끈다. 다음 로그인 때 다시 켜진다 */
+  @Post('stt/local-server/stop')
+  @HttpCode(200)
+  @RequirePermission(PERMISSION.ORG_MANAGE, 'USE')
+  stopLocalServer(): Promise<SttLocalServerView> {
+    return this.localServer.stop();
   }
 }
