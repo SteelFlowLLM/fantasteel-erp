@@ -62,6 +62,25 @@ describe('VoiceSegmenter', () => {
   });
 });
 
+describe('말 시작 민감도 (이슈 #494)', () => {
+  it('작은 목소리(크기 0.01)는 보통이면 놓치고, 높음이면 잡는다. 듣는 중에 바꿔도 된다', () => {
+    const normal = new VoiceSegmenter({ sampleRate: RATE });
+    feed(normal, 0.001, 1000);
+    expect(normal.startThreshold).toBeCloseTo(0.015, 5);
+    expect(feed(normal, 0.01, 1500)).toEqual([]);
+    expect(normal.speaking).toBe(false);
+    expect(normal.lastRms).toBeCloseTo(0.01, 5);
+
+    // 조용한 곳에서 켠 뒤 민감도를 높이면 같은 목소리를 잡는다
+    const raised = new VoiceSegmenter({ sampleRate: RATE });
+    feed(raised, 0.001, 1000);
+    raised.minStartRms = 0.007;
+    feed(raised, 0.01, 1500);
+    expect(raised.speaking).toBe(true);
+    expect(feed(raised, 0.001, 1000)).toHaveLength(1);
+  });
+});
+
 describe('WAV', () => {
   it('48kHz를 16kHz로 줄인다 (묶음 평균)', () => {
     const out = downsample(Float32Array.from([0.3, 0.3, 0.3, 0.6, 0.6, 0.6]), 48_000);

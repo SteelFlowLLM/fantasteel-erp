@@ -14,13 +14,16 @@ export interface VoiceSegmenterOptions {
   minSpeechMs?: number;
   /** 말 시작을 알아채기 전의 소리도 조금 붙인다: 첫 글자가 잘리지 않게 */
   preRollMs?: number;
+  /** 말 시작으로 보는 최소 소리 크기 (민감도, 이슈 #494). 없으면 MIN_START_RMS */
+  minStartRms?: number;
 }
 
 /** 시끄러운 공장 사무실에서도 배경 소리를 말로 잡지 않게 배경 크기의 몇 배를 넘어야 말로 본다 (가정값) */
 const START_RATIO = 3;
 const KEEP_RATIO = 2;
-const MIN_START_RMS = 0.015;
-const MIN_KEEP_RMS = 0.008;
+export const MIN_START_RMS = 0.015;
+/** 말이 이어지는 것으로 보는 최소 크기는 시작 기준의 이 배수 (0.015 → 0.008) */
+const KEEP_OF_START = 0.53;
 /** 배경 크기를 따라가는 빠르기. 켠 직후에는 배경을 빨리 배운다 (그동안은 말로 보지 않는다) */
 const FLOOR_ALPHA = 0.05;
 const WARM_UP_ALPHA = 0.2;
@@ -52,6 +55,10 @@ export class VoiceSegmenter {
   private voicedSamples = 0;
   private rmsSum = 0;
   private frames = 0;
+  /** 말 시작으로 보는 최소 소리 크기. 듣는 중에도 바꿀 수 있다(민감도) */
+  minStartRms: number;
+  /** 마지막으로 넣은 소리 조각의 크기 (화면의 소리 크기 막대) */
+  lastRms = 0;
 
   constructor(options: VoiceSegmenterOptions) {
     this.maxSamples = Math.round(((options.maxMs ?? STT_WAKE_CLIP_LIMITS.maxSeconds * 1000) * options.sampleRate) / 1000);
@@ -59,6 +66,12 @@ export class VoiceSegmenter {
     this.minSpeechSamples = Math.round(((options.minSpeechMs ?? 300) * options.sampleRate) / 1000);
     this.preRollSamples = Math.round(((options.preRollMs ?? 300) * options.sampleRate) / 1000);
     this.warmUpSamples = Math.round((WARM_UP_MS * options.sampleRate) / 1000);
+    this.minStartRms = options.minStartRms ?? MIN_START_RMS;
+  }
+
+  /** 지금 말 시작으로 보는 소리 크기: 최소 크기와 배경 크기의 배수 중 큰 것 */
+  get startThreshold(): number {
+    return Math.max(this.minStartRms, this.floor * START_RATIO);
   }
 
   get speaking(): boolean {
@@ -67,10 +80,11 @@ export class VoiceSegmenter {
 
   feed(frame: Float32Array): Float32Array | null {
     const rms = rmsOf(frame);
+    this.lastRms = rms;
     if (!this.speaking) {
       const warmingUp = this.heard < this.warmUpSamples;
       this.heard += frame.length;
-      if (!warmingUp && rms >= Math.max(MIN_START_RMS, this.floor * START_RATIO)) {
+      if (!warmingUp && rms >= this.startThreshold) {
         this.speech = [...this.preRoll, frame];
         this.speechLength = this.preRollLength + frame.length;
         this.preRoll = [];
@@ -91,7 +105,7 @@ export class VoiceSegmenter {
     this.speechLength += frame.length;
     this.rmsSum += rms;
     this.frames += 1;
-    const quiet = rms < Math.max(MIN_KEEP_RMS, this.floor * KEEP_RATIO);
+    const quiet = rms < Math.max(this.minStartRms * KEEP_OF_START, this.floor * KEEP_RATIO);
     this.silentSamples = quiet ? this.silentSamples + frame.length : 0;
     if (!quiet) this.voicedSamples += frame.length;
     const full = this.speechLength >= this.maxSamples;

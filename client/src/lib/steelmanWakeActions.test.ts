@@ -154,3 +154,35 @@ describe('회사 설정 (AI 연결 화면)', () => {
     expect(wake().status).toBe('off');
   });
 });
+
+describe('띠에 보이는 단계 (이슈 #494)', () => {
+  beforeEach(() => useSteelmanWakeStore.setState({ activity: null, transcribing: false, approval: null, screenConfirm: null, called: null }));
+
+  it('부르는 말이 없는 글은 들은 말로 잠깐 보이고(넘김), 부르는 말이면 불렀어요와 대답을 보인다', () => {
+    handleText('점심 뭐 먹지', false);
+    expect(wake().activity).toMatchObject({ kind: 'heard', text: '점심 뭐 먹지', matched: false });
+    expect(wake().called).toBeNull();
+    handleText('철강맨', false);
+    expect(wake().activity).toMatchObject({ kind: 'heard', matched: true });
+    expect(wake().called?.reply).toBeTruthy();
+  });
+
+  it('질문을 패널로 보내면 물어보는 중을 보인다', () => {
+    handleText('철강맨, 오늘 내 일정 알려줘', false);
+    expect(wake().activity).toMatchObject({ kind: 'asking', question: '오늘 내 일정 알려줘' });
+    expect(wake().panelRequest).toMatchObject({ kind: 'ask', question: '오늘 내 일정 알려줘' });
+  });
+
+  it('받아쓰는 동안 transcribing이고, 끝나거나 실패하면 내린다', async () => {
+    let finish: (value: { text: string; error: null }) => void = () => undefined;
+    transcribeWakeClip.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
+    const done = transcribe(new Blob(), () => false, () => false);
+    expect(wake().transcribing).toBe(true);
+    finish({ text: '', error: null });
+    await done;
+    expect(wake().transcribing).toBe(false);
+    transcribeWakeClip.mockRejectedValueOnce(new Error('끊김'));
+    await transcribe(new Blob(), () => false, () => false);
+    expect(wake().transcribing).toBe(false);
+  });
+});

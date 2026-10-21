@@ -36,6 +36,7 @@ function ask(question: string): void {
   useShellStore.getState().showAiPanel();
   const chat = useAiChatStore.getState();
   if (!chat.pendingId) {
+    store().showActivity({ kind: 'asking', question });
     store().requestPanel({ kind: 'ask', question });
     return;
   }
@@ -183,7 +184,12 @@ export function handleText(text: string, screenControlAvailable: boolean): void 
   }
   const wake = matchWakeWord(text);
   const waiting = called !== null && now <= called.until;
-  if (!wake.called && !(waiting && !isLikelyHallucination(text))) return;
+  if (!wake.called && !(waiting && !isLikelyHallucination(text))) {
+    // 무엇을 들었는지 띠에 몇 초만 보인다 (이슈 #494). 서버·저장소에는 남기지 않는다
+    store().showActivity({ kind: 'heard', text, matched: false });
+    return;
+  }
+  store().showActivity({ kind: 'heard', text, matched: true });
   const command = parseVoiceCommand(wake.called ? wake.rest : text);
   if (command.kind === 'empty') {
     replyTurn += 1;
@@ -197,8 +203,10 @@ export function handleText(text: string, screenControlAvailable: boolean): void 
 
 /** 조각 하나를 받아쓴다. 음성 서버에 닿지 않으면 스위치 옆에 이유를 보인다 */
 export async function transcribe(wav: Blob, stopped: () => boolean, screenControlAvailable: () => boolean): Promise<void> {
+  store().setTranscribing(true);
   try {
     const result = await sttApi.transcribeWakeClip(wav);
+    store().setTranscribing(false);
     if (stopped()) return;
     if (result.error) {
       store().setProblem(`음성 서버가 꺼져 있어요 · ${result.error}`);
@@ -207,6 +215,7 @@ export async function transcribe(wav: Blob, stopped: () => boolean, screenContro
     if (store().problem) store().setProblem(null);
     if (result.text) handleText(result.text, screenControlAvailable());
   } catch (error) {
+    store().setTranscribing(false);
     if (stopped()) return;
     if (errorCodeOf(error) === 'VOC-011') store().setCompany({ wake: false, voiceApproval: false });
     else if (errorCodeOf(error) === 'VOC-009') store().notify(errorMessageOf(error));
