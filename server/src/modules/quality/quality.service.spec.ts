@@ -2,6 +2,7 @@ import type { AuthUser } from '@fantasteel/shared';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { NumberingRepository } from '../../common/numbering/numbering.repository';
 import { NumberingService } from '../../common/numbering/numbering.service';
+import { lockShipmentRequest } from '../../generated/prisma/sql';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { EligibilitySyncResult, InventoryService } from '../inventory/inventory.service';
 import { QualityRepository } from './quality.repository';
@@ -818,6 +819,45 @@ describe('측정값 보완·오타 수정 (REQ-QC-003)', () => {
       inspectionResult: 'PENDING',
       lockedMillSheetNos: [expect.stringContaining('QU-MS-1')],
     });
+  });
+
+  it('출고 확정이 밀시트를 발행하는 중이면 측정값 수정은 기다렸다가 발행된 밀시트를 보고 막는다 (#487)', async () => {
+    const base = await prisma.lot.findUniqueOrThrow({ where: { id: lots.coilTypo } });
+    const raceCoil = await prisma.lot.create({ data: { lotNo: 'QU-C-RACE', lotType: 'COIL', itemId: base.itemId, productionResultId: base.productionResultId, producedDate: base.producedDate } });
+    lotIds.push(raceCoil.id);
+    const registered = await register(raceCoil.id, valuesWithoutCharpy());
+    const request = await prisma.shipmentRequest.create({ data: { shipmentRequestNo: 'QU-DR-RACE', customerId: (await prisma.customer.findFirstOrThrow()).id } });
+    const requestItem = await prisma.shipmentRequestItem.create({ data: { shipmentRequestId: request.id, salesOrderItemId: shipping.salesOrderItemId, requestQty: 1 } });
+    const allocation = await prisma.allocation.create({ data: { lotId: raceCoil.id, allocationPurpose: 'SHIPMENT', shipmentRequestItemId: requestItem.id, allocationStatus: 'CONFIRMED' } });
+
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let issuing = false;
+    // 출고 확정과 같은 순서: 출하요청을 잠그고 → 배정 소진·LOT 출고·밀시트 발행 → (멈춤) → 커밋
+    const issue = prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRawTyped(lockShipmentRequest(request.id));
+        await tx.allocation.update({ where: { id: allocation.id }, data: { allocationStatus: 'CONSUMED' } });
+        await tx.lot.update({ where: { id: raceCoil.id }, data: { lotStatus: 'SHIPPED' } });
+        await tx.millSheet.create({ data: { millSheetNo: 'QU-MS-RACE', shipmentRequestId: request.id, salesOrderId: shipping.salesOrderId, snapshot: {}, issuedAt: new Date() } });
+        issuing = true;
+        await gate;
+      },
+      { maxWait: 10_000, timeout: 30_000 },
+    );
+    while (!issuing) await new Promise((resolve) => setTimeout(resolve, 20));
+    let settled = false;
+    const updating = update(registered.qualityInspectionId, registered.updatedAt, [charpy('27')]).finally(() => (settled = true));
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(settled).toBe(false);
+    release();
+    await issue;
+    await expect(updating).rejects.toMatchObject({ code: 'COM-004', message: expect.stringContaining('QU-MS-RACE') });
+
+    await prisma.millSheet.deleteMany({ where: { shipmentRequestId: request.id } });
+    await prisma.allocation.deleteMany({ where: { shipmentRequestItemId: requestItem.id } });
+    await prisma.shipmentRequestItem.delete({ where: { id: requestItem.id } });
+    await prisma.shipmentRequest.delete({ where: { id: request.id } });
   });
 
   it('히트는 하위 코일이 밀시트에 들어갔으면 막는다', async () => {
