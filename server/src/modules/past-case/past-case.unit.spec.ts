@@ -33,6 +33,9 @@ describe('사례 초안 (REQ-CASE-002)', () => {
   it('검사 결과 초안: 기준을 벗어난 값과 처리 상태로 채우고 원인은 비운다', () => {
     expect(failedItemText(facts.failedItems[0]!)).toBe('망가니즈(MN) 1.68 % (기준 1.60 이하)');
     expect(failedItemText({ name: '항복강도', code: 'YIELD_STRENGTH', value: '300', unit: 'N/mm²', min: '355', max: null })).toBe('항복강도 300 N/mm² (기준 355 이상)');
+    // 이름에 이미 기호가 있으면 다시 붙이지 않는다 (#519)
+    expect(failedItemText({ name: '인(P)', code: 'P', value: '0.058', unit: '%', min: null, max: '0.050' })).toBe('인(P) 0.058 % (기준 0.050 이하)');
+    expect(failedItemText({ name: '망간(Mn)', code: 'MN', value: '1.68', unit: '%', min: null, max: '1.60' })).toBe('망간(Mn) 1.68 % (기준 1.60 이하)');
     const draft = ruleDraft(facts);
     expect(draft).toMatchObject({ caseCategory: 'QUALITY', cause: '', equipmentText: '' });
     expect(draft.title).toBe('SM355A 히트 제강 검사 불합격');
