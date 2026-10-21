@@ -72,4 +72,4 @@
 - `past-case.spec.ts`(DB `fs_collab`, 초안용 LOT 검사 조회는 고정 값): AI 실패 세 가지(미설정·연결 실패·이상한 답)에도 초안, 상위 히트 불합격 슬래브, 합격·없는 LOT 막기, 등록 번호(id 6 이상, CASE-{id})·DB 저장(빈 원인 NULL, 관련 LOT)·검색·상세, 동시 등록 번호와 임시 번호 정리, 없는 LOT·미래 발생일, 등록 작업 로그(`CASE_REGISTERED` 주체·대상·LOT·변경 후 값, 작업 로그 실패 시 등록 롤백), 수정(항목·LOT 교체, 번호·등록자 유지, 예시·없는 사례·없는 LOT·미래 발생일 거부, 본인·부서장·관리자 외 COM-002, `expectedUpdatedAt` 불일치 COM-001)·삭제(LOT 연결 정리, 번호 재사용 없음)·`case_category` DB CHECK.
 - `past-case.unit.spec.ts`: 수정·삭제 권한 규칙(`canModifyPastCase`). `ai-assistant/ai-ops-card.unit.spec.ts`: 사례 카드 실행이 AI 경유로 부른다.
 - 화면: `client/src/features/pastCases/pastCaseForm.test.ts`(입력값·필수 항목·수정으로 보낼 LOT).
-- `ai-assistant/tools/assistant-tools.spec.ts`: `search_past_cases` 출처·예시 표시·인자 오류, 도구 14개.
+- `ai-assistant/tools/assistant-tools.spec.ts`: `search_past_cases` 출처·예시 표시·인자 오류, 조회 도구 목록(18개).

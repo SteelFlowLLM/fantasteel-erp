@@ -13,8 +13,8 @@ export const LLM_FAILURE_CODE: Record<LlmFailureKind, AiLlmFailureCode> = {
 type Failure = Pick<LlmRequestError, 'kind' | 'message'>;
 
 /**
- * 사용자에게 보일 오류 코드와 문구. 연결 실패는 내부 LLM 주소가 문구에 들어 있어 코드의 안내 문구로 바꾸고(이유는 부르는 쪽이 서버 로그에 남긴다),
- * 시간 초과·모델 없음도 코드 문구를 쓴다. 다만 Unsloth 모델 미적재(LlmModelNotLoadedError)는 주소가 없고 고치는 방법이 든 안내라 그대로 둔다. 그 밖(LLM 서버가 돌려준 HTTP 오류·API 키·읽을 수 없는 응답)은 고칠 단서가 되므로 이유를 그대로 둔다.
+ * 사용자에게 보일 오류 코드와 문구. 연결 실패·시간 초과·모델 없음은 코드의 안내 문구를 쓴다(이유는 부르는 쪽이 서버 로그에 남긴다).
+ * LlmRequestError 문구에도 내부 LLM 주소는 넣지 않는다(이슈 #497). 다만 Unsloth 모델 미적재(LlmModelNotLoadedError)는 주소가 없고 고치는 방법이 든 안내라 그대로 둔다. 그 밖(LLM 서버가 돌려준 HTTP 오류·API 키·읽을 수 없는 응답)은 고칠 단서가 되므로 이유를 그대로 둔다.
  */
 export function llmFailureOf(error: Failure): { code: AiLlmFailureCode; message: string } {
   const code = LLM_FAILURE_CODE[error.kind];

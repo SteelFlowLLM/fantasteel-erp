@@ -1,15 +1,20 @@
 import { Transform } from 'class-transformer';
 import { LLM_START_SITE_PATTERN, LLM_START_SITES_MAX } from '@fantasteel/shared';
+import { IsAllowedServerHost } from '../../../common/net/server-url';
 import { ArrayMaxSize, IsArray, IsBoolean, IsInt, Matches, IsNotEmpty, IsOptional, IsString, IsUrl, Max, MaxLength, Min, ValidateIf } from 'class-validator';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
-/** 사내망·LM Studio(127.0.0.1)도 써야 해서 최상위 도메인을 요구하지 않는다 */
+/**
+ * 사내망·LM Studio(127.0.0.1)·Tailscale(100.x.x.x)도 써야 해서 최상위 도메인을 요구하지 않고 사설 주소도 막지 않는다.
+ * 다만 클라우드 메타데이터가 있는 링크 로컬(169.254.x.x)·metadata 이름은 막는다 (이슈 #497): 저장과 연결 확인 둘 다 이 서버가 그 주소로 요청을 보낸다.
+ */
 const URL_OPTIONS = { protocols: ['http', 'https'], require_protocol: true, require_tld: false };
 const URL_MESSAGE = 'http:// 또는 https://로 시작하는 주소를 입력해 주세요';
 
 export class UpdateLlmSettingsDto {
   @Transform(trim)
   @IsUrl(URL_OPTIONS, { message: URL_MESSAGE })
+  @IsAllowedServerHost('AI 서버')
   baseUrl!: string;
 
   /** null이면 모델 선택을 비운다 */
@@ -46,6 +51,7 @@ export class UpdateLlmSettingsDto {
 export class TestLlmConnectionDto {
   @Transform(trim)
   @IsUrl(URL_OPTIONS, { message: URL_MESSAGE })
+  @IsAllowedServerHost('AI 서버')
   baseUrl!: string;
 
   /** 보내지 않으면 저장된 API 키를 쓴다 */

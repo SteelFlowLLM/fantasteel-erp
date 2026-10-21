@@ -31,7 +31,7 @@ Nest ──Tailscale──▶ Mac LLM 서버·음성 서버(8001)
 
 ## 2. 설치 순서
 
-1. **Node.js 22.18 이상** (예: NodeSource 또는 nvm). `node -v`로 확인. 그다음 `sudo npm i -g pm2`.
+1. **Node.js 22.19 이상** (예: NodeSource 또는 nvm). `node -v`로 확인. 그다음 `sudo npm i -g pm2`.
 2. **Caddy**(공식 apt 저장소)와 **Tailscale**(`tailscale up`으로 내 tailnet에 넣는다). 도메인(예: DuckDNS)의 A 레코드가 이 서버의 공인 IP를 가리켜야 Caddy가 인증서를 받는다.
 3. **코드 받기**: `git clone <저장소 주소> ~/fantasteel-erp && cd ~/fantasteel-erp && git switch main`(배포 브랜치).
 4. **`server/.env`**: `deploy/aws/server.env.example`을 `server/.env`로 복사해 채운다. `NODE_ENV=production`, `DATABASE_URL`(6543 + `?pgbouncer=true`), `DIRECT_URL`(5432), `JWT_SECRET`(새로 만든 값), `CORS_ORIGIN`·`CLIENT_BASE_URL`·`SERVER_PUBLIC_URL`(https 주소), `STORAGE_DIR`(코드 폴더 밖, 예: `/var/lib/fantasteel/storage`, `sudo mkdir -p … && sudo chown ubuntu …`). **로컬 DB 주소가 같은 파일에 남아 있으면 뒤 줄이 앞을 덮으니 한 벌만 둔다.**
@@ -51,6 +51,7 @@ Nest ──Tailscale──▶ Mac LLM 서버·음성 서버(8001)
 - **로그인 실패 제한**: 사원번호별 5번·IP별 20번 틀리면 5분 막는다(메모리, 서버 한 대 가정, 재시작하면 비워짐). 사용자 IP는 Caddy가 붙인 `X-Forwarded-For`로 읽는다(서버가 루프백에서 온 값만 믿는다).
 - **받아쓰기 제한 시간**: 음성 서버의 긴 전사(최대 1시간)가 기본 5분 대기에 끊기지 않게 서버가 받아쓰기 요청에만 대기 시간을 맞춘다.
 - **스트리밍**: Caddy는 `/api/v1`·`/socket.io`에 압축을 걸지 않고 응답을 모으지 않는다(철강맨AI 답이 한꺼번에 나오지 않게).
+- **요청 본문 상한**: 파일을 올리는 경로(회의 녹음·음성 시험 오디오·메신저 첨부)만 510MB까지 받고, 나머지 API는 13MB(철강맨AI 질문에 실린 사진까지), 실시간 연결·화면은 2MB다. 새 파일 올리기 경로를 서버에 더하면 `Caddyfile`의 `@bigUpload` 목록에도 더한다.
 
 ## 4. 외부 연결
 
@@ -72,7 +73,7 @@ curl -sI https://<도메인>/login | head -1    # HTTP/2 200
 - 브라우저로 `https://<도메인>` → 로그인 → 대시보드가 뜬다. 사원 메뉴가 사원 권한대로 보인다.
 - 메신저 두 계정(시크릿 창)으로 메시지가 실시간으로 간다(웹소켓).
 - 철강맨AI 질문의 답이 **조금씩 흐르듯** 나온다(Caddy가 모으지 않는다). Mac이 켜져 있으면 답, 꺼져 있으면 `AST-003` 안내.
-- 회의 녹음(수 MB)을 올려 전사가 끝난다. 큰 파일은 Caddy·Next·서버 상한(500MB)을 모두 지난다.
+- 회의 녹음(수 MB)을 올려 전사가 끝난다. 녹음 올리기 경로(`/api/v1/meeting-minutes/audio`)는 Caddy·서버 상한(500MB)을 모두 지난다.
 - 쿠키가 `Secure`·`HttpOnly`로 오고, 한 사원번호를 6번 틀리면 `AUTH-003`(429)이다.
 - `free -h`로 램·스왑을 본다. 서버 프로세스가 1.5GB를 넘으면 pm2가 다시 띄운다.
 

@@ -17,6 +17,7 @@ import { buildResearchContext, citedResearchSources } from '../ai-assistant/assi
 import { canExtend, checkResearchQuery, decideAction, defaultBudget, extendedBudget, fallbackPlan, parseLenientJson, readAudit, readPlan, readState, readTurn, queryKey, normalizeSeed, revisionNeedsStep, revisionStart, seedSources, storedAudit, storedSeed, storedState, type StoredSource, type StoredState } from './ai-research.rules';
 import { proposeResearchCard } from '../ai-assistant/ai-research-card.service';
 import { ToolArgumentError } from '../ai-assistant/tools/assistant-tool';
+import { ACTION_CARD_TOOLS } from '../ai-assistant/tools/action-card.tool';
 import type { AuthUser } from '@fantasteel/shared';
 import type { AuthUserService } from '../../common/auth/auth-user.service';
 import type { AssistantToolbox, ToolRunResult } from '../ai-assistant/tools/assistant-toolbox';
@@ -749,6 +750,21 @@ describe('우리 ERP 자료 (이슈 #435)', () => {
       expect(result.findings).toHaveLength(1);
       expect(JSON.stringify(t.seen[1])).toContain('없는 도구예요: create_task_card');
       expect(JSON.stringify(t.seen[1])).toContain('이미 조회한 내용이에요');
+    });
+
+    it('이 단계에 알리지 않은 도구는 실제 이름이어도 실행하지 않는다: 실행 카드(propose_*)·내 일정·업무(get_my_*)·웹·브라우저 도구 (이슈 #497)', async () => {
+      const unlisted = [...ACTION_CARD_TOOLS, 'get_my_schedule', 'get_my_tasks', 'read_web_page', 'browser_click', 'notion_create_page'];
+      expect(unlisted.filter((name) => name.startsWith('propose_')).length).toBeGreaterThan(5);
+      const t = setup([unlisted.map((name) => call(name, '{"title":"x"}')), [call('get_inventory', '{"keyword":"SS275"}')], []]);
+      const result = await t.lookup.lookup(t.input);
+      // 알린 조회 도구 get_inventory만 돌고, 나머지는 모델에 '없는 도구'로 돌려준다
+      expect(t.toolbox.run.mock.calls.map(([, c]) => c.name)).toEqual(['get_inventory']);
+      expect(result).toMatchObject({ calls: 1, failed: 0 });
+      const answered = t.seen[1].filter((m) => m.role === 'tool').map((m) => m.content);
+      expect(answered).toHaveLength(unlisted.length);
+      expect(answered.every((content) => content.startsWith('{"오류":"없는 도구예요: '))).toBe(true);
+      // 알리지 않은 도구는 호출 수 상한(ERP_LOOKUP_CALLS)도 쓰지 않는다
+      expect(result.calls).toBeLessThan(ERP_LOOKUP_CALLS);
     });
 
     it('이미 모은 조회(known)는 되풀이하지 않는다', async () => {

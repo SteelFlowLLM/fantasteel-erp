@@ -10,7 +10,7 @@
 
 ## 2. 실행
 
-필요: Node.js 22.18 이상. 명령은 저장소 맨 위에서 실행한다.
+필요: Node.js 22.19 이상. 명령은 저장소 맨 위에서 실행한다.
 
 ```bash
 npm install          # shared 빌드 + Prisma Client 생성까지 자동
