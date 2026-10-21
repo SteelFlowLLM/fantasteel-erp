@@ -149,6 +149,11 @@ export class PurchaseRequisitionAction implements ActionDefinition<PurchaseRequi
     return this.purchasing.assertCanRequest(tx, actor);
   }
 
+  async payloadLabels(tx: Tx, payload: PurchaseRequisitionDraftPayload): Promise<Record<string, string>> {
+    const item = await this.itemOf(tx, payload.itemId);
+    return item ? { itemId: `${item.itemName} · ${item.itemCode}` } : {};
+  }
+
   async confirmReason(tx: Tx, payload: PurchaseRequisitionDraftPayload): Promise<string> {
     const item = await this.itemOf(tx, payload.itemId);
     return `DRAFT_CONFIRMED: 요청자 확정 (${item?.itemCode} ${payload.requestedTon}t, 희망 입고일 ${payload.desiredReceiptDate})`;

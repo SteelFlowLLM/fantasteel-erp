@@ -12,7 +12,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { AiMark } from '@/components/ComingSoon';
 import { Icon } from '@/components/Icon';
 import { AiLiveView, AiStepsDetails } from '@/features/shell/AiAnswerTrace';
-import { QUESTION_CHIP, SOURCE_ICON, sourceText } from '@/features/shell/AiPanel';
+import { QUESTION_CHIP, SOURCE_ICON, sourceText } from '@/features/shell/aiSourceDisplay';
 import { MEETING_SUGGESTED_QUESTIONS, meetingScreenContext, splitCitations } from '@/lib/meetingAsk';
 import { useDeleteAiChatThread } from '@/hooks/useAiAssistant';
 import { AI_CHAT_STOPPED_REASON, aiAnswerEntryFromReply, aiChatEntriesFromThread, emptyAiChatLive, newAiChatId, reduceAiChatLive, type AiChatEntry, type AiChatLive } from '@/stores/useAiChatStore';

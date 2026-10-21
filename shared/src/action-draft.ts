@@ -19,8 +19,52 @@ export interface PurchaseRequisitionDraftPayload {
   aiFilledFields?: string[];
 }
 
-/** 초안 값 (유형별 추출 스키마, 업무 프로세스 12.3). 유형을 더하면 그 유형의 값을 합집합으로 더한다 */
-export type ActionDraftPayload = PurchaseRequisitionDraftPayload;
+/** 확장 유형 초안 값에 늘 있는 칸 (원본 글·AI가 채운 칸) */
+interface DraftPayloadBase {
+  sourceText: string | null;
+  /** 만들 때 AI가 채운 칸 이름. 사람이 고쳐도 그대로 두고, 비어 있지 않으면 확정·실행 작업 로그가 AI 경유다 */
+  aiFilledFields: string[];
+}
+
+/** 수주 등록 초안의 품목 한 줄 (ERD sales_order_item). 매수는 정수, 납기는 'YYYY-MM-DD' */
+export interface SalesOrderDraftLine {
+  itemId: number | null;
+  orderedQty: number | null;
+  dueDate: string | null;
+}
+
+/** 수주 등록 초안 (업무 프로세스 12.3, ACTION_TYPE SALES_ORDER_CREATE) */
+export interface SalesOrderDraftPayload extends DraftPayloadBase {
+  customerId: number | null;
+  items: SalesOrderDraftLine[];
+}
+
+/** 출하요청 초안의 품목 한 줄 (ERD shipment_request_item) */
+export interface ShipmentRequestDraftLine {
+  salesOrderItemId: number | null;
+  requestQty: number | null;
+}
+
+/** 출하요청 생성 초안 (SHIPMENT_REQUEST_CREATE). 출하 예정일은 선택 */
+export interface ShipmentRequestDraftPayload extends DraftPayloadBase {
+  customerId: number | null;
+  shipDate: string | null;
+  items: ShipmentRequestDraftLine[];
+}
+
+/** 배정 확정 초안 (ALLOCATION_CONFIRM). LOT은 AI가 아니라 시스템 배정 추천(FIFO)으로 채운다 */
+export interface AllocationDraftPayload extends DraftPayloadBase {
+  shipmentRequestItemId: number | null;
+  lotIds: number[];
+}
+
+/** 재생산 계획 생성 초안 (REPRODUCTION_PLAN_CREATE). 추가 계획 매수는 실행 때 서버가 다시 계산한다 */
+export interface ReproductionPlanDraftPayload extends DraftPayloadBase {
+  salesOrderItemId: number | null;
+}
+
+/** 초안 값 (유형별 추출 스키마, 업무 프로세스 12.3). 어느 모양인지는 초안의 actionType으로 정한다 */
+export type ActionDraftPayload = PurchaseRequisitionDraftPayload | SalesOrderDraftPayload | ShipmentRequestDraftPayload | AllocationDraftPayload | ReproductionPlanDraftPayload;
 
 /** 초안을 실행해 만든 업무 */
 export interface ActionDraftResultView {
@@ -32,10 +76,13 @@ export interface ActionDraftResultView {
   status: string | null;
 }
 
-/** POST messages/:id/action-drafts. 같은 메시지에 미처리 초안이 있으면 그 초안을 돌려준다(created: false) */
+/** POST messages/:id/action-drafts. 같은 메시지·유형에 미처리 초안이 있으면 그 초안을 돌려준다(created: false) */
 export interface ActionDraftCreateResult {
   id: number;
   created: boolean;
+  /** 초안의 확정 주체(만든 사원 또는 메시지 작성자) 이름. 다른 사원이 만든 초안이면 "○○님이 만든 초안이 이미 있어요"에 쓴다 */
+  requesterId: number | null;
+  requesterName: string | null;
 }
 
 export interface ActionDraftMessageView {
@@ -65,8 +112,13 @@ export interface ActionDraftView {
   message: ActionDraftMessageView | null;
   /** 회의록에서 만든 초안이면 그 회의록 (메시지 초안이면 null) */
   meetingMinutes: { id: number; title: string } | null;
-  /** 확정 전에 채워야 할 필수 칸 (표시명). 비면 확정할 수 있다 */
+  /** 확정 전에 채워야 할 필수 칸 (표시명, 예: '고객사', '품목 1 매수'). 비면 확정할 수 있다 */
   unresolvedFields: string[];
+  /**
+   * payload의 id 칸을 사람이 읽을 이름으로 (칸 경로 → 이름, 예: customerId → '가람중공업', items.0.itemId → 'SL-SS275-… 슬래브', lotIds → 'L-… · L-…').
+   * 찾을 수 없는 id는 넣지 않는다
+   */
+  payloadLabels: Record<string, string>;
   /** 실행해 만든 업무. 실행 전이면 null */
   result: ActionDraftResultView | null;
   /** 확정 뒤 실행(업무 생성)에 실패한 오류 코드와 시도 횟수 */

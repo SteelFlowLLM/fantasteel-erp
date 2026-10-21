@@ -29,6 +29,10 @@ export interface ActionDefinition<P extends ActionDraftPayload = ActionDraftPayl
   unresolvedFields(tx: Tx, payload: P): Promise<string[]>;
   /** 확정 주체가 실행할 수 있는지 미리 본다(예: 구매요청 승인권자). 실행이 늘 실패해 APPROVED에 갇히지 않게 */
   assertCanExecute(tx: Tx, actor: AuthUser): Promise<void>;
+  /** 칸은 다 찼지만 지금 업무 데이터로 실행할 수 없는 값을 확정 전에 막는다(예: 출하 가능 매수 초과). 없으면 확인하지 않는다 */
+  assertPayloadExecutable?(tx: Tx, payload: P): Promise<void>;
+  /** payload의 id 칸을 사람이 읽을 이름으로 (칸 경로 → 이름). 화면이 확정 주체가 아닐 때 값을 보여 줄 때 쓴다 */
+  payloadLabels(tx: Tx, payload: P): Promise<Record<string, string>>;
   /** 확정 작업 로그(DRAFT_CONFIRMED)의 사유 */
   confirmReason(tx: Tx, payload: P): Promise<string>;
   /** 업무를 만든다. 실행 트랜잭션 안에서 부른다 */

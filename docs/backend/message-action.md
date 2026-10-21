@@ -1,4 +1,4 @@
-# message-action — Message → ERP 구매요청 초안(Action Draft)
+# message-action — Message → ERP 업무 초안(Action Draft)
 
 > 근거 약어: [02] 요구사항 정의서 · [03] 용어 사전 · [04] 업무 프로세스 정의서 · [05] 코드 컨벤션 · [06] 공통 코드 정의서 · [ERD] `docs/erd/fantasteel_erp_p1.dbml` · [CSV] API 목록 · [권한표] 역할별 메뉴 (v2) 3장. 🟡 = 확인 필요.
 > 경로는 컨트롤러에 쓰는 모양(전역 prefix `/api/v1` 제외). 스켈레톤은 `@Controller()`이므로 메서드마다 전체 경로를 쓴다.
@@ -7,7 +7,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| REQ | REQ-ACT-001~004. REQ-ACT-005 확장 유형(P2)은 2026-10-15 결정으로 만든다(10장) |
+| REQ | REQ-ACT-001~004. REQ-ACT-005 확장 유형(P2)은 2026-10-15 결정으로 만들었다(10장, 구현 11장) |
 | BP | BP-ACT-01 Message → ERP 구매요청([04] 6장), BP-ACT-02 업무 유형 확장([04] 7장), 10장 Action Draft 상태, 12.3 업무 유형 등록 예시·유형 표, 13.4 의사코드 |
 | 등급 | P1 (확장 유형은 P2) |
 | AI | 2026-10-15 결정(SPEC.md 5장 결정 2): 초안을 만들 때 LLM이 메시지에서 고른 유형의 칸을 채운다(10장). LLM이 없거나 실패하면 지금처럼 요청자가 직접 입력한다. 아래 1~9장은 AI 추출 전의 구매요청 구현 기준이다 |
@@ -179,7 +179,7 @@ confirm(draftId, actor):
 | 다른 모듈 | 핸들러는 각 모듈 service의 트랜잭션을 받는 함수를 부른다. sales-order는 tx를 받는 `createInTx`가 있지만 `private`이라 공개로 바꾸고, shipment·inventory·production은 tx를 받는 함수로 나눈다(동작은 그대로) |
 | 같이 쓰는 곳 | AI 어시스턴트 실행 카드(AST-005, ai-assistant.md 단계 ③)와 회의록 업무 등록(VOC-004)도 이 등록부의 핸들러를 쓴다 |
 
-구현 순서: 등록부 일반화(REQ-ACT-004, 2026-10-15 완료) → AI 추출(2026-10-15 완료) → 화면(유형 고르기·유형별 칸) → 수주 등록 / 출하요청·배정 확정 / 재생산 계획.
+구현 순서: 등록부 일반화(REQ-ACT-004, 2026-10-15 완료) → AI 추출(2026-10-15 완료) → 화면(유형 고르기·유형별 칸) → 수주 등록 / 출하요청·배정 확정 / 재생산 계획 (화면부터 모두 2026-10-21 완료, 11장).
 
 - AI 추출 구현: `DraftExtractor`가 llm 모듈에 저장된 모델로 메시지 글, 작성일(요일 포함), 유형 정의의 칸 설명(`extractionGuide`, 구매요청은 원료 코드·이름 목록)을 보내 JSON 하나를 받는다. 제한 시간은 30초다.
   - 유형 정의 `fromExtraction`이 값을 다시 확인해 맞는 칸만 채운다. 구매요청은 원료(코드나 이름이 정확히 1건), 톤(0 초과, 소수 3자리까지), 희망 입고일(실제 있는 YYYY-MM-DD)을 본다.
@@ -190,3 +190,63 @@ confirm(draftId, actor):
 - 응답의 실행 결과는 `result { table, id, no, status }`다(구매요청 전용 `purchaseRequisition` 칸을 바꿈).
 - `GET action-drafts`(내 초안)는 메시지·회의록(VOC-004)에서 만든 초안만 준다. 확정한 Agent 대응 후보는 `?source=agent`(factory-agent)에서 본다.
 - AI Factory Agent(factory-agent.md)는 같은 `action_draft`를 쓰지만 실행 핸들러는 따로 있다. 같은 유형이라도 Agent의 배정 확정(ALLOCATION_CONFIRM)은 추천 확인 기록이고 실행하지 않는다. 메시지 배정 확정을 만들 때 둘을 맞출지 정한다.
+
+## 11. 확장 유형 구현 (2026-10-21, 이슈 #463)
+
+10장 결정을 이렇게 구현했다. 🟡 = 문서에 정한 값이 없어 구현에서 정한 가정값(팀 확인 대상).
+
+### 11.1 유형 정의 (`action-types/`)
+
+| 유형 | 파일 | payload 칸 | 미확정 칸 이름 | 확정 전 추가 확인 | 실행 핸들러 | 결과(`result.table`) |
+| --- | --- | --- | --- | --- | --- | --- |
+| SALES_ORDER_CREATE | `sales-order.action.ts` | `customerId`, `items[]`(`itemId`, `orderedQty`, `dueDate`) | 고객사, 품목, 품목 n 규격·매수·납기 | 없음 | `salesOrders.createInTx` (private → 공개) | `sales_order` |
+| SHIPMENT_REQUEST_CREATE | `shipment-request.action.ts` | `customerId`, `shipDate`(선택), `items[]`(`salesOrderItemId`, `requestQty`) | 고객사, 품목, 품목 n 수주 품목·매수 | 출하 가능 매수 초과면 SHP-002 | `shipments.createInTx` (`create`에서 나눔) | `shipment_request` |
+| ALLOCATION_CONFIRM | `allocation.action.ts` | `shipmentRequestItemId`, `lotIds` | 출하요청 품목, 배정 LOT | 없음 (LOT은 실행 때 inventory가 다시 검사) | `inventory.confirmShipmentAllocationsInTx` (`confirmAllocations`에서 나눔) | `shipment_request` |
+| REPRODUCTION_PLAN_CREATE | `reproduction-plan.action.ts` | `salesOrderItemId` | 수주 품목 | 추가 계획이 필요 없으면 COM-001 | `production.createReproductionPlanInTx` (이미 공개) | `production_plan`, 여재 예약만으로 채워지면 `sales_order_item` 🟡 |
+
+- 모든 확장 유형 payload에 `sourceText`·`aiFilledFields`가 있다. 확정 주체 `DRAFT_CREATOR`, 권한은 12.3 표(수주 등록 SALES_ORDER_CREATE, 출하·배정 SHIPMENT_REQUEST_MANAGE, 재생산 PRODUCTION_PLAN_CONFIRM).
+- 유형 정의에 `assertPayloadExecutable`(선택)·`payloadLabels`를 더했다. 앞은 칸은 다 찼지만 지금 데이터로 실행이 늘 실패할 값을 확정 전에 막고(APPROVED에 갇히지 않게), 뒤는 id 칸을 이름으로 바꿔 응답 `payloadLabels`(칸 경로 → 이름, 예: `items.0.itemId`)에 준다.
+- 핸들러 함수는 동작을 바꾸지 않고 tx를 받게 나눴고, 마지막 인자 `origin`(`actionDraftId`·`messageId`·`isAiAssisted`)을 받으면 본 작업 로그(SALES_ORDER_CREATED·SHIPMENT_REQUEST_CREATED·ALLOCATION_CONFIRMED·REPRODUCTION_PLAN_CREATED)에 남긴다. 권한은 초안 서비스가 확인한다.
+- AI가 채운 초안을 실행하면 실행 트랜잭션을 `runAsAiAssisted`로 감싸 핸들러 안에서 이어 남는 로그(자동 예약·생산계획 등)도 AI 경유가 된다.
+- 결과 연결: 구매요청 밖의 유형은 마지막 DRAFT_EXECUTED `after`(resultTable·resultId·resultNo)에서 읽는다. 그래서 응답 `result.status`는 null이다(지금 상태는 그 업무 화면에서 본다).
+- 품목 줄은 초안 한 장에 20줄까지 🟡(LLM이 긴 목록을 지어내지 않게). 수정은 줄 목록을 통째로 바꾼다.
+- 수주 등록 초안의 매수는 정수만 받는다. 톤만 말한 메시지는 매수를 비워 둔다(톤을 매수로 바꾸지 않는다, 4.1).
+- 실행 트랜잭션 제한 시간을 30초로 늘렸다(수주 등록과 같은 값). 수주 등록은 품목마다 예약·계획·로그가 돈다.
+
+### 11.2 AI 추출과 이름 → id
+
+| 유형 | LLM에 보내는 후보 | LLM이 주는 값 | 서버가 맞추는 법 |
+| --- | --- | --- | --- |
+| 수주 등록 | 고객사 전체, 제품 규격(이론중량 있는 슬래브·코일) 전체 | `customerName`, `items[]{itemCode, orderedQty, dueDate}` | 이름·코드가 정확히 하나와 맞을 때만(대소문자·앞뒤 공백 무시) |
+| 출하요청 | 고객사, 진행 중 수주 품목 최근 80줄 🟡 | `customerName`, `shipDate`, `items[]{salesOrderNo, lineNo, itemCode, requestQty}` | 수주번호 → 줄 번호 → 규격 코드 순. 고객사를 말하지 않았어도 고른 수주 품목이 모두 한 고객사면 그 고객사 |
+| 배정 확정 | 배정 대기·배정 확정 출하요청 품목 최근 80줄 🟡 | `shipmentRequestNo`, `lineNo`, `itemCode` | 출하요청 번호 → 줄 번호 → 규격 코드. LOT은 `inventory.recommendedShipmentLotIds`(FIFO, 미배정 매수만큼, 로그 없음)로 채운다. AI가 LOT을 줘도 쓰지 않는다 |
+| 재생산 계획 | 진행 중 수주 품목 최근 80줄 🟡 | `salesOrderNo`, `lineNo`, `itemCode` | 수주 품목과 같은 방식 |
+
+- 줄 번호는 수주·출하요청 안의 id 순서(1부터).
+- 배정 확정 초안에서 출하요청 품목을 바꾸면 LOT을 그 품목의 추천으로 다시 채운다. LOT만 보내면 사람이 고른 LOT으로 바꾼다(화면은 '추천 다시 받기'만 둔다).
+- 매수는 `20`, `'20매'`, `'1,200'`을 받고 소수·0·`'6t'`는 버린다.
+
+### 11.3 생성 응답·화면
+
+- `POST messages/:id/action-drafts` 응답에 `requesterId`·`requesterName`(확정 주체)을 더했다. 다른 사원이 만든 미처리 초안이 있으면 화면이 "○○님이 만든 초안이 이미 있어요"를 보인다.
+- 메시지 메뉴(`MessageDraftAction.tsx`): 유형마다 한 줄. 구매요청은 늘 보이고, 확장 유형은 그 유형의 사용 권한이 있을 때만 보인다. 같은 메시지·유형의 미처리 초안이 있으면 '○○ 초안 보기 #id'(다른 사원 초안이면 이름 표시). 실행·반려된 초안만 있으면 새로 만든다.
+- 초안 화면: 구매요청은 기존 카드, 확장 유형은 `TypedDraftFormCard`. 서버 `unresolvedFields` 이름으로 칸마다 '미확정'을 보이고(고치는 중인 칸은 뺀다), 확정 주체가 아니면 `payloadLabels`로 읽기만 한다. 실행하면 만든 업무 번호와 화면 링크를 보인다. AI가 채운 칸이 있으면 'AI 추출' 표시.
+- `GET action-drafts?chatRoomId=` 목록 행(`RoomDraftView`)에 유형·확정 주체를 더했다(화면 변환만, 서버 응답은 그대로).
+
+### 11.4 Agent와의 경계
+
+- Agent 대응 후보는 payload `agent` 칸으로 가른다(`factory-agent.isCandidate`). 메시지 초안 payload에는 `agent` 칸이 없다.
+- Agent의 배정 확정(ALLOCATION_CONFIRM)은 지금처럼 추천 확인 기록이고 실행하지 않는다. 메시지 배정 확정만 실제로 배정한다. 둘을 맞출지는 정하지 않았다(10장 끝 항목 그대로).
+
+### 11.5 실제 LLM 확인 (2026-10-21, 개발 설정 `unsloth/Qwen3.8-Flash-Next-GGUF`)
+
+| 메시지 (작성 10-21 수) | 결과 |
+| --- | --- |
+| A사 SS275 6t 20매 다음주 금요일 납기로 수주 넣어줘 | 고객사 비움(A사 없음), 규격 비움(6t로 하나로 안 정해짐), 20매·2026-10-30 |
+| 가람중공업 SS275 250×1200×10000 슬래브 20매, 다음주 금요일 납기 | 모두 채움 |
+| 나래조선 SM355A 슬래브 8매 11/20, SPHC 코일 2.5x1200 5개 11/27 | 2줄 모두 채움 |
+| SO-… 4매 모레 출하요청 | 수주 품목·고객사·4매·2026-10-23 |
+| DR-… 배정 확정 | 출하요청 품목 채움(합격 LOT이 없어 배정 LOT은 미확정) |
+| SO-… 재생산 계획 | 수주 품목 채움 |
+
+- 위 결과는 확인하는 동안만 추출 제한 시간을 180초로 늘려 얻었다. 한 건에 15~80초 걸렸고, 지금 제한 시간(30초)으로는 대부분 시간이 지나 빈 초안이 된다(초안 만들기는 실패하지 않는다). 모델·제한 시간 조정은 따로 정한다 🟡.

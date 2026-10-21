@@ -81,16 +81,17 @@ describe('표시', () => {
 });
 
 describe('초안 업무 유형 등록부 (REQ-ACT-004)', () => {
-  it('구매요청 생성만 실행할 수 있고, 추출 스키마는 원료 품목·수량(톤)·희망 입고일·요청자, 요청 근거는 스키마 밖 선택 입력이다', () => {
+  it('메시지에서 만드는 유형은 구매요청(P1)과 확장 4종(P2)이고, 유형마다 추출 스키마가 있다 (REQ-ACT-005)', () => {
     const active = ACTION_TYPE_CATALOG.filter((entry) => entry.active);
-    expect(active.map((entry) => entry.actionType)).toEqual(['PURCHASE_REQUISITION_CREATE']);
+    expect(active.map((entry) => entry.actionType)).toEqual(['PURCHASE_REQUISITION_CREATE', 'SHIPMENT_REQUEST_CREATE', 'SALES_ORDER_CREATE', 'ALLOCATION_CONFIRM', 'REPRODUCTION_PLAN_CREATE']);
     expect(active[0].schemaFieldLabels).toEqual(['원료 품목', '수량(톤)', '희망 입고일', '요청자']);
     expect(active[0].optionalInputLabels).toEqual(['요청 근거']);
+    expect(active.every((entry) => entry.schemaFieldLabels.length > 0)).toBe(true);
   });
 
-  it('나머지 유형은 모두 P2 준비 중이고 추출 스키마가 없다', () => {
+  it('생산계획 생성은 수주 등록 때 자동이라 메시지에서 만들지 않는다', () => {
     const inactive = ACTION_TYPE_CATALOG.filter((entry) => !entry.active);
-    expect(inactive).toHaveLength(5);
-    expect(inactive.every((entry) => entry.grade === 'P2' && entry.schemaFieldLabels.length === 0)).toBe(true);
+    expect(inactive.map((entry) => entry.actionType)).toEqual(['PRODUCTION_PLAN_CREATE']);
+    expect(inactive[0].schemaFieldLabels).toEqual([]);
   });
 });

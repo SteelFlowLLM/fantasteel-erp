@@ -72,6 +72,19 @@ describe('LlmClient.chatJson', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('실패 종류(kind)를 나눈다: 연결 실패 CONNECT·시간 초과 TIMEOUT·HTTP 오류와 읽을 수 없는 응답 SERVER (이슈 #462)', async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError('fetch failed'));
+    await expect(new LlmClient().chatJson(endpoint, 'm', [], format, options)).rejects.toMatchObject({ kind: 'CONNECT' });
+    // 시간 제한(AbortSignal.timeout)이 끊으면 fetch는 TimeoutError로 실패한다
+    fetchMock.mockRejectedValueOnce(Object.assign(new Error('timeout'), { name: 'TimeoutError' }));
+    await expect(new LlmClient().chatJson(endpoint, 'm', [], format, options)).rejects.toMatchObject({ kind: 'TIMEOUT' });
+    fetchMock.mockResolvedValueOnce(new Response('boom', { status: 500 }));
+    await expect(new LlmClient().chatJson(endpoint, 'm', [], format, options)).rejects.toMatchObject({ kind: 'SERVER', status: 500 });
+    fetchMock.mockResolvedValueOnce(new Response('x', { status: 401 }));
+    await expect(new LlmClient().chatJson(endpoint, 'm', [], format, options)).rejects.toMatchObject({ kind: 'SERVER' });
+    expect(new LlmRequestError('이유').kind).toBe('SERVER');
+  });
+
   it('parseJsonContent: 울타리 언어 표시가 없어도 읽는다', () => {
     expect(parseJsonContent('```\n[1,2]\n```')).toEqual([1, 2]);
   });

@@ -1,16 +1,16 @@
-// 메시지 메뉴의 동작 등록부 — Message → ERP(REQ-ACT-001 구매요청 초안 만들기)가 여기에 동작을 더한다 (3단계).
+// 메시지 메뉴의 동작 등록부 — Message → ERP(REQ-ACT-001·005 업무 초안 만들기)가 여기에 유형별 동작을 더한다.
 // 메시지 말풍선의 '더 보기' 메뉴는 이 목록을 그린다. 등록된 동작이 없거나 이 메시지에 쓸 수 있는 동작이 없으면 메뉴 버튼을 숨긴다.
 //
 // 더하는 법 (둘 중 하나):
 // 1) 아래 MESSAGE_ACTIONS 배열에 한 줄을 넣는다.
-//      { key: 'purchase-requisition-draft', sortOrder: 10, isAvailable: (message, room, me) => …, Component: PurchaseRequisitionDraftAction }
+//      { key: 'sales-order-draft', sortOrder: 11, isAvailable: (message, room, me) => …, Component: … } (예: features/actionDrafts/components/MessageDraftAction.tsx)
 // 2) 다른 모듈에서 registerMessageAction({...})을 부른다 (그 모듈이 메신저 화면보다 먼저 불려야 한다).
 // Component는 MessageActionItem(features/messenger/components/MessageActionItem.tsx)으로 메뉴 한 줄을 그리고,
 // 안에서 훅(useAction·useRouter 등)을 자유롭게 쓴다. 일을 마치면 closeMenu()를 부른다.
 import type { ComponentType } from 'react';
 import type { ChatRoomDetailView, MessageView } from '@/api/messenger';
 import type { SessionUser } from '@/api/session';
-import { PURCHASE_REQUISITION_DRAFT_ACTION } from '@/features/actionDrafts/components/PurchaseRequisitionDraftAction';
+import { MESSAGE_DRAFT_ACTIONS } from '@/features/actionDrafts/components/MessageDraftAction';
 import { DELETE_MESSAGE_ACTION, EDIT_MESSAGE_ACTION, PIN_MESSAGE_ACTION, REACTION_MESSAGE_ACTION, REPLY_MESSAGE_ACTION, TASK_MESSAGE_ACTION } from '@/features/messenger/components/MessageEditActions';
 
 export interface MessageActionProps {
@@ -31,7 +31,7 @@ export interface MessageActionEntry {
 }
 
 /** 코드로 넣는 동작 (3단계가 이 배열에 더한다) */
-const MESSAGE_ACTIONS: MessageActionEntry[] = [REACTION_MESSAGE_ACTION, REPLY_MESSAGE_ACTION, EDIT_MESSAGE_ACTION, DELETE_MESSAGE_ACTION, PIN_MESSAGE_ACTION, TASK_MESSAGE_ACTION, PURCHASE_REQUISITION_DRAFT_ACTION];
+const MESSAGE_ACTIONS: MessageActionEntry[] = [REACTION_MESSAGE_ACTION, REPLY_MESSAGE_ACTION, EDIT_MESSAGE_ACTION, DELETE_MESSAGE_ACTION, PIN_MESSAGE_ACTION, TASK_MESSAGE_ACTION, ...MESSAGE_DRAFT_ACTIONS];
 
 const registered: MessageActionEntry[] = [];
 

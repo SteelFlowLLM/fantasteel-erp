@@ -127,7 +127,7 @@ export class MeetingAnalysisRunner implements OnApplicationBootstrap, OnModuleDe
     const row = await this.repository.findDetail(this.prisma, id);
     if (!row || row.transcript === null) throw new LlmRequestError('분석할 회의 기록이 없어요');
     const settings = await this.llmSettings.read();
-    if (!settings.model) throw new LlmRequestError(NO_MODEL_REASON);
+    if (!settings.model) throw new LlmRequestError(NO_MODEL_REASON, undefined, 'NO_MODEL');
     const model = settings.model;
 
     const transcriptSegments = readSegments(row.transcriptSegments);
@@ -179,7 +179,7 @@ export class MeetingAnalysisRunner implements OnApplicationBootstrap, OnModuleDe
         );
       } catch (error) {
         // 한 조각이라도 1차 분석을 못 하면 그 부분의 후보가 통째로 빠지므로 분석 전체를 실패로 둔다
-        if (chunk.total > 1 && error instanceof LlmRequestError) throw new LlmRequestError(`${chunkLabel(chunk)} 분석 실패: ${error.message}`);
+        if (chunk.total > 1 && error instanceof LlmRequestError) throw new LlmRequestError(`${chunkLabel(chunk)} 분석 실패: ${error.message}`, error.status, error.kind);
         throw error;
       }
       // 조각 밖 번호를 근거로 대면 지어낸 것이다

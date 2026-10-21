@@ -17,7 +17,7 @@ import {
   type SalesOrderCancelPlanEffect,
   type SalesOrderItemStatus,
 } from '@fantasteel/shared';
-import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
+import { BusinessEventRecorder, type BusinessEventInput } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
 import { NumberingService } from '../../common/numbering/numbering.service';
 import { Prisma } from '../../generated/prisma/client';
@@ -386,8 +386,11 @@ export class ProductionService {
     return this.prisma.$transaction((tx) => this.createReproductionPlanInTx(tx, user, salesOrderItemId));
   }
 
-  /** 재생산 계획 생성 본문. Agent 후보 확정(REQ-AGT-003)이 자기 실행 트랜잭션 안에서 부른다 */
-  async createReproductionPlanInTx(tx: Tx, user: AuthUser, salesOrderItemId: number): Promise<ReproductionResult> {
+  /**
+   * 재생산 계획 생성 본문. Agent 후보 확정(REQ-AGT-003)과 Message → ERP 재생산 계획 초안이 자기 실행 트랜잭션 안에서 부른다.
+   * origin이 있으면 재생산 계획 작업 로그에 원본 초안·메시지를 남긴다
+   */
+  async createReproductionPlanInTx(tx: Tx, user: AuthUser, salesOrderItemId: number, origin: Pick<BusinessEventInput, 'actionDraftId' | 'messageId' | 'isAiAssisted'> = {}): Promise<ReproductionResult> {
     const locked = await this.repository.lockSalesOrderItem(tx, salesOrderItemId);
     if (!locked) throw new AppException('COM-003', '수주 품목을 찾을 수 없어요');
     if (locked.sales_order_item_status !== SALES_ORDER_ITEM_STATUS.OPEN && locked.sales_order_item_status !== SALES_ORDER_ITEM_STATUS.PARTIALLY_SHIPPED) {
@@ -424,6 +427,7 @@ export class ProductionService {
       salesOrderId: locked.sales_order_id,
       after: { ...planSnapshot(plan), isReproduction: true, targetTon: heat.targetTon, heatTon: heat.heatTon, reservedFromSurplusQty, check },
       reason: `QUALITY_FAILURE: 합격 매수가 수주 대비 ${check.additionalPlanQty}매 부족${reservedFromSurplusQty > 0 ? ` (여재 ${reservedFromSurplusQty}매 먼저 예약)` : ''} → 재생산 ${shortageQty}매 (히트 ${heat.heatCount}개)`,
+      ...origin,
     });
     const created = await this.repository.findPlan(tx, plan.id);
     return { check, reservedFromSurplusQty, plan: created ? toPlanSummary(created) : null };

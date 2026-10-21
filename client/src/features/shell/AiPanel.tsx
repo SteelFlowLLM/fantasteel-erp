@@ -5,12 +5,12 @@
 // 답을 받은 질문은 서버가 대화로 저장하고(이슈 #399), [대화 목록]에서 지난 대화를 열어 이어 묻거나 지운다.
 // 입력칸 맨 앞의 /로 명령(심층 조사·이번 질문만 웹 검색·브라우저, 새 대화, 대화 목록)을 부른다(이슈 #410, lib/aiSlashCommand.ts).
 // 화면 도우미 펫 철강맨과 한 캐릭터로 느끼도록 펫 말풍선·대화창(public/pet/pet-engine.js의 .fp-bubble·.fp-chat)과 같은 모양으로 그린다.
-import { AI_IMAGE_MAX_COUNT, AI_REASONING_DEFAULT, AI_RESEARCH_LIMITS, type DriveFileView, AI_REASONING_LABEL, AI_REASONING_LEVELS, type AiAssistantImageInput, type AiAssistantScreenContext, type AiAssistantSource, type AiReasoningLevel, type AiResearchSeed } from '@fantasteel/shared';
+import { AI_IMAGE_MAX_COUNT, AI_REASONING_DEFAULT, AI_RESEARCH_LIMITS, type DriveFileView, AI_REASONING_LABEL, AI_REASONING_LEVELS, type AiAssistantImageInput, type AiAssistantScreenContext, type AiReasoningLevel, type AiResearchSeed } from '@fantasteel/shared';
 import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from 'react';
 import { aiResearchApi } from '@/api/aiResearch';
 import { Button } from '@/components/Button';
-import { Icon, type IconName } from '@/components/Icon';
+import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { ROLE_LABEL } from '@/codes';
 import { DriveFilePicker } from '@/features/drive/components/DriveFilePicker';
@@ -19,7 +19,8 @@ import { AiAnswerText, AiWebSources } from '@/features/shell/AiWebAnswer';
 import { routeTitleOf } from '@/features/shell/routeTitles';
 import { AiActionCards } from '@/features/shell/AiActionCards';
 import { AiChatThreadList } from '@/features/shell/AiChatThreadList';
-import { SteelmanAiMark } from '@/features/shell/SteelmanAiMark';
+import { AiFailureNotice } from '@/features/shell/AiFailureNotice';
+import { QUESTION_CHIP, SOURCE_ICON, sourceText } from '@/features/shell/aiSourceDisplay';
 import { SteelmanAiStatus } from '@/features/shell/SteelmanAiStatus';
 import { SteelmanWakeToggle } from '@/features/shell/SteelmanWake';
 import { AFTER_ANSWER_MS, finishedSteelmanStatus, liveSteelmanStatus, type SteelmanStatus, type ToolTimes } from '@/lib/steelmanStatus';
@@ -30,6 +31,7 @@ import { useDriveReady } from '@/hooks/useIntegrations';
 import { useMe } from '@/hooks/useMe';
 import { aiImageDataUrl, type PreparedAiImage } from '@/lib/aiImage';
 import { driveAiImageProblem } from '@/lib/driveFiles';
+import { AI_LLM_FAILURE_GUIDE } from '@/lib/aiLlmFailure';
 import { readAiReasoningPreference, reasoningAfterSend, writeAiReasoningPreference } from '@/lib/aiReasoning';
 import { researchChipLabel } from '@/lib/aiResearchChart';
 import { researchCardSeedAt, webResearchStartAt, type AiWebResearchStart } from '@/lib/aiResearchSeed';
@@ -47,18 +49,6 @@ import { useSteelmanWakeStore } from '@/stores/useSteelmanWakeStore';
 
 /** 서버 DTO와 같은 상한 (가정값) */
 const MAX_QUESTION_LENGTH = 1000;
-
-/** 답에 붙는 출처 종류 (REQ-AST-009) */
-export const SOURCE_ICON: Record<AiAssistantSource['kind'], IconName> = { GLOSSARY: 'book', PROCESS: 'book', MANUAL: 'book', DATA: 'database' };
-const SOURCE_LABEL: Record<AiAssistantSource['kind'], string> = { GLOSSARY: '용어 사전', PROCESS: '업무 프로세스', MANUAL: '업무 매뉴얼', DATA: '조회 데이터' };
-
-/** 용어 사전·업무 프로세스는 ID를 함께 보이고, 조회 데이터의 id는 도구 이름(영문)이라 보이지 않는다 */
-export const sourceText = (source: AiAssistantSource): string =>
-  `${SOURCE_LABEL[source.kind]} · ${source.label}${source.kind === 'DATA' ? '' : ` (${source.id})`}`;
-
-/** 펫 대화창의 추천 질문 칩(.fp-chip)과 같은 모양. 질문이 길 수 있어 한 줄로 자르지 않고 줄을 바꾼다 */
-export const QUESTION_CHIP =
-  'inline-flex min-h-7 items-center gap-1.5 rounded-[14px] border border-line-strong bg-surface px-2.5 py-1 text-left text-xs leading-snug font-medium text-ink-2 enabled:hover:border-steelman enabled:hover:text-steelman-ink disabled:cursor-not-allowed disabled:opacity-60';
 
 /** 펫 말풍선(.fp-bubble)처럼 아바타 쪽으로 꼬리를 낸다: 바깥 삼각형이 테두리, 안쪽 삼각형이 바탕색으로 테두리 틈을 메운다 */
 const TAIL_SHAPE =
@@ -1058,9 +1048,10 @@ function ChatEntry({
         <div role={stopped ? 'status' : 'alert'} className={`flex min-w-0 flex-1 flex-col gap-2 px-3 py-2.5 text-sm ${stopped ? STOPPED_BUBBLE : FAILURE_BUBBLE}`}>
           <span className={`inline-flex items-center gap-1.5 font-semibold ${stopped ? 'text-ink-2' : 'text-danger'}`}>
             <Icon name={stopped ? 'x-circle' : 'alert'} size="sm" />
-            {stopped ? '답을 멈췄어요' : '답을 받지 못했어요'}
+            {stopped ? '답을 멈췄어요' : entry.code ? AI_LLM_FAILURE_GUIDE[entry.code].title : '답을 받지 못했어요'}
           </span>
           {stopped ? null : <p className="leading-normal break-keep wrap-anywhere text-ink-2">{entry.content}</p>}
+          {entry.code ? <AiFailureNotice code={entry.code} /> : null}
           <Button size="sm" icon="refresh" className="self-start" disabled={disabled} onClick={() => onRetry(entry)}>
             다시 묻기
           </Button>

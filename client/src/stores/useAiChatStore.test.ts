@@ -226,6 +226,19 @@ describe('실시간 답 (스트림 이벤트)', () => {
     expect(store().entries.at(-1)).toMatchObject({ role: 'failure', content: '모델이 설정되지 않았어요', question: '재고 알려줘', reasoning: 'low' });
   });
 
+  it('error 이벤트의 LLM 실패 오류 코드(AST-)는 실패 줄에 담기고, 코드가 없으면 담지 않는다 (이슈 #462)', () => {
+    store().addQuestion('q1', '재고 알려줘');
+    store().applyStreamEvent('q1', { type: 'error', message: 'AI 서버에 연결할 수 없어요', code: 'AST-003' });
+    expect(store().entries.at(-1)).toMatchObject({ role: 'failure', content: 'AI 서버에 연결할 수 없어요', code: 'AST-003' });
+    store().addQuestion('q2', '또 알려줘');
+    store().applyStreamEvent('q2', { type: 'error', message: '답을 만드는 중에 문제가 생겼어요' });
+    expect(store().entries.at(-1)).not.toHaveProperty('code');
+    // HTTP 오류로 알게 된 실패(스트림 시작 전)도 코드를 담는다
+    store().addQuestion('q3', '모델 없이 알려줘');
+    store().addFailure('q3', '모델 없이 알려줘', 'AI 모델이 아직 정해지지 않았어요', 'AST-002');
+    expect(store().entries.at(-1)).toMatchObject({ role: 'failure', code: 'AST-002' });
+  });
+
   it('대화를 비운 뒤 늦게 온 이벤트는 버린다', () => {
     store().addQuestion('q1', '재고 알려줘');
     store().clear();

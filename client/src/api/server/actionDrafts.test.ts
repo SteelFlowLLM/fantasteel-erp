@@ -24,6 +24,7 @@ const view = (overrides: Partial<ActionDraftView> = {}): ActionDraftView => ({
   message: { id: 900, chatRoomId: 70, chatRoomName: null, chatRoomType: 'DIRECT', senderName: '정다은', content: '실리코망가니즈 20톤 부탁해요', createdAt: '2026-10-13T00:00:00.000Z' },
   meetingMinutes: null,
   unresolvedFields: [],
+  payloadLabels: { itemId: '실리코망가니즈 · SMN01' },
   result: null,
   executionErrorCode: null,
   executionAttemptCount: 0,
@@ -69,7 +70,34 @@ describe('초안 서버 모드 (api/server/actionDrafts.ts)', () => {
     const result = await actionDraftApi.confirm({ actionDraftId: 31 });
     expect(result).toMatchObject({ executed: true, target: { targetType: 'purchase_requisition', targetId: 77, targetNo: 'PR-2610-0009' }, draft: { executedAt: executed.updatedAt } });
 
-    expect(await actionDraftApi.listOfRoom(70)).toEqual([{ id: 31, messageId: 900, draftStatus: 'WAITING_APPROVAL' }]);
+    expect(await actionDraftApi.listOfRoom(70)).toEqual([{ id: 31, messageId: 900, actionType: 'PURCHASE_REQUISITION_CREATE', draftStatus: 'WAITING_APPROVAL', requesterId: 5, requesterName: '정다은' }]);
     expect(calls.find((c) => c.path === '/action-drafts')?.query).toEqual({ chatRoomId: '70' });
+  });
+
+  it('확장 유형: 만들 때 유형을 보내고, 칸은 서버 칸 이름 그대로 고치며, 확정 결과는 만든 업무(수주)를 대상으로 보인다', async () => {
+    const salesDraft = view({
+      id: 32,
+      actionType: 'SALES_ORDER_CREATE',
+      payload: { customerId: 1, items: [{ itemId: 11, orderedQty: 20, dueDate: '2026-11-06' }], sourceText: '가람중공업 20매', aiFilledFields: ['customerId', 'items'] },
+      payloadLabels: { customerId: '가람중공업', 'items.0.itemId': 'SL-SS275-250x1200x10000 SS275 슬래브' },
+    });
+    const executed = { ...salesDraft, draftStatus: 'EXECUTED' as const, result: { table: 'sales_order', id: 8, no: 'SO-2610-008', status: null } };
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, (c: ServerCall) => {
+      if (c.path === '/auth/me') return ok(me);
+      if (c.path === '/messages/900/action-drafts') return ok({ id: 32, created: false, requesterId: 3, requesterName: '박서영' });
+      if (c.method === 'PATCH' && c.path === '/action-drafts/32') return ok(salesDraft);
+      if (c.path === '/action-drafts/32/confirm') return ok({ draft: executed, executed: true, errorCode: null, errorMessage: null });
+      return undefined;
+    });
+    expect(await actionDraftApi.createFromMessage({ messageId: 900, actionType: 'SALES_ORDER_CREATE' })).toEqual({ id: 32, created: false, requesterId: 3, requesterName: '박서영' });
+    expect(calls.find((c) => c.path === '/messages/900/action-drafts')?.body).toEqual({ actionType: 'SALES_ORDER_CREATE' });
+
+    const fields = { customerId: 1, items: [{ itemId: 11, orderedQty: 20, dueDate: '2026-11-06' }] };
+    const updated = await actionDraftApi.updateFields({ actionDraftId: 32, fields, expectedUpdatedAt: '2026-10-13T00:05:00.000Z' });
+    expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ payload: fields, expectedUpdatedAt: '2026-10-13T00:05:00.000Z' });
+    expect(updated).toMatchObject({ actionTypeLabel: '수주 등록', payloadLabels: { customerId: '가람중공업' }, purchaseRequisition: null });
+
+    const result = await actionDraftApi.confirm({ actionDraftId: 32 });
+    expect(result).toMatchObject({ executed: true, target: { targetType: 'sales_order', targetId: 8, targetNo: 'SO-2610-008' }, draft: { result: { table: 'sales_order', no: 'SO-2610-008' } } });
   });
 });

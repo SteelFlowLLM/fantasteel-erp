@@ -28,7 +28,7 @@ import {
   type SurplusSlabRow,
 } from '@fantasteel/shared';
 import { hasPermission } from '../../common/auth/auth.guard';
-import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
+import { BusinessEventRecorder, type BusinessEventInput } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
@@ -486,28 +486,53 @@ export class InventoryService {
   /** 배정 확정: 고른 LOT마다 CONFIRMED 배정 1건. 같은 LOT의 동시 확정은 부분 unique(allocation_confirmed_lot_key)가 막는다 (REQ-INV-009) */
   async confirmAllocations(user: AuthUser, dto: ConfirmAllocationDto): Promise<AllocationView[]> {
     this.assertPurposePermission(user, dto.allocationPurpose, 'USE');
-    return this.prisma.$transaction(async (tx) => {
-      const requestItem = await this.openShipmentRequestItem(tx, dto.shipmentRequestItemId);
-      const unallocatedQty = requestItem.requestQty - (await this.repository.countConfirmedShipmentAllocations(tx, requestItem.id));
-      if (dto.lotIds.length > unallocatedQty) throw new AppException('INV-001', `미배정 매수는 ${unallocatedQty}매예요`);
+    return this.prisma.$transaction((tx) => this.confirmShipmentAllocationsInTx(tx, user, dto));
+  }
 
-      const created: AllocationView[] = [];
-      for (const lotId of [...dto.lotIds].sort((a, b) => a - b)) {
-        await this.assertAllocatableLot(tx, lotId, requestItem.salesOrderItem.itemId);
-        const allocation = await this.repository.createShipmentAllocation(tx, lotId, requestItem.id);
-        await this.businessEventRecorder.record(tx, {
-          type: BUSINESS_EVENT_TYPE.ALLOCATION_CONFIRMED,
-          actor: user,
-          target: { table: 'allocation', id: allocation.id },
-          salesOrderId: requestItem.salesOrderItem.salesOrderId,
-          lotIds: [lotId],
-          after: allocationSnapshot(allocation),
-        });
-        created.push(toAllocationView(allocation));
-      }
-      await this.shipment.refreshAllocationStatus(tx, requestItem.shipmentRequest.id);
-      return created;
-    });
+  /**
+   * 출하 배정 확정 본문. Message → ERP 배정 확정 초안이 자기 실행 트랜잭션 안에서 부른다(권한은 부르는 쪽이 확인한다).
+   * origin이 있으면 배정 확정 작업 로그에 원본 초안·메시지를 남긴다
+   */
+  async confirmShipmentAllocationsInTx(
+    tx: Tx,
+    user: AuthUser,
+    dto: Pick<ConfirmAllocationDto, 'shipmentRequestItemId' | 'lotIds'>,
+    origin: Pick<BusinessEventInput, 'actionDraftId' | 'messageId' | 'isAiAssisted'> = {},
+  ): Promise<AllocationView[]> {
+    const requestItem = await this.openShipmentRequestItem(tx, dto.shipmentRequestItemId);
+    const unallocatedQty = requestItem.requestQty - (await this.repository.countConfirmedShipmentAllocations(tx, requestItem.id));
+    if (dto.lotIds.length > unallocatedQty) throw new AppException('INV-001', `미배정 매수는 ${unallocatedQty}매예요`);
+
+    const created: AllocationView[] = [];
+    for (const lotId of [...dto.lotIds].sort((a, b) => a - b)) {
+      await this.assertAllocatableLot(tx, lotId, requestItem.salesOrderItem.itemId);
+      const allocation = await this.repository.createShipmentAllocation(tx, lotId, requestItem.id);
+      await this.businessEventRecorder.record(tx, {
+        type: BUSINESS_EVENT_TYPE.ALLOCATION_CONFIRMED,
+        actor: user,
+        target: { table: 'allocation', id: allocation.id },
+        salesOrderId: requestItem.salesOrderItem.salesOrderId,
+        lotIds: [lotId],
+        after: allocationSnapshot(allocation),
+        ...origin,
+      });
+      created.push(toAllocationView(allocation));
+    }
+    await this.shipment.refreshAllocationStatus(tx, requestItem.shipmentRequest.id);
+    return created;
+  }
+
+  /**
+   * 출하요청 품목의 FIFO 추천 LOT id (조회만, 작업 로그 없음). 미배정 매수만큼 앞에서부터.
+   * Message → ERP 배정 확정 초안은 LOT을 AI가 아니라 이 추천으로 채운다 (message-action.md 10장)
+   */
+  async recommendedShipmentLotIds(tx: Tx, shipmentRequestItemId: number): Promise<number[]> {
+    const requestItem = await this.repository.findShipmentRequestItem(tx, shipmentRequestItemId);
+    if (!requestItem) return [];
+    const unallocatedQty = requestItem.requestQty - (await this.repository.countConfirmedShipmentAllocations(tx, requestItem.id));
+    if (unallocatedQty <= 0) return [];
+    const lots = await this.repository.findAllocatableLots(tx, requestItem.salesOrderItem.itemId);
+    return lots.slice(0, unallocatedQty).map((l) => l.id);
   }
 
   /** 배정 해제(newLotId 없음) 또는 변경(기존 해제 + 새 LOT 확정을 한 트랜잭션에서). 소진된 배정은 바꿀 수 없다 (INV-004) */

@@ -1,19 +1,19 @@
 'use client';
 
-// 초안 카드: 추출 스키마(REQ-ACT-001 · TRM-095) 원료 품목 · 수량(톤) · 희망 입고일 · 요청자 + 선택 입력 요청 근거
-// AI 자동 추출은 준비 중이라 요청자가 직접 입력한다(SPEC 5장 결정 2). 확정은 요청자만(REQ-ACT-002, BP-ACT-01).
+// 구매요청 초안 카드: 추출 스키마(REQ-ACT-001 · TRM-095) 원료 품목 · 수량(톤) · 희망 입고일 · 요청자 + 선택 입력 요청 근거
+// 만들 때 AI가 메시지에서 칸을 채우고, 못 채운 칸은 요청자가 입력한다(SPEC 5장 결정 2). 확정은 요청자만(REQ-ACT-002, BP-ACT-01).
 import { useState } from 'react';
 import { DRAFT_STATUS_LABEL, PERMISSION } from '@/codes';
-import { actionDraftApi, type DraftConfirmResult, type DraftDetailView } from '@/api/actionDrafts';
+import { actionDraftApi, type DraftConfirmResult, type DraftDetailView, type PurchaseRequisitionDraftPayload } from '@/api/actionDrafts';
 import { ApiError, InputError } from '@/api/errors';
 import { Badge } from '@/components/Badge';
 import { Button } from '@/components/Button';
 import { Card, CardFoot } from '@/components/Card';
-import { ComingSoon, SoonButton } from '@/components/ComingSoon';
 import { DateInput } from '@/components/DateInput';
 import { Icon } from '@/components/Icon';
 import { Input, Select, Textarea } from '@/components/Input';
 import { ReadOnlyHint } from '@/components/ReadOnlyHint';
+import { AiFillHint } from '@/features/actionDrafts/components/AiFillHint';
 import { Table, Td, Th } from '@/components/Table';
 import {
   DRAFT_FIELD_LABEL,
@@ -44,6 +44,8 @@ export interface ConfirmFailure {
 
 interface DraftFormCardProps {
   draft: DraftDetailView;
+  /** 구매요청 초안 값 (화면이 유형을 가려 넘긴다) */
+  payload: PurchaseRequisitionDraftPayload;
   failure: DraftExecutionFailure | null;
   /** 확정·실행이 막혔을 때 위쪽 배너에 보일 내용 (null = 지움) */
   onConfirmFailure: (failure: ConfirmFailure | null) => void;
@@ -54,10 +56,10 @@ function toastConfirmResult(result: DraftConfirmResult) {
   else toast.error('확정했지만 구매요청을 만들지 못했어요');
 }
 
-export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCardProps) {
+export function DraftFormCard({ draft, payload, failure, onConfirmFailure }: DraftFormCardProps) {
   const canUsePurchaseRequisition = useCanUse(PERMISSION.PURCHASE_REQUISITION_CREATE);
   const materials = useDraftRawMaterials();
-  const saved = buildDraftForm(draft.payload);
+  const saved = buildDraftForm(payload);
   const [form, setForm] = useState<DraftForm>(saved);
   // 다른 탭·저장으로 초안이 바뀌면, 내가 고치는 중이 아닐 때만 폼을 맞춘다 (렌더 중 상태 맞추기)
   const [base, setBase] = useState({ updatedAt: draft.updatedAt, form: saved });
@@ -151,16 +153,10 @@ export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCar
     <Card petKey="card:purchaseRequisitions.draftForm" className={cn(status === 'EXECUTED' && 'border-[#b9dec8]', status === 'REJECTED' && 'opacity-90')}>
       <header className="flex flex-none flex-wrap items-center gap-2 border-b border-line px-4 py-2.5">
         <h2 className="text-base font-semibold">{editable ? '값을 입력하고 확정해 주세요' : '초안 내용'}</h2>
-        <span className="flex items-center gap-1.5 rounded-sm border border-dashed border-line-strong bg-surface-2 px-2 py-1 text-cap text-ink-3">
-          <ComingSoon grade="AI" />
-          AI 자동 추출은 준비 중이에요. 값을 직접 입력해 주세요.
-        </span>
-        <span className="ml-auto flex items-center gap-2">
-          <SoonButton grade="AI" variant="ai-outline" size="sm">
-            AI 자동 추출
-          </SoonButton>
-          <Badge tone={DRAFT_STATUS_TONE[status]}>{DRAFT_STATUS_LABEL[status]}</Badge>
-        </span>
+        <AiFillHint aiFilledFields={payload.aiFilledFields ?? []} editable={editable} />
+        <Badge tone={DRAFT_STATUS_TONE[status]} className="ml-auto">
+          {DRAFT_STATUS_LABEL[status]}
+        </Badge>
       </header>
       <div className="overflow-x-auto px-4 py-3">
         <Table>
@@ -220,7 +216,7 @@ export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCar
                     onChange={(event) => setField('requestedTon', event.target.value)}
                   />
                 ) : (
-                  renderReadValue(draft.payload.requestedTon ? fmtTon(draft.payload.requestedTon) : null)
+                  renderReadValue(payload.requestedTon ? fmtTon(payload.requestedTon) : null)
                 )}
                 {renderFieldError('requestedTon')}
               </Td>
@@ -239,7 +235,7 @@ export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCar
                     className="w-44"
                   />
                 ) : (
-                  renderReadValue(draft.payload.desiredReceiptDate)
+                  renderReadValue(payload.desiredReceiptDate)
                 )}
                 {renderFieldError('desiredReceiptDate')}
               </Td>
@@ -272,7 +268,7 @@ export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCar
                     onChange={(event) => setField('requestReason', event.target.value)}
                   />
                 ) : (
-                  renderReadValue(draft.payload.requestReason)
+                  renderReadValue(payload.requestReason)
                 )}
                 {reasonTooLong && editable ? <span className="mt-1 block text-cap text-danger">{REASON_MAX}자까지 쓸 수 있어요</span> : renderFieldError('requestReason')}
               </Td>
