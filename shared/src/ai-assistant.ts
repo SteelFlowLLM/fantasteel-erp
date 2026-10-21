@@ -121,6 +121,8 @@ export interface AiAssistantCapabilitiesView {
   notion: AiNotionCapabilities;
   /** Drive 도구를 쓸 수 있는지 (이슈 #398 2단계). Drive가 연결돼 있고(서비스 계정 또는 OAuth) 폴더가 정해졌을 때 */
   drive: AiNotionCapabilities;
+  /** 철강맨 부르기 회사 설정 (이슈 #457). 꺼져 있으면 화면이 스위치를 숨기고 마이크를 끈다 */
+  steelmanWake: { available: boolean; voiceApproval: boolean };
 }
 
 export interface AiNotionCapabilities {

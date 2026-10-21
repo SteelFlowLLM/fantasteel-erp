@@ -1,8 +1,8 @@
 import { Body, Controller, Get, HttpCode, Post, Put, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { PERMISSION, STT_WAKE_CLIP_LIMITS, type AuthUser, type SttConnectionView, type SttLocalServerView, type SttSettingsView, type SttTranscribeTestView, type SttWakeClipView } from '@fantasteel/shared';
+import { PERMISSION, STT_WAKE_CLIP_LIMITS, type AuthUser, type SteelmanWakeSettingsView, type SttConnectionView, type SttLocalServerView, type SttSettingsView, type SttTranscribeTestView, type SttWakeClipView } from '@fantasteel/shared';
 import { CurrentUser, RequirePermission } from '../../common/auth/auth.decorators';
-import { TestSttConnectionDto, UpdateSttSettingsDto } from './dto/stt-settings.dto';
+import { TestSttConnectionDto, UpdateSteelmanWakeSettingsDto, UpdateSttSettingsDto } from './dto/stt-settings.dto';
 import { SttLocalServerService } from './stt-local-server.service';
 import { SttService, type UploadedAudio } from './stt.service';
 
@@ -45,6 +45,19 @@ export class SttController {
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: AUDIO_TEST_MAX_BYTES, files: 1 } }))
   testTranscribe(@UploadedFile() file: UploadedAudio | undefined): Promise<SttTranscribeTestView> {
     return this.service.testTranscribe(file);
+  }
+
+  /** 철강맨 부르기 회사 설정 (이슈 #457). 음성 설정과 같은 권한 */
+  @Get('stt/wake-settings')
+  @RequirePermission(PERMISSION.ORG_MANAGE, 'VIEW')
+  getWakeSettings(): Promise<SteelmanWakeSettingsView> {
+    return this.service.getWakeSettings();
+  }
+
+  @Put('stt/wake-settings')
+  @RequirePermission(PERMISSION.ORG_MANAGE, 'USE')
+  updateWakeSettings(@Body() dto: UpdateSteelmanWakeSettingsDto): Promise<SteelmanWakeSettingsView> {
+    return this.service.updateWakeSettings(dto);
   }
 
   /**

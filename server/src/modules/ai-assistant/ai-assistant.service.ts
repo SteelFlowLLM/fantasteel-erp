@@ -61,6 +61,7 @@ import { AiUpdateCardService } from './ai-update-card.service';
 import { AssistantDriveToolbox, type DriveToolSession } from './drive/assistant-drive-toolbox';
 import { DRIVE_UNTRUSTED_NOTE, driveTextBlock, type DriveReadOutcome } from './drive/drive-file-reader';
 import { AiChatThreadService } from './chat/ai-chat-thread.service';
+import { SteelmanWakeSettingsStore } from '../stt/steelman-wake-settings.store';
 import { historyBudget, HistorySearchSession, type HistorySearchSource } from './history/chat-memory';
 import { AiResearchCardService } from './ai-research-card.service';
 
@@ -152,6 +153,7 @@ export class AiAssistantService {
     private readonly chatThreads: AiChatThreadService,
     private readonly researchCards: AiResearchCardService,
     private readonly browserSettings: BrowserSettingsStore,
+    private readonly wakeSettings: SteelmanWakeSettingsStore,
   ) {}
 
   /** 화면 조작 결과 (이슈 #382). 묻는 사원 본인의 기다리는 자리만, 처음 온 결과만 받는다 */
@@ -213,6 +215,7 @@ export class AiAssistantService {
   async executeActionCard(user: AuthUser, dto: ExecuteAiActionCardDto): Promise<AiActionCardExecuteResult> {
     if (dto.approvedByVoice) {
       if (!AI_VOICE_APPROVABLE_KINDS.includes(dto.kind)) throw new AppException('VOC-010');
+      if (!(await this.wakeSettings.read()).voiceApproval) throw new AppException('VOC-012');
       return runAsVoiceApproved(() => this.runActionCard(user, dto));
     }
     return this.runActionCard(user, dto);
@@ -256,9 +259,11 @@ export class AiAssistantService {
     const screenControl = this.screenTools.capabilities();
     const notion = await this.notionTools.availability();
     const drive = await this.driveTools.availability();
-    if (!settings.model) return { model: null, vision: null, reasoning: null, webSearch, browser, deepResearch: { available: false }, screenControl, notion, drive };
+    const wake = await this.wakeSettings.read();
+    const steelmanWake = { available: wake.enabled, voiceApproval: wake.voiceApproval };
+    if (!settings.model) return { model: null, vision: null, reasoning: null, webSearch, browser, deepResearch: { available: false }, screenControl, notion, drive, steelmanWake };
     const caps = await this.llm.modelCapabilities({ baseUrl: settings.baseUrl, apiKey: settings.apiKey }, settings.model);
-    return { model: settings.model, ...caps, webSearch, browser, deepResearch: { available: true }, screenControl, notion, drive };
+    return { model: settings.model, ...caps, webSearch, browser, deepResearch: { available: true }, screenControl, notion, drive, steelmanWake };
   }
 
   /** 조회 도구가 보여 준 데이터를 이 사용자가 볼 수 있는지 (사내 채팅 @AI 답을 멤버마다 보일지 정할 때) */

@@ -36,6 +36,7 @@ import { AssistantWebToolbox, defaultWebToolDeps } from './web/assistant-web-too
 import { AssistantBrowserToolbox } from './browser/assistant-browser-toolbox';
 import { BrowserPool } from './browser/browser-pool';
 import { AssistantScreenToolbox, ScreenActionBroker } from './screen/assistant-screen-toolbox';
+import { SttModule } from '../stt/stt.module';
 
 /** AI 어시스턴트 (REQ-AST, docs/backend/ai-assistant.md). 조회 도구는 각 모듈의 조회 service를 쓴다. 웹 도구는 web/ (이슈 #367), 브라우저 도구는 browser/ (이슈 #373) */
 @Module({
@@ -58,6 +59,8 @@ import { AssistantScreenToolbox, ScreenActionBroker } from './screen/assistant-s
     // 실행 카드가 업무·알림·구매요청 초안을 만든다 (REQ-AST-005)
     NotificationModule,
     MessageActionModule,
+    // 철강맨 부르기 회사 설정 (이슈 #457)
+    SttModule,
     // 내 일정 조회·일정 고치기 카드가 일정 화면과 같은 service를 쓴다 (이슈 #398)
     ScheduleEventModule,
     // 심층 조사 카드(이슈 #408)가 조사 만들기 service를 쓴다. 심층 조사도 이 모듈의 웹 도구를 써서 서로 부르므로 forwardRef

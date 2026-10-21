@@ -7,14 +7,17 @@ import { SttController } from './stt.controller';
 import { SttService, type UploadedAudio } from './stt.service';
 import type { SttSettingsStore } from './stt-settings.store';
 import { SttWakeLimiter } from './stt-wake-limiter';
+import type { SteelmanWakeSettingsStore } from './steelman-wake-settings.store';
 
 const user = (employeeId: number, permissions: AuthUser['permissions'] = {}) => ({ employeeId, permissions }) as AuthUser;
 const clip: UploadedAudio = { originalname: 'wake.wav', mimetype: 'audio/wav', buffer: silentWav(2) };
 const stored = { baseUrl: 'http://127.0.0.1:8001/v1', model: 'whisper-pyannote', apiKey: 'key' };
 
-const setup = (transcribe: jest.Mock, limiter = new SttWakeLimiter()) => {
+const wakeOn = { read: async () => ({ enabled: true, voiceApproval: false }) } as unknown as SteelmanWakeSettingsStore;
+
+const setup = (transcribe: jest.Mock, limiter = new SttWakeLimiter(), wakeSettings = wakeOn) => {
   const store = { read: jest.fn().mockResolvedValue(stored) } as unknown as SttSettingsStore;
-  return new SttService(store, { transcribe } as unknown as SttClient, limiter);
+  return new SttService(store, { transcribe } as unknown as SttClient, limiter, wakeSettings);
 };
 
 describe('SttWakeLimiter', () => {
@@ -84,6 +87,23 @@ describe('SttService.transcribeWakeClip', () => {
     await service.transcribeWakeClip(user(1), clip);
     await expect(service.transcribeWakeClip(user(1), clip)).rejects.toMatchObject({ code: 'VOC-009' });
     expect(transcribe).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('철강맨 부르기 회사 설정', () => {
+  it('관리자가 끄면 조각을 받지 않고(VOC-011) 한도도 세지 않는다', async () => {
+    const transcribe = jest.fn();
+    const limiter = new SttWakeLimiter();
+    const off = { read: async () => ({ enabled: false, voiceApproval: false }) } as unknown as SteelmanWakeSettingsStore;
+    await expect(setup(transcribe, limiter, off).transcribeWakeClip(user(1), clip)).rejects.toMatchObject({ code: 'VOC-011' });
+    expect(transcribe).not.toHaveBeenCalled();
+    limiter.perMinute = 1;
+    expect(limiter.take(1)).toBe(true);
+  });
+
+  it('GET·PUT stt/wake-settings는 음성 설정과 같은 권한(ORG_MANAGE VIEW·USE)', () => {
+    expect(Reflect.getMetadata(REQUIRED_PERMISSION, SttController.prototype.getWakeSettings)).toEqual({ permission: 'ORG_MANAGE', level: 'VIEW' });
+    expect(Reflect.getMetadata(REQUIRED_PERMISSION, SttController.prototype.updateWakeSettings)).toEqual({ permission: 'ORG_MANAGE', level: 'USE' });
   });
 });
 

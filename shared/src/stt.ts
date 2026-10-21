@@ -91,3 +91,16 @@ export interface SttWakeClipView {
   text: string | null;
   error: string | null;
 }
+
+/**
+ * 철강맨 부르기 회사 설정 (이슈 #457, GET·PUT stt/wake-settings). 관리자가 AI 연결 화면에서 회사 전체로 끈다.
+ * 켜 있어도 사원마다 화면의 스위치(기본 꺼짐)를 켜야 듣는다. 기본값: 부르기 켬, 말로 승인 끔 (가정값)
+ */
+export interface SteelmanWakeSettingsView {
+  enabled: boolean;
+  voiceApproval: boolean;
+}
+
+export type SteelmanWakeSettingsInput = SteelmanWakeSettingsView;
+
+export const STEELMAN_WAKE_SETTINGS_DEFAULT: SteelmanWakeSettingsView = { enabled: true, voiceApproval: false };

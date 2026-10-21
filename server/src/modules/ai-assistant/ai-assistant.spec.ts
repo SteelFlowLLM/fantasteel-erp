@@ -1,4 +1,5 @@
 import { AI_AGENT_NOTES_MAX, AI_AGENT_PAUSE_MAX_MS, ROLE, type AiAgentControlCommand, type AiAgentInput, type AuthUser } from '@fantasteel/shared';
+import type { SteelmanWakeSettingsStore } from '../stt/steelman-wake-settings.store';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { AppException } from '../../common/errors/app.exception';
@@ -308,7 +309,7 @@ describe('AiAssistantService', () => {
         return toolResult ?? { content: '{"제품":[]}', source: { kind: 'DATA', id: call.name, label: '재고 · SS275' } };
       },
     } as unknown as AssistantToolbox;
-    return { service: new AiAssistantService(store, client, toolbox, meetingMinutes, {} as AiActionCardService, {} as AiOpsCardService, webTools, browserTools, screenTools, {} as PrismaService, notionTools, {} as AiNotionCardService, {} as AiUpdateCardService, driveTools, chatThreads as unknown as AiChatThreadService, {} as AiResearchCardService, browserSettings), calls, runs, definitionOptions, capabilityAsks };
+    return { service: new AiAssistantService(store, client, toolbox, meetingMinutes, {} as AiActionCardService, {} as AiOpsCardService, webTools, browserTools, screenTools, {} as PrismaService, notionTools, {} as AiNotionCardService, {} as AiUpdateCardService, driveTools, chatThreads as unknown as AiChatThreadService, {} as AiResearchCardService, browserSettings, { read: async () => ({ enabled: true, voiceApproval: false }) } as unknown as SteelmanWakeSettingsStore), calls, runs, definitionOptions, capabilityAsks };
   }
 
   it('용어 사전을 찾아 답하고 출처·모델을 돌려준다', async () => {
@@ -1916,13 +1917,13 @@ describe('AiAssistantService', () => {
   describe('모델이 할 수 있는 것 (capabilities)', () => {
     it('설정된 모델 이름과 모델이 알려 준 사진·생각 정도 지원 여부를 돌려준다', async () => {
       const { service } = setup({ model: 'vision-model' }, async () => answer(''), undefined, { vision: true, reasoning: false });
-      expect(await service.capabilities()).toEqual({ model: 'vision-model', vision: true, reasoning: false, webSearch: { engines: ['duckduckgo', 'wikipedia'], placeSearch: false }, browser: { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요', maxActions: DEFAULT_BROWSER_MAX_ACTIONS, openAllSites: false }, deepResearch: { available: true }, screenControl: { available: false }, notion: { available: false, reason: 'Notion이 연결되어 있지 않아요' }, drive: { available: false, reason: 'Google Drive가 연결되어 있지 않아요. 관리자가 먼저 연결해 주세요' } });
+      expect(await service.capabilities()).toEqual({ model: 'vision-model', vision: true, reasoning: false, webSearch: { engines: ['duckduckgo', 'wikipedia'], placeSearch: false }, browser: { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요', maxActions: DEFAULT_BROWSER_MAX_ACTIONS, openAllSites: false }, deepResearch: { available: true }, screenControl: { available: false }, notion: { available: false, reason: 'Notion이 연결되어 있지 않아요' }, drive: { available: false, reason: 'Google Drive가 연결되어 있지 않아요. 관리자가 먼저 연결해 주세요' }, steelmanWake: { available: true, voiceApproval: false } });
     });
 
     it('모델이 아직 없으면 모두 null이고 모델 정보를 묻지 않는다', async () => {
       const { service, capabilityAsks } = setup({ model: null }, async () => answer(''));
       // 웹 검색 기능은 모델과 상관없이 서버 키 설정으로 정해진다
-      expect(await service.capabilities()).toEqual({ model: null, vision: null, reasoning: null, webSearch: { engines: ['duckduckgo', 'wikipedia'], placeSearch: false }, browser: { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요', maxActions: DEFAULT_BROWSER_MAX_ACTIONS, openAllSites: false }, deepResearch: { available: false }, screenControl: { available: false }, notion: { available: false, reason: 'Notion이 연결되어 있지 않아요' }, drive: { available: false, reason: 'Google Drive가 연결되어 있지 않아요. 관리자가 먼저 연결해 주세요' } });
+      expect(await service.capabilities()).toEqual({ model: null, vision: null, reasoning: null, webSearch: { engines: ['duckduckgo', 'wikipedia'], placeSearch: false }, browser: { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요', maxActions: DEFAULT_BROWSER_MAX_ACTIONS, openAllSites: false }, deepResearch: { available: false }, screenControl: { available: false }, notion: { available: false, reason: 'Notion이 연결되어 있지 않아요' }, drive: { available: false, reason: 'Google Drive가 연결되어 있지 않아요. 관리자가 먼저 연결해 주세요' }, steelmanWake: { available: true, voiceApproval: false } });
       expect(capabilityAsks).toHaveLength(0);
     });
   });

@@ -15,7 +15,7 @@ import type { ExecuteAiActionCardDto } from './dto/ai-assistant.dto';
 
 const user = { employeeId: 1 } as AuthUser;
 
-const setup = () => {
+const setup = (company = { enabled: true, voiceApproval: true }) => {
   const seen: boolean[] = [];
   const run = async () => {
     seen.push(isInVoiceApprovedRun());
@@ -28,6 +28,7 @@ const setup = () => {
     notionCards: { execute: run },
     updateCards: { execute: run },
     researchCards: { execute: run },
+    wakeSettings: { read: async () => company },
   }) as unknown as AiAssistantService;
   return { service, seen };
 };
@@ -52,6 +53,15 @@ describe('말로 승인한 카드 실행', () => {
     const { service, seen } = setup();
     await expect(service.executeActionCard(user, dto(kind, true))).rejects.toMatchObject({ code: 'VOC-010' });
     expect(seen).toEqual([]);
+  });
+});
+
+describe('회사 설정 (이슈 #457)', () => {
+  it('관리자가 말로 승인을 꺼 두면 말로 승인한 실행은 VOC-012, 눌러 실행은 그대로', async () => {
+    const { service, seen } = setup({ enabled: true, voiceApproval: false });
+    await expect(service.executeActionCard(user, dto('TASK', true))).rejects.toMatchObject({ code: 'VOC-012' });
+    await service.executeActionCard(user, dto('TASK'));
+    expect(seen).toEqual([false]);
   });
 });
 

@@ -1,11 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PERMISSION, type AuthUser, type SttConnectionTestInput, type SttConnectionView, type SttSettingsInput, type SttSettingsView, type SttTranscribeTestView, type SttWakeClipView } from '@fantasteel/shared';
+import { PERMISSION, type AuthUser, type SteelmanWakeSettingsInput, type SteelmanWakeSettingsView, type SttConnectionTestInput, type SttConnectionView, type SttSettingsInput, type SttSettingsView, type SttTranscribeTestView, type SttWakeClipView } from '@fantasteel/shared';
 import { hasPermission } from '../../common/auth/auth.guard';
 import { AppException } from '../../common/errors/app.exception';
 import { SttClient, SttRequestError, normalizeBaseUrl, quickModelOf } from './stt.client';
 import { SttSettingsStore, type SttSettings } from './stt-settings.store';
 import { wakeClipProblem } from './stt-wake-clip';
 import { SttWakeLimiter } from './stt-wake-limiter';
+import { SteelmanWakeSettingsStore } from './steelman-wake-settings.store';
 import { redactUrl, sameOrigin } from './stt-url';
 
 /** 음성 서버 주소·Tailscale 이름·서버가 준 오류는 설정을 맡은 사람에게만 보인다 */
@@ -29,7 +30,16 @@ export class SttService {
     private readonly store: SttSettingsStore,
     private readonly client: SttClient,
     private readonly wakeLimiter: SttWakeLimiter = new SttWakeLimiter(),
+    private readonly wakeSettings: SteelmanWakeSettingsStore = new SteelmanWakeSettingsStore(),
   ) {}
+
+  getWakeSettings(): Promise<SteelmanWakeSettingsView> {
+    return this.wakeSettings.read();
+  }
+
+  updateWakeSettings(input: SteelmanWakeSettingsInput): Promise<SteelmanWakeSettingsView> {
+    return this.wakeSettings.write(input);
+  }
 
   async getSettings(): Promise<SttSettingsView> {
     return toView(await this.store.read());
@@ -86,6 +96,8 @@ export class SttService {
    * 자세한 이유(주소 등)는 설정 권한(ORG_MANAGE USE)이 있는 사원에게만, 나머지는 서버 기록으로 남긴다.
    */
   async transcribeWakeClip(user: AuthUser, file: UploadedAudio | undefined): Promise<SttWakeClipView> {
+    // 관리자가 회사 전체로 끈 뒤에도 켜 둔 화면이 보내는 조각은 세지도 받아쓰지도 않는다
+    if (!(await this.wakeSettings.read()).enabled) throw new AppException('VOC-011');
     if (!this.wakeLimiter.take(user.employeeId)) throw new AppException('VOC-009');
     if (!file) throw new AppException('COM-004', '말소리 조각이 없어요 (file 필드)');
     const problem = wakeClipProblem(file.buffer);
