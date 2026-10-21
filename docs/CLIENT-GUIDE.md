@@ -35,7 +35,7 @@ npm run start -w @fantasteel/client       # 빌드 결과 실행 (5173)
 
 모든 화면이 실제 서버(`server/`)를 부른다. 상단 통합 검색은 서버 목록 API로 찾는다(`api/server/search.ts`: 수주·출하요청은 번호 일부, LOT은 앞부분 일치, 조회 권한이 없는 목록은 부르지 않아 결과에서 빠지고, 결과가 없으면 그 이유를 한 줄로 안내한다). 2026-10-13에 브라우저 안 가짜 DB(`client/src/mock/`)와 가짜 DB 모드의 계정 선택 화면을 지웠다.
 
-1. `npm run dev`로 DB·서버·화면을 띄운다. 브라우저는 화면과 같은 주소의 `/api/v1`·`/socket.io`로 부르고, 화면 서버(Next)가 `NEXT_PUBLIC_API_BASE_URL`(기본 `http://localhost:8787/api/v1`)의 서버로 넘긴다(`client/next.config.ts` rewrites, 이슈 #440). 그래서 다른 PC에서 `http://<서버 PC IP>:5173`으로 들어와도 같은 서버를 쓴다. 그때는 `server/.env`에 `COOKIE_SECURE=false`(http에서는 Secure 쿠키가 저장되지 않는다)를 넣는다(`client/next.config.ts`의 `allowedDevOrigins`는 사내 IP `192.168.*.*`·`10.*.*.*`를 이미 허용한다). Next 프록시 상한은 응답 없이 30분, 본문 510MB(회의 녹음 500MB)다.
+1. `npm run dev`로 DB·서버·화면을 띄운다. 브라우저는 화면과 같은 주소의 `/api/v1`·`/socket.io`로 부르고, 화면 서버(Next)가 `NEXT_PUBLIC_API_BASE_URL`(기본 `http://localhost:8787/api/v1`)의 서버로 넘긴다(`client/next.config.ts` rewrites, 이슈 #440). 그래서 다른 PC에서 `http://<서버 PC IP>:5173`으로 들어와도 같은 서버를 쓴다. 그때는 `server/.env`에 `COOKIE_SECURE=false`(http에서는 Secure 쿠키가 저장되지 않는다)를 넣는다(`client/next.config.ts`의 `allowedDevOrigins`는 사내 IP `192.168.*.*`·`10.*.*.*`를 이미 허용한다). Next 프록시 상한은 응답 없이 30분, 본문 510MiB(회의 녹음 500MiB)다.
 2. 로그인 화면은 사원번호·비밀번호 입력이다(REQ-AUTH-001, 2026-10-07 결정). 시드 계정은 `docs/backend/seed.md`(비밀번호 `fantasteel`). 로그인 사원의 정보·권한은 `GET /auth/me`, 부서·직급 이름은 `GET /departments`에서 읽는다(`api/server/session.ts`). 사용자 메뉴의 '로그아웃'은 `POST /auth/logout`.
 
 - 연결 방식: 화면이 부르는 `api/*.ts` 함수가 `api/server/*.ts` 어댑터를 부른다. 화면별로 어떤 어댑터를 쓰는지는 아래 줄에 적는다.

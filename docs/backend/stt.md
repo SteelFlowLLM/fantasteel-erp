@@ -16,7 +16,7 @@ DB가 아니라 `storage/settings/stt.json`에 저장한다. 파일이 없으면
 | `POST /stt/connection-test` | USE | `{ baseUrl, model?, apiKey? }` → `{ connected, baseUrl, latencyMs, error, models[] }`. 먼저 `GET {baseUrl}/models`(10초)로 모델 목록을 받고(없으면 빈 목록, 닿지 않거나 401이면 바로 실패), 그다음 화면에 입력한(저장 전) 모델·키로 1초 무음 WAV(16kHz·모노·16비트)를 실제로 보내 HTTP 성공이면 연결됨. `model`·`apiKey`를 보내지 않으면 저장된 값을 쓴다(`model: null`은 모델 이름 없이) |
 | `GET /stt/local-server` | VIEW | ERP 서버와 같은 Mac의 음성 서버(LaunchAgent `com.fantasteel.voice`) `{ supported, installed, running, healthy, pid, logPath, message }`. macOS가 아니면 `supported: false` (이슈 #450) |
 | `POST /stt/local-server/start` · `/stop` | USE | `launchctl bootstrap`/`kickstart`·`bootout`만 실행한다(화면 값은 명령에 넣지 않는다). 끄기는 지금만이고 다음 로그인 때 다시 켜진다. 등록 전·macOS가 아니면 COM-004 |
-| `POST /stt/transcribe-test` | USE | multipart `file`(오디오, 100MB까지). `{ ok, text, segmentCount, durationSec, latencyMs, error }` |
+| `POST /stt/transcribe-test` | USE | multipart `file`(오디오, 100MiB까지). `{ ok, text, segmentCount, durationSec, latencyMs, error }` |
 | `GET /stt/wake-settings` | VIEW | 철강맨 부르기 회사 설정 `{ enabled, voiceApproval }` (이슈 #457) |
 | `PUT /stt/wake-settings` | USE | 같은 모양으로 저장. `enabled`가 false면 `voiceApproval`도 false로 저장 |
 | `POST /stt/wake-clip` | 로그인만 | 철강맨 부르기(이슈 #457). 아래 절 |
@@ -38,7 +38,7 @@ DB가 아니라 `storage/settings/stt.json`에 저장한다. 파일이 없으면
 
 응답 구간에 `speaker`(문자열)가 있으면 `SttSegment.speaker`로 남기고, 없거나 문자열이 아니면 null이다. 일반 whisper.cpp·OpenAI는 주지 않는다.
 
-주소는 관리자가 넣는 서버 설정이라 `localhost`·`127.0.0.1`·같은 망(`192.168.x.x`·`10.x`·`172.16~31.x`)·Tailscale(`100.64~127.x`·`*.ts.net`)·인터넷 주소를 모두 받고(`http://`·`https://`만), 철강맨AI 웹 도구의 사설 주소 차단과는 별개다. 다만 링크 로컬(`169.254.x.x`, IPv6 `fe80::/10`)·클라우드 메타데이터 주소(`fd00:ec2::254`·`100.100.100.200`)·이름(`metadata.google.internal` 등)은 저장과 연결 확인 모두 `COM-004`로 거절하고(LLM 서버 주소와 같은 규칙 `common/net/server-url.ts`, 이전에 저장된 주소도 요청 전에 막는다. 🟡 DNS 이름이 메타데이터 주소로 풀리는 경우는 막지 않는다), 주소 안의 아이디·비밀번호(`http://user:pw@…`)도 받지 않는다. 요청은 리다이렉트를 따라가지 않고, 오류 문구에는 주소의 아이디·비밀번호와 서버의 JSON이 아닌 응답 본문을 내보내지 않는다. 저장된 API 키는 새로 보낸 주소의 출처(프로토콜·호스트·포트)가 저장된 주소와 같을 때만 쓰며, 다른 출처로 바꾸면서 키를 비워 두면 연결 확인에는 키를 보내지 않고 저장하면 키를 지운다. 연결 실패는 오류가 아니라 이유가 담긴 결과로 돌려주며, 원인(거절·길 없음·이름 못 찾음·인증서·404)별로 문구를 나누고, 404에는 서버가 준 이유(예: OpenAI의 모델 없음)를 붙인다.
+주소는 관리자가 넣는 서버 설정이라 `localhost`·`127.0.0.1`·같은 망(`192.168.x.x`·`10.x`·`172.16~31.x`)·Tailscale(`100.64~127.x`·`*.ts.net`)·인터넷 주소를 모두 받고(`http://`·`https://`만), 철강맨AI 웹 도구의 사설 주소 차단과는 별개다. 다만 링크 로컬(`169.254.x.x`, IPv6 `fe80::/10`)·클라우드 메타데이터 주소(`fd00:ec2::254`·`100.100.100.200`)·이름(`metadata.google.internal` 등)은 저장과 연결 확인 모두 `COM-004`로 거절하고(LLM 서버 주소와 같은 규칙 `common/net/server-url.ts`, 이전에 저장된 주소도 요청 전에 막는다. 이름이 메타데이터 주소로 풀리는 경우(`169.254.169.254.nip.io` 등)는 `common/net/guarded-agent.ts`의 Agent가 연결할 때 막고, 받아쓰기·모델 목록 모두 이 Agent로 부르고, 부르는 함수도 전역 `fetch`가 아니라 같은 undici의 `fetch`(`netFetch.run`)다. 본문 `FormData`도 undici의 것이다: Agent와 짝이 맞아야 Node 22·24에서 돌고, 전역 FormData를 넘기면 글 `[object FormData]`로 간다), 주소 안의 아이디·비밀번호(`http://user:pw@…`)도 받지 않는다. 요청은 리다이렉트를 따라가지 않고, 오류 문구에는 주소의 아이디·비밀번호와 서버의 JSON이 아닌 응답 본문을 내보내지 않는다. 저장된 API 키는 새로 보낸 주소의 출처(프로토콜·호스트·포트)가 저장된 주소와 같을 때만 쓰며, 다른 출처로 바꾸면서 키를 비워 두면 연결 확인에는 키를 보내지 않고 저장하면 키를 지운다. 연결 실패는 오류가 아니라 이유가 담긴 결과로 돌려주며, 원인(거절·길 없음·이름 못 찾음·인증서·404)별로 문구를 나누고, 404에는 서버가 준 이유(예: OpenAI의 모델 없음)를 붙인다.
 
 ## whisper.cpp 실행 예
 

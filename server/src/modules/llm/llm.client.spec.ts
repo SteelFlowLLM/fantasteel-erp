@@ -1,5 +1,7 @@
 // chatJson: 가짜 fetch로 형식 강제 요청, <think>·울타리 제거, 400 재시도, 기능별 샘플링·생각 설정을 확인한다.
 import { Logger } from '@nestjs/common';
+import * as guardedAgent from '../../common/net/guarded-agent';
+import { netFetch } from '../../common/net/guarded-agent';
 import { createThinkSplitter, LLM_TRUNCATED_MESSAGE, LlmAbortedError, LlmClient, LlmJsonParseError, LlmModelNotLoadedError, LlmRequestError, LlmTruncatedError, parseJsonContent, reasoningEffortFor, reasoningMaxTokens, splitThinking } from './llm.client';
 import { LLM_PROFILE } from './llm-profiles';
 
@@ -25,12 +27,12 @@ beforeEach(() => {
   fetchMock.mockReset();
   modelsMock.mockReset().mockImplementation(async () => new Response('not found', { status: 404 }));
   unslothMock.mockReset().mockImplementation(async () => new Response('not found', { status: 404 }));
-  jest.spyOn(globalThis, 'fetch').mockImplementation(((url: string, init: RequestInit) =>
+  jest.spyOn(netFetch, 'run').mockImplementation(((url: string, init: RequestInit) =>
     url.endsWith('/api/v1/models')
       ? modelsMock(url)
       : url.endsWith('/v1/status') || url.includes('/api/settings/') || url.includes('/api/models/')
         ? unslothMock(url)
-        : fetchMock(url, init)) as unknown as typeof fetch);
+        : fetchMock(url, init)) as unknown as typeof netFetch.run);
 });
 afterEach(() => jest.restoreAllMocks());
 
@@ -108,6 +110,30 @@ describe('LlmClient.chatJson', () => {
     expect(logged).not.toContain('pw');
   });
 
+  it('연결은 메타데이터 주소로 풀리는 이름을 막는 Agent(dispatcher)로 하고, 그 때문에 막힌 연결은 주소 없는 문구로 알린다 (이슈 #497)', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const created = jest.spyOn(guardedAgent, 'createMetadataGuardedAgent');
+    fetchMock.mockResolvedValueOnce(reply('{"a":1}'));
+    fetchMock.mockResolvedValueOnce(reply('{"a":2}'));
+    const client = new LlmClient();
+    await client.chatJson(endpoint, 'm', [], format, options);
+    const madeAfterFirst = created.mock.calls.length;
+    await client.chatJson(endpoint, 'm', [], format, options);
+    // 일반 Agent가 아니라 메타데이터 막는 Agent를 제한 시간마다 한 번 만들어 계속 쓴다 (제한 시간별 Agent는 이슈 #502)
+    expect(madeAfterFirst).toBeGreaterThan(0);
+    expect(created).toHaveBeenCalledTimes(madeAfterFirst);
+    const made = created.mock.results.map((r) => r.value as unknown);
+    for (const [, init] of fetchMock.mock.calls) expect(made).toContain((init as { dispatcher?: unknown }).dispatcher);
+
+    const blocked = Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('사내망·내부 주소는 읽을 수 없어요 (169.254.169.254.nip.io)'), { code: 'EBLOCKED' }) });
+    fetchMock.mockRejectedValueOnce(blocked);
+    const error = await new LlmClient().chatJson({ baseUrl: 'http://169.254.169.254.nip.io:1234/v1', apiKey: null }, 'm', [], format, options).catch((e: unknown) => e);
+    expect(error).toMatchObject({ kind: 'CONNECT' });
+    expect((error as LlmRequestError).message).toContain('링크 로컬·클라우드 메타데이터');
+    expect((error as LlmRequestError).message).not.toMatch(/nip\.io|1234|http/);
+    expect(String(warn.mock.calls.at(-1)?.[0])).toContain('169.254.169.254.nip.io');
+  });
+
   it('리다이렉트는 따라가지 않는다 (메타데이터 같은 다른 곳에 키·질문이 가지 않게, 이슈 #497)', async () => {
     fetchMock.mockResolvedValueOnce(reply('{"a":1}'));
     await new LlmClient().chatJson({ baseUrl: 'http://llm.test/v1', apiKey: 'secret-key' }, 'm', [], format, options);
@@ -124,6 +150,31 @@ describe('LlmClient.chatJson', () => {
     expect(await new LlmClient().listModels({ baseUrl: 'http://169.254.169.254/v1', apiKey: null }).catch((e: unknown) => e)).toBeInstanceOf(LlmRequestError);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(modelsMock).not.toHaveBeenCalled();
+  });
+
+  it('모델 목록 요청은 15초까지 기다리고 서버 종류 탐침은 5초만 기다린다: 바쁜 로컬 LLM의 연결 확인이 5초 만에 끊기지 않고, 멈춘 서버에서 1분 넘게 걸리지도 않는다 (이슈 #510)', async () => {
+    const timeouts: number[] = [];
+    const real = AbortSignal.timeout.bind(AbortSignal);
+    jest.spyOn(AbortSignal, 'timeout').mockImplementation((ms: number) => {
+      timeouts.push(ms);
+      return real(ms);
+    });
+    fetchMock.mockResolvedValueOnce(Response.json({ data: [{ id: 'm' }] }));
+    await new LlmClient().listModels(endpoint);
+    expect(timeouts[0]).toBe(15_000);
+    // 이어지는 서버 종류 탐침(LM Studio·Unsloth 고유 경로)은 모두 5초
+    expect(timeouts.length).toBeGreaterThan(1);
+    expect(timeouts.slice(1).every((ms) => ms === 5_000)).toBe(true);
+  });
+
+  it('모델 목록이 제한 시간 안에 안 오면 15초라고 알린다', async () => {
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    fetchMock.mockImplementationOnce(async () => {
+      throw Object.assign(new Error('timeout'), { name: 'TimeoutError' });
+    });
+    const error = await new LlmClient().listModels(endpoint).catch((e: unknown) => e);
+    expect(error).toMatchObject({ kind: 'TIMEOUT' });
+    expect((error as LlmRequestError).message).toContain('15초 안에 응답이 없어요');
   });
 
   it('parseJsonContent: 울타리 언어 표시가 없어도 읽는다', () => {

@@ -19,7 +19,7 @@ const nextConfig: NextConfig = {
   experimental: {
     // Next 프록시는 기본으로 응답 없이 30초가 지나면 끊는다. 철강맨AI 답·심층 조사·회의록 분석은 그보다 오래 말없이 일할 수 있다
     proxyTimeout: 30 * 60_000,
-    // 기본 10MB를 넘는 본문은 잘린다. 회의 녹음 올리기 상한(MEETING_AUDIO_MAX_BYTES 500MB)에 multipart 머리 여유를 더한다
+    // 기본 10MB를 넘는 본문은 잘린다. 회의 녹음 올리기 상한(MEETING_AUDIO_MAX_BYTES 500MiB)에 multipart 머리 여유를 더한다
     proxyClientMaxBodySize: '510mb',
   },
   async rewrites() {
