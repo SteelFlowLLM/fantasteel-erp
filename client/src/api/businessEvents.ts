@@ -59,7 +59,7 @@ export interface BusinessEventView {
   afterData: JsonValue | null;
   reasonCode: EventReasonCode | null;
   reasonText: string | null;
-  /** AI 경유 (P2 준비 중). 지금은 늘 false */
+  /** AI 경유 (REQ-AST-010): 철강맨AI 실행 카드로 확정한 작업이면 true */
   isAiAssisted: boolean;
   actionDraftId: number | null;
   messageId: number | null;

@@ -35,6 +35,10 @@ export interface SteelGradeView {
   steelGradeName: string;
   /** KS 규격 번호. 밀시트 표시 */
   standardNo: string;
+  /** 수정할 때 expectedUpdatedAt으로 돌려보낸다 (ISO 8601) */
+  updatedAt: string;
+  /** 이 강종을 쓰는 곳 이름(품목·배합 원단위·검사 기준·LOT). 하나라도 있으면 코드를 바꿀 수 없다 (서버가 같은 기준으로 막는다) */
+  codeLockedBy: string[];
 }
 
 export interface SpecMappingItemView {
@@ -54,6 +58,8 @@ export interface SpecMappingView {
   slabItem: SpecMappingItemView;
   coilItem: SpecMappingItemView;
   hotRollingYieldRate: string;
+  /** 수정할 때 expectedUpdatedAt으로 돌려보낸다 (ISO 8601) */
+  updatedAt: string;
 }
 
 /** API-172. 열연은 계획 수율 null (규격 매핑에서 계산) */

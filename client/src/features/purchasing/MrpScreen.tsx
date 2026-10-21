@@ -5,7 +5,7 @@
 // → 총소요 − 원료 LOT 잔량 − 입고예정(필요일까지 도착하는 확정 발주) = 순소요.
 // 원료 줄의 잔량·입고예정 칸은 이 계획들이 실제로 쓰는 몫이고, 전체 합계는 칸 아래 작은 글씨로 보인다.
 // "구매요청 만들기"는 순소요 줄(계획·원료)로 미리 채우고 production_plan_id를 연결한다. 같은 계획·원료는 한 번만 만든다.
-// 구매요청 자동 초안(REQ-PUR-005)은 P2라 준비 중이다.
+// 구매요청 자동 초안(REQ-PUR-005)은 AI Factory Agent가 원료 부족을 감지해 후보로 만든다 → /agent에서 담당 부서원이 확정한다.
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { PERMISSION, RAW_MATERIAL_TYPE_LABEL } from '@/codes';
@@ -14,7 +14,6 @@ import type { MrpPeriod, MrpRequirementsView, MrpRequisitionLineView } from '@/a
 import { Badge } from '@/components/Badge';
 import { Button, ButtonLink } from '@/components/Button';
 import { Card, CardBody, CardFoot, CardHead } from '@/components/Card';
-import { SoonButton } from '@/components/ComingSoon';
 import { DateInput } from '@/components/DateInput';
 import { Kpi, StatBar } from '@/components/Kpi';
 import { PageHead, PageMain } from '@/components/Page';
@@ -69,9 +68,9 @@ export function MrpScreen() {
         title="MRP"
         actions={
           <>
-            <SoonButton grade="P2" size="sm">
-              구매요청 자동 초안
-            </SoonButton>
+            <ButtonLink href="/agent" size="sm" icon="radar">
+              Agent 구매요청 후보
+            </ButtonLink>
             {canSeeRequisitions ? (
               <ButtonLink href="/purchase-requisitions" size="sm" icon="cart">
                 구매요청 목록

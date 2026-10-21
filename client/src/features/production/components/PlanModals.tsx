@@ -1,12 +1,12 @@
 'use client';
 
 // 생산계획 화면의 창: 계획 취소·히트 편성 확정 (PLANNED일 때만) · 재생산 계획 (여재·진행 계획을 먼저 확인, 14.1-6)
+import Link from 'next/link';
 import { useState } from 'react';
 import { PRODUCT_QTY_UNIT, PRODUCTION_PLAN_STATUS_LABEL, RESERVATION_STATUS_LABEL, type ProductItemType } from '@/codes';
 import { productionPlanApi, type ProductionPlanDetail, type ReproductionCheck } from '@/api/production';
 import { Banner } from '@/components/Banner';
 import { Button } from '@/components/Button';
-import { SoonButton } from '@/components/ComingSoon';
 import { Field } from '@/components/Field';
 import { Textarea } from '@/components/Input';
 import { KvList } from '@/components/KvList';
@@ -204,9 +204,12 @@ export function ReproductionModal({ check, itemType, onClose }: { check: Reprodu
           {surplusFirst > check.additionalPlanQty ? ` 진행 계획 잔여 목표로 덮인 몫도 재고로 먼저 잡으므로, 그 계획의 산출은 뒤에 여재로 남을 수 있어요.` : ''}
         </Banner>
       )}
-      <div className="flex items-center gap-2 text-cap text-ink-3">
-        <SoonButton size="sm">재생산 자동 초안</SoonButton>
-        AI Factory Agent의 재생산 초안은 담당 부서원이 확정하는 2등급 기능이에요.
+      <div className="text-cap text-ink-3">
+        합격 매수가 부족해지면 AI Factory Agent가 재생산 계획 후보를 만들어요. 담당 부서원이{' '}
+        <Link href="/agent" className="font-semibold text-run hover:underline">
+          AI Factory Agent
+        </Link>
+        에서 확정해요.
       </div>
     </Modal>
   );

@@ -10,16 +10,17 @@ import {
   type SteelGradeView,
   type SupplierView,
   type YardView,
+  type AuthUser,
 } from '@fantasteel/shared';
-import { RequirePermission } from '../../common/auth/auth.decorators';
+import { CurrentUser, RequirePermission } from '../../common/auth/auth.decorators';
 import { CreateItemDto, UpdateItemDto } from './dto/item.dto';
 import { ListItemsQuery } from './dto/list-items.query';
 import { CreateCustomerDto, CreateSupplierDto, CreateYardDto, UpdateCustomerDto, UpdateSupplierDto, UpdateYardDto } from './dto/partner.dto';
 import { UpdateProductionSettingDto } from './dto/production-setting.dto';
 import { CreateRoutingDto, UpdateRoutingDto } from './dto/routing.dto';
-import { CreateSpecMappingDto } from './dto/spec-mapping.dto';
+import { CreateSpecMappingDto, UpdateSpecMappingDto } from './dto/spec-mapping.dto';
 import { CreateSpecificConsumptionDto, UpdateSpecificConsumptionDto } from './dto/specific-consumption.dto';
-import { CreateSteelGradeDto } from './dto/steel-grade.dto';
+import { CreateSteelGradeDto, UpdateSteelGradeDto } from './dto/steel-grade.dto';
 import { MasterDataService } from './master-data.service';
 
 /**
@@ -73,6 +74,13 @@ export class MasterDataController {
     return this.service.createSteelGrade(dto);
   }
 
+  /** API-280 강종 수정 (이름·적용 규격 번호는 언제든, 코드는 쓰는 곳이 없을 때만. 불러온 뒤 바뀌었으면 COM-001) */
+  @Patch('steel-grades/:id')
+  @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
+  updateSteelGrade(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Body() dto: UpdateSteelGradeDto): Promise<SteelGradeView> {
+    return this.service.updateSteelGrade(user, id, dto);
+  }
+
   /** API-276 강종 삭제 (쓰는 곳이 있으면 COM-004, [05] 7-2) */
   @Delete('steel-grades/:id')
   @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
@@ -92,6 +100,20 @@ export class MasterDataController {
   @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
   createSpecMapping(@Body() dto: CreateSpecMappingDto): Promise<SpecMappingView> {
     return this.service.createSpecMapping(dto);
+  }
+
+  /** API-281 규격 매핑 수정 (수주·재고·예약·생산계획·LOT이 쓰는 규격이면 COM-004, 불러온 뒤 바뀌었으면 COM-001) */
+  @Patch('spec-mappings/:id')
+  @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
+  updateSpecMapping(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateSpecMappingDto): Promise<SpecMappingView> {
+    return this.service.updateSpecMapping(id, dto);
+  }
+
+  /** API-282 규격 매핑 삭제 (쓰는 곳이 있으면 COM-004). 지운 매핑을 돌려준다 */
+  @Delete('spec-mappings/:id')
+  @RequirePermission(PERMISSION.MASTER_MANAGE, 'USE')
+  deleteSpecMapping(@Param('id', ParseIntPipe) id: number): Promise<SpecMappingView> {
+    return this.service.deleteSpecMapping(id);
   }
 
   /** API-172 라우팅 */

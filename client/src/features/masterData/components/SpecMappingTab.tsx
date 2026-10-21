@@ -1,9 +1,9 @@
 'use client';
 
 // 규격 매핑 (REQ-MST-004): 슬래브 규격마다 대응 코일 규격 1개, 코일 1개 이론중량 ≤ 슬래브 1매 이론중량,
-// 열연 계획 수율 = 코일 ÷ 슬래브 (저장하지 않고 계산). 매핑 수정·삭제 API는 없다.
+// 열연 계획 수율 = 코일 ÷ 슬래브 (저장하지 않고 계산). 수정·삭제는 두 규격이 수주·재고·예약·생산계획·LOT에 쓰이지 않았을 때만(서버가 확인, API-281·282).
 import { useState } from 'react';
-import { masterDataApi, type MasterProductSpecView, type SpecBrief } from '@/api/masterData';
+import { masterDataApi, type MasterProductSpecView, type MasterSpecMappingView, type SpecBrief } from '@/api/masterData';
 import { Banner } from '@/components/Banner';
 import { Button } from '@/components/Button';
 import { Card, CardHead } from '@/components/Card';
@@ -13,7 +13,7 @@ import { Modal } from '@/components/Modal';
 import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
-import { MASTER_LOCK_TEXT, ModalFooter, TableFoot, formatYieldPercent } from '@/features/masterData/components/MasterParts';
+import { MASTER_LOCK_TEXT, ModalFooter, RowActions, TableFoot, formatYieldPercent, useMasterDelete } from '@/features/masterData/components/MasterParts';
 import { useAction } from '@/hooks/useAction';
 import { useMasterDataFieldErrors } from '@/hooks/useMasterDataForm';
 import { useMasterProductSpecs, useMasterSpecMappings, useMasterSteelGrades } from '@/hooks/useMasterData';
@@ -32,6 +32,8 @@ function SpecCell({ spec }: { spec: SpecBrief }) {
 export function SpecMappingTab({ canEdit }: { canEdit: boolean }) {
   const mappings = useMasterSpecMappings();
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<MasterSpecMappingView | null>(null);
+  const deletion = useMasterDelete();
   return (
     <Card petKey="card:masterData.mapping">
       <CardHead
@@ -56,6 +58,7 @@ export function SpecMappingTab({ canEdit }: { canEdit: boolean }) {
                     <Th>코일 규격</Th>
                     <Th align="right">코일 1개</Th>
                     <Th align="right">열연 계획 수율</Th>
+                    <Th aria-label="수정·삭제" />
                   </tr>
                 </thead>
                 <tbody>
@@ -73,6 +76,13 @@ export function SpecMappingTab({ canEdit }: { canEdit: boolean }) {
                       <Td align="right" className="font-semibold">
                         {formatYieldPercent(m.hotRollingPlannedYieldRate)}
                       </Td>
+                      <Td align="right">
+                        <RowActions
+                          canEdit={canEdit}
+                          onEdit={() => setEditing(m)}
+                          onDelete={() => deletion.open({ id: m.id, name: `${m.slab.itemCode} → ${m.coil.itemCode}`, object: '규격 매핑을', remove: masterDataApi.deleteSpecMapping })}
+                        />
+                      </Td>
                     </tr>
                   ))}
                 </tbody>
@@ -80,31 +90,36 @@ export function SpecMappingTab({ canEdit }: { canEdit: boolean }) {
               {rows.length === 0 ? <EmptyNote>매핑된 규격이 없어요</EmptyNote> : null}
             </div>
             <TableFoot>
-              열연 계획 수율은 저장하지 않고 두 규격의 1매 이론중량으로 계산해요 · 같은 강종끼리, 아직 매핑되지 않은 규격만 매핑해요 · 수주·재고·LOT에 쓰인 규격의 매핑은 지울
-              수 없어요
+              열연 계획 수율은 저장하지 않고 두 규격의 1매 이론중량으로 계산해요 · 같은 강종끼리, 아직 매핑되지 않은 규격만 매핑해요 · 수주·재고·예약·생산계획·LOT에 쓰인 규격의
+              매핑은 바꾸거나 지울 수 없어요
             </TableFoot>
           </>
         )}
       </QueryBoundary>
       {adding ? <SpecMappingModal onClose={() => setAdding(false)} /> : null}
+      {editing ? <SpecMappingModal key={editing.id} editing={editing} onClose={() => setEditing(null)} /> : null}
+      {deletion.dialog}
     </Card>
   );
 }
 
-function SpecMappingModal({ onClose }: { onClose: () => void }) {
+/** 규격 매핑 추가·수정. 수정은 지금 매핑의 두 규격도 고를 수 있어야 해서 그 규격을 "매핑 안 된" 목록에 함께 둔다 */
+function SpecMappingModal({ onClose, editing }: { onClose: () => void; editing?: MasterSpecMappingView }) {
   const specs = useMasterProductSpecs();
   const grades = useMasterSteelGrades();
   const fieldErrors = useMasterDataFieldErrors();
-  const [gradeId, setGradeId] = useState('');
-  const [slabId, setSlabId] = useState('');
-  const [coilId, setCoilId] = useState('');
+  const [gradeId, setGradeId] = useState(editing ? String(editing.steelGradeId) : '');
+  const [slabId, setSlabId] = useState(editing ? String(editing.slab.id) : '');
+  const [coilId, setCoilId] = useState(editing ? String(editing.coil.id) : '');
   const create = useAction(masterDataApi.createSpecMapping, { success: '규격을 매핑했어요', onSuccess: onClose, onError: fieldErrors.takeFrom });
+  const update = useAction(masterDataApi.updateSpecMapping, { success: '규격 매핑을 고쳤어요', onSuccess: onClose, onError: fieldErrors.takeFrom });
+  const free = (s: MasterProductSpecView) => s.mappingId === null || s.mappingId === editing?.id;
 
   const all = specs.data ?? [];
   const matchesGrade = (s: MasterProductSpecView) => !gradeId || s.steelGradeId === Number(gradeId);
-  const slabs = all.filter((s) => s.itemType === 'SLAB' && s.mappingId === null && matchesGrade(s));
+  const slabs = all.filter((s) => s.itemType === 'SLAB' && free(s) && matchesGrade(s));
   const slab = all.find((s) => s.id === Number(slabId));
-  const coils = all.filter((s) => s.itemType === 'COIL' && s.mappingId === null && matchesGrade(s) && (!slab || s.steelGradeId === slab.steelGradeId));
+  const coils = all.filter((s) => s.itemType === 'COIL' && free(s) && matchesGrade(s) && (!slab || s.steelGradeId === slab.steelGradeId));
   const coil = all.find((s) => s.id === Number(coilId));
   const tooHeavy = slab && coil ? compareDecimal(coil.theoreticalWeightTon, slab.theoreticalWeightTon) > 0 : false;
   const otherGrade = slab && coil ? slab.steelGradeId !== coil.steelGradeId : false;
@@ -112,16 +127,20 @@ function SpecMappingModal({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal
-      title="규격 매핑 추가"
+      title={editing ? `규격 매핑 수정 · ${editing.slab.itemCode}` : '규격 매핑 추가'}
       onClose={onClose}
       width={560}
       footer={
         <ModalFooter
-          pending={create.isPending}
+          pending={create.isPending || update.isPending}
           disabled={!slab || !coil || tooHeavy || otherGrade}
-          submitLabel="매핑"
+          submitLabel={editing ? '저장' : '매핑'}
           onCancel={onClose}
-          onSubmit={() => create.mutate({ slabItemId: slab?.id ?? null, coilItemId: coil?.id ?? null })}
+          onSubmit={() => {
+            const pair = { slabItemId: slab?.id ?? null, coilItemId: coil?.id ?? null };
+            if (editing) update.mutate({ ...pair, id: editing.id, expectedUpdatedAt: editing.updatedAt });
+            else create.mutate(pair);
+          }}
         />
       }
     >

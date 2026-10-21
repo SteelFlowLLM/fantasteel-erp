@@ -6,9 +6,9 @@ import { Fragment, useMemo, useState } from 'react';
 import { ACTOR_TYPE_LABEL, INSPECTION_RESULT_LABEL } from '@/codes';
 import { BUSINESS_EVENT_PAGE_SIZE, type BusinessEventFilter, type BusinessEventPage, type BusinessEventView } from '@/api/businessEvents';
 import { Button } from '@/components/Button';
-import { ComingSoon } from '@/components/ComingSoon';
 import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote, Spinner } from '@/components/StateView';
+import { AiAssistedTag } from '@/features/agent/components/SoonExampleParts';
 import { EventRow } from '@/features/businessEvents/components/EventRow';
 import { EVENT_TONE_DOT } from '@/features/businessEvents/lib/eventTone';
 import { useBusinessEvents } from '@/hooks/useBusinessEvents';
@@ -56,7 +56,7 @@ export function EventLegend() {
         {INSPECTION_RESULT_LABEL.FAIL}
       </span>
       <span data-pet-term="AI 경유" className="inline-flex items-center gap-1">
-        AI 경유 <ComingSoon grade="P2" />
+        <AiAssistedTag />
       </span>
     </span>
   );

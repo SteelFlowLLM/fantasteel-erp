@@ -7,12 +7,14 @@ import {
   INSPECTION_RESULT,
   NOTIFICATION_TYPE,
   PERMISSION,
+  ROLE,
   type ActionType,
   type AgentCandidateExecutionResult,
   type AgentCandidateView,
   type AgentDraftMeta,
   type AgentExplainView,
   type AgentRiskType,
+  type AgentScanView,
   type AuthUser,
   type DraftStatus,
   type Permission,
@@ -60,6 +62,8 @@ export interface AgentScanResult {
   detected: number;
   /** 새로 만든 초안 수 (같은 대상의 미처리 초안이 있으면 만들지 않는다) */
   created: number;
+  /** 규칙이 실패했을 때만 이유 */
+  error?: string;
 }
 
 /** 확정 전(수정·확정·반려할 수 있는) 상태 */
@@ -78,6 +82,10 @@ const CONFIRM_PERMISSION: Partial<Record<ActionType, Permission>> = {
  * 안 읽은 옛 알림이 없어지면 이 상수와 아래 두 곳의 목록을 지운다.
  */
 const LEGACY_ALERT_NOTIFICATION_TYPE = NOTIFICATION_TYPE.TASK_ASSIGNED;
+/** 🟡 가정값: 관리자가 지금 감지를 다시 돌릴 수 있는 최소 간격 (연타로 감지 쿼리가 몰리지 않게) */
+export const MANUAL_SCAN_MIN_INTERVAL_MS = 60_000;
+/** 규칙 실패 이유는 응답에 일반 문구만 싣고 원문(DB 오류 문구 등)은 서버 로그에만 남긴다 */
+const SCAN_FAILED_TEXT = '이 규칙을 돌리지 못했어요. 서버 로그를 확인해 주세요';
 /** 품질 부서 코드 (시드 조직) */
 const QUALITY_DEPARTMENT_CODE = 'QC';
 
@@ -101,6 +109,8 @@ export class FactoryAgentService {
   private readonly logger = new Logger(FactoryAgentService.name);
   /** 감지(스케줄·이벤트)는 한 번에 하나씩 돌려 같은 대상의 초안이 겹쳐 생기지 않게 한다 */
   private queue: Promise<unknown> = Promise.resolve();
+  /** 관리자가 마지막으로 지금 감지를 받아들인 시각 (서버 한 대 기준) */
+  private lastManualScanAt = 0;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -132,11 +142,27 @@ export class FactoryAgentService {
         try {
           results.push(await scan());
         } catch (e) {
-          this.logger.warn(`${riskType} 감지에 실패했어요: ${e instanceof Error ? e.message : String(e)}`);
+          const error = e instanceof Error ? e.message : String(e);
+          this.logger.warn(`${riskType} 감지에 실패했어요: ${error}`);
+          results.push({ riskType, detected: 0, created: 0, error });
         }
       }
       return results;
     });
+  }
+
+  /**
+   * 관리자가 감지를 지금 바로 돌린다 (스케줄 24시간을 기다리지 않게, 시연·점검용). 스케줄과 같은 규칙·같은 순서 큐·같은 중복 방지를 쓴다.
+   * 합격 매수 부족(GOOD_QTY_SHORTAGE)은 검사 등록 이벤트로만 감지해서 여기에 없다. 규칙이 실패하면 그 이유를 결과에 담는다.
+   */
+  async scanNow(user: AuthUser): Promise<AgentScanView> {
+    if (user.roleCode !== ROLE.ADMIN) throw new AppException('COM-002', '관리자만 Agent 위험 감지를 바로 돌릴 수 있어요');
+    const waitMs = this.lastManualScanAt + MANUAL_SCAN_MIN_INTERVAL_MS - Date.now();
+    if (waitMs > 0) throw new AppException('COM-004', `방금 감지를 돌렸어요. ${Math.ceil(waitMs / 1000)}초 뒤에 다시 해 주세요`, 429);
+    this.lastManualScanAt = Date.now();
+    const results = await this.scanAll();
+    this.logger.log(`Agent 감지를 관리자가 바로 돌렸어요 (사원 ${user.employeeId}): ${results.map((r) => `${r.riskType} ${r.created}/${r.detected}${r.error ? ' 실패' : ''}`).join(', ')}`);
+    return { ranAt: new Date().toISOString(), results: results.map((r) => ({ ...r, error: r.error === undefined ? null : SCAN_FAILED_TEXT })) };
   }
 
   /**

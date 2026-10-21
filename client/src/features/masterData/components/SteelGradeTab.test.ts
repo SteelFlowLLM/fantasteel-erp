@@ -19,6 +19,7 @@ const grade = (id: number, steelGradeCode: string): MasterSteelGradeView => ({
   steelmakingStandard: null,
   referenceText: null,
   updatedAt: '2026-10-14T00:00:00.000Z',
+  codeLockedBy: [],
 });
 
 function render(canEdit: boolean): string {

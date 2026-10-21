@@ -455,3 +455,87 @@ describe('기준정보 삭제 ([05] 7-2: 쓰는 곳이 없을 때만)', () => {
     expect(await reasonOf(`/customers/${customer.id}`)).toBe('쓰는 곳이 있어 삭제할 수 없어요: 수주');
   });
 });
+
+describe('강종 수정·규격 매핑 수정·삭제 (API-280·281·282, 이슈 #477)', () => {
+  const patch = <T>(path: string, payload: unknown, cookie = adminCookie) => send<T>('PATCH', path, payload, cookie);
+  const del = <T>(path: string, cookie = adminCookie) => send<T>('DELETE', path, undefined, cookie);
+
+  it('강종 수정: 이름·적용 규격 번호는 언제든, 코드는 쓰는 곳이 없을 때만 바꾼다', async () => {
+    const created = (await send<SteelGradeView>('POST', '/steel-grades', { steelGradeCode: 'UPD-01', steelGradeName: '수정 전', standardNo: 'KS D 0010' })).body.data;
+    const body = { steelGradeCode: 'UPD-01', steelGradeName: '수정 후', standardNo: 'KS D 0011', expectedUpdatedAt: created.updatedAt };
+    expect((await patch('/steel-grades/' + created.id, body, productionCookie)).body.error?.code).toBe('COM-002');
+    const updated = await patch<SteelGradeView>(`/steel-grades/${created.id}`, body);
+    expect(updated.status).toBe(200);
+    expect(updated.body.data).toMatchObject({ id: created.id, steelGradeCode: 'UPD-01', steelGradeName: '수정 후', standardNo: 'KS D 0011' });
+    expect(updated.body.data.updatedAt).not.toBe(created.updatedAt);
+
+    // 불러온 뒤 다른 곳에서 고쳤으면 COM-001
+    expect((await patch(`/steel-grades/${created.id}`, { ...body, steelGradeName: '늦은 수정' })).body.error?.code).toBe('COM-001');
+    // 쓰는 곳이 없으면 코드도 바꾼다. 다른 강종의 코드로는 못 바꾼다
+    expect((await patch(`/steel-grades/${created.id}`, { ...body, steelGradeCode: 'SS275', expectedUpdatedAt: updated.body.data.updatedAt })).body.error?.code).toBe('COM-004');
+    const renamed = await patch<SteelGradeView>(`/steel-grades/${created.id}`, { ...body, steelGradeCode: 'upd-02', expectedUpdatedAt: updated.body.data.updatedAt });
+    expect(renamed.body.data.steelGradeCode).toBe('UPD-02');
+    expect((await patch('/steel-grades/999999', body)).body.error?.code).toBe('COM-003');
+
+    // 품목이 쓰기 시작하면 이름·적용 규격 번호만 고칠 수 있다
+    const yard = (await get<YardView[]>('/yards')).body.data.find((y) => y.yardType === 'SLAB');
+    await send('POST', '/items', { itemType: 'SLAB', steelGradeId: created.id, thicknessMm: '200', widthMm: '1000', lengthMm: '8000', defaultYardId: yard?.id });
+    const locked = await patch(`/steel-grades/${created.id}`, { ...body, steelGradeCode: 'UPD-03', expectedUpdatedAt: undefined });
+    expect(locked.body.error).toMatchObject({ code: 'COM-004', message: expect.stringContaining('쓰는 곳이 있어 강종 코드는 바꿀 수 없어요: 품목') });
+    const nameOnly = await patch<SteelGradeView>(`/steel-grades/${created.id}`, { steelGradeCode: 'UPD-02', steelGradeName: '품목 있는 강종', standardNo: 'KS D 0012' });
+    expect(nameOnly.body.data).toMatchObject({ steelGradeCode: 'UPD-02', steelGradeName: '품목 있는 강종', codeLockedBy: ['품목'] });
+    // 목록도 같은 기준으로 코드를 잠글 이유를 내려 준다 (화면이 이 값으로 코드 칸을 잠근다)
+    const listed = (await get<SteelGradeView[]>('/steel-grades')).body.data;
+    expect(listed.find((g) => g.id === created.id)?.codeLockedBy).toEqual(['품목']);
+    expect(listed.find((g) => g.steelGradeCode === 'SS275')?.codeLockedBy).toEqual(expect.arrayContaining(['품목', '검사 기준']));
+    expect(updated.body.data.codeLockedBy).toEqual([]);
+  });
+
+  it('규격 매핑 수정·삭제: 짝을 다시 검사하고, 쓰는 곳이 있으면 막는다', async () => {
+    const grade = (await send<SteelGradeView>('POST', '/steel-grades', { steelGradeCode: 'MAP-01', steelGradeName: '매핑 시험', standardNo: 'KS D 0020' })).body.data;
+    const yards = (await get<YardView[]>('/yards')).body.data;
+    const yardOf = (type: string) => yards.find((y) => y.yardType === type)?.id;
+    const spec = async (itemType: 'SLAB' | 'COIL', thicknessMm: string, lengthMm: string) =>
+      (await send<ItemView>('POST', '/items', { itemType, steelGradeId: grade.id, thicknessMm, widthMm: '1200', lengthMm, defaultYardId: yardOf(itemType) })).body.data;
+    const slabA = await spec('SLAB', '200', '10000');
+    const slabB = await spec('SLAB', '220', '10000');
+    const coilA = await spec('COIL', '2', '980000');
+    const coilB = await spec('COIL', '1.5', '980000');
+    const coilHeavy = await spec('COIL', '2.5', '980000');
+
+    const mapA = (await send<SpecMappingView>('POST', '/spec-mappings', { slabItemId: slabA.id, coilItemId: coilA.id })).body.data;
+    const mapB = (await send<SpecMappingView>('POST', '/spec-mappings', { slabItemId: slabB.id, coilItemId: coilB.id })).body.data;
+    expect(mapA.updatedAt).toEqual(expect.any(String));
+
+    // 수정: 짝의 코일을 바꾸면 열연 계획 수율이 다시 계산된다. 권한은 기준정보 관리 사용
+    const change = { slabItemId: slabA.id, coilItemId: coilA.id, expectedUpdatedAt: mapA.updatedAt };
+    expect((await patch(`/spec-mappings/${mapA.id}`, change, productionCookie)).body.error?.code).toBe('COM-002');
+    // 자기 자신의 짝을 그대로 보내도 중복이 아니다 (저장만 다시)
+    const same = await patch<SpecMappingView>(`/spec-mappings/${mapA.id}`, change);
+    expect(same.body.data).toMatchObject({ id: mapA.id, hotRollingYieldRate: '0.9800' });
+    expect((await patch(`/spec-mappings/${mapA.id}`, { ...change, coilItemId: coilB.id, expectedUpdatedAt: same.body.data.updatedAt })).body.error?.code).toBe('COM-004'); // 다른 매핑이 쓰는 코일
+    expect((await patch(`/spec-mappings/${mapA.id}`, { ...change, coilItemId: coilHeavy.id, expectedUpdatedAt: same.body.data.updatedAt })).body.error?.code).toBe('COM-004'); // 코일이 더 무거움
+    // 불러온 뒤 다른 곳에서 고쳤으면 COM-001
+    expect((await patch(`/spec-mappings/${mapA.id}`, change)).body.error?.code).toBe('COM-001');
+    expect((await patch('/spec-mappings/999999', change)).body.error?.code).toBe('COM-003');
+
+    // 코일 B를 풀어 주면(매핑 B 삭제) 매핑 A가 코일 B로 옮겨 간다
+    expect((await del(`/spec-mappings/${mapB.id}`, productionCookie)).body.error?.code).toBe('COM-002');
+    expect((await del<SpecMappingView>(`/spec-mappings/${mapB.id}`)).body.data).toMatchObject({ id: mapB.id, slabItem: { id: slabB.id }, coilItem: { id: coilB.id } });
+    expect((await del(`/spec-mappings/${mapB.id}`)).body.error?.code).toBe('COM-003');
+    const moved = await patch<SpecMappingView>(`/spec-mappings/${mapA.id}`, { slabItemId: slabA.id, coilItemId: coilB.id, expectedUpdatedAt: same.body.data.updatedAt });
+    expect(moved.body.data).toMatchObject({ coilItem: { id: coilB.id }, hotRollingYieldRate: '0.7350' });
+
+    // 슬래브 규격에 수주가 있으면 바꾸지도 지우지도 못한다
+    const prisma = app.get(PrismaService);
+    const customer = await prisma.customer.create({ data: { customerCode: 'CUS-MAP', customerName: '매핑 시험 고객' } });
+    const owner = await prisma.employee.findUniqueOrThrow({ where: { employeeNo: '2103003' } });
+    await prisma.salesOrder.create({
+      data: { salesOrderNo: 'T-SO-MAP-1', customerId: customer.id, ownerEmployeeId: owner.id, salesOrderItems: { create: [{ itemId: slabA.id, orderedQty: 1, dueDate: new Date('2026-12-31T00:00:00Z') }] } },
+    });
+    const usedChange = { slabItemId: slabA.id, coilItemId: coilA.id, expectedUpdatedAt: moved.body.data.updatedAt };
+    expect((await patch(`/spec-mappings/${mapA.id}`, usedChange)).body.error).toMatchObject({ code: 'COM-004', message: '쓰는 곳이 있어 매핑을 바꿀 수 없어요: 수주' });
+    expect((await del(`/spec-mappings/${mapA.id}`)).body.error).toMatchObject({ code: 'COM-004', message: '쓰는 곳이 있어 매핑을 지울 수 없어요: 수주' });
+    expect((await get<SpecMappingView[]>('/spec-mappings')).body.data.some((m) => m.id === mapA.id)).toBe(true);
+  });
+});
