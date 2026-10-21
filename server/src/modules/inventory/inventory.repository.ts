@@ -4,6 +4,7 @@ import {
   allocateRollingQty,
   countEligibleAvailableLots,
   countUnallocatedPassedLotsByItem,
+  ensureInventoryRow,
   findAllocatableLots,
   findLotEligibility,
   lockInventoryByItemId,
@@ -65,8 +66,8 @@ export class InventoryRepository {
   }
 
   /** 재고 행이 없으면 만든다 (시드에 재고 행이 없고, 처음 적격이 될 때 생긴다) */
-  ensureInventory(tx: Tx, itemId: number) {
-    return tx.inventory.upsert({ where: { itemId }, create: { itemId }, update: {} });
+  async ensureInventory(tx: Tx, itemId: number): Promise<void> {
+    await tx.$queryRawTyped(ensureInventoryRow(itemId));
   }
 
   async countEligibleAvailableLots(tx: Tx, itemId: number): Promise<number> {
