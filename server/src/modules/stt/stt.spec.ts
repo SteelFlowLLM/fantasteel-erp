@@ -117,13 +117,85 @@ describe('SttClient.transcribe', () => {
     expect(init.headers).toEqual({});
   });
 
-  it('화자 수는 화자 분리 서버 모델일 때만 보낸다 (OpenAI는 모르는 칸을 거절할 수 있다)', async () => {
+  it('화자 수는 화자 분리 서버 모델일 때만 최대 화자 수로 보낸다 (OpenAI는 모르는 칸을 거절할 수 있다, 이슈 #522)', async () => {
     fetchMock.mockImplementation(async () => new Response(JSON.stringify({ text: '' }), { status: 200 }));
-    await new SttClient().transcribe(endpoint, { ...input, model: 'whisper-pyannote', speakerCount: 6 });
-    await new SttClient().transcribe(endpoint, { ...input, model: 'whisper-1', speakerCount: 6 });
+    await new SttClient().transcribe(endpoint, { ...input, model: 'whisper-pyannote', maxSpeakers: 6 });
+    await new SttClient().transcribe(endpoint, { ...input, model: 'whisper-1', maxSpeakers: 6 });
     const bodyOf = (call: number) => (fetchMock.mock.calls[call][1] as RequestInit).body as FormData;
-    expect(bodyOf(0).get('num_speakers')).toBe('6');
-    expect(bodyOf(1).get('num_speakers')).toBeNull();
+    expect(bodyOf(0).get('max_speakers')).toBe('6');
+    expect(bodyOf(0).get('num_speakers')).toBeNull();
+    expect(bodyOf(1).get('max_speakers')).toBeNull();
+  });
+
+  it('용어 힌트는 prompt로 어느 서버에나 보내고, 진행은 사이드카 모델에만 stream=progress로 청한다 (이슈 #522)', async () => {
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ text: '' }), { status: 200 }));
+    const onProgress = jest.fn();
+    await new SttClient().transcribe(endpoint, { ...input, model: 'whisper-1', prompt: '강종 SM355B', onProgress });
+    await new SttClient().transcribe(endpoint, { ...input, model: 'whisper', prompt: '강종 SM355B', onProgress });
+    await new SttClient().transcribe(endpoint, { ...input, model: 'whisper-pyannote' });
+    const bodyOf = (call: number) => (fetchMock.mock.calls[call][1] as RequestInit).body as FormData;
+    expect(bodyOf(0).get('prompt')).toBe('강종 SM355B');
+    expect(bodyOf(0).get('stream')).toBeNull();
+    expect(bodyOf(1).get('stream')).toBe('progress');
+    // 진행을 받을 곳이 없으면 청하지 않는다
+    expect(bodyOf(2).get('stream')).toBeNull();
+    expect(bodyOf(2).get('prompt')).toBeNull();
+  });
+
+  describe('사이드카 진행 응답 (NDJSON, 이슈 #522)', () => {
+    const ndjson = (lines: string[], chunkAt?: number) => {
+      const text = lines.join('\n');
+      const encoder = new TextEncoder();
+      // 줄 가운데에서 끊어 보내도 이어 읽는지 본다
+      const parts = chunkAt === undefined ? [text] : [text.slice(0, chunkAt), text.slice(chunkAt)];
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const part of parts) controller.enqueue(encoder.encode(part));
+          controller.close();
+        },
+      });
+      return new Response(body, { status: 200, headers: { 'content-type': 'application/x-ndjson; charset=utf-8' } });
+    };
+    const result = { text: '안녕하세요', duration: 12.5, segments: [{ id: 0, start: 0, end: 2, text: '안녕하세요', speaker: 'SPEAKER_1' }] };
+
+    it('진행 줄을 차례로 알리고 결과 줄을 전사로 바꾼다', async () => {
+      const lines = [
+        JSON.stringify({ type: 'progress', stage: 'diarize', current: 1, total: 1 }),
+        JSON.stringify({ type: 'progress', stage: 'transcribe', current: 1, total: 3 }),
+        JSON.stringify({ type: 'progress', stage: 'transcribe', current: 2, total: 3 }),
+        JSON.stringify({ type: 'result', result }),
+      ];
+      fetchMock.mockResolvedValueOnce(ndjson(lines, 37));
+      const onProgress = jest.fn();
+      const transcript = await new SttClient().transcribe(endpoint, { ...input, model: 'whisper-pyannote', onProgress });
+      expect(onProgress.mock.calls.map(([p]) => p)).toEqual([
+        { stage: 'diarize', current: 1, total: 1 },
+        { stage: 'transcribe', current: 1, total: 3 },
+        { stage: 'transcribe', current: 2, total: 3 },
+      ]);
+      expect(transcript).toEqual({ text: '안녕하세요', durationSec: 12.5, segments: [{ start: 0, end: 2, text: '안녕하세요', speaker: 'SPEAKER_1' }] });
+    });
+
+    it('오류 줄은 서버 오류로, 결과 없이 끝나면 끊겼다고 알린다', async () => {
+      fetchMock.mockResolvedValueOnce(ndjson([JSON.stringify({ type: 'progress', stage: 'transcribe', current: 1, total: 2 }), JSON.stringify({ type: 'error', status: 502, message: 'whisper 서버 오류' })]));
+      await expect(new SttClient().transcribe(endpoint, { ...input, model: 'whisper', onProgress: jest.fn() })).rejects.toThrow('HTTP 502): whisper 서버 오류');
+      fetchMock.mockResolvedValueOnce(ndjson([JSON.stringify({ type: 'progress', stage: 'transcribe', current: 1, total: 2 })]));
+      const error = await new SttClient().transcribe(endpoint, { ...input, model: 'whisper', onProgress: jest.fn() }).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(SttRequestError);
+      expect((error as SttRequestError).publicMessage).toContain('녹음을 다시 올려 주세요');
+    });
+
+    it('진행을 받는 쪽이 실패해도 받아쓰기는 끝까지 읽는다', async () => {
+      fetchMock.mockResolvedValueOnce(ndjson([JSON.stringify({ type: 'progress', stage: 'transcribe', current: 1, total: 1 }), JSON.stringify({ type: 'result', result })]));
+      const transcript = await new SttClient().transcribe(endpoint, {
+        ...input,
+        model: 'whisper',
+        onProgress: () => {
+          throw new Error('DB 끊김');
+        },
+      });
+      expect(transcript.text).toBe('안녕하세요');
+    });
   });
 
   it('401은 API 키 안내, 네트워크 실패는 서버 켜짐 안내', async () => {

@@ -218,6 +218,57 @@ describe('POST /meeting-minutes/audio (음성 → 전사)', () => {
     expect(row.transcript).toBe('통째 글');
   });
 
+  it('받아쓴 글이 없으면 빈 회의록이 아니라 말소리를 찾지 못했다는 실패로 끝낸다 (이슈 #522)', async () => {
+    sttClient.transcribe.mockResolvedValueOnce({ text: '', segments: [], durationSec: 30 });
+    const silent = await uploadAudio();
+    sttClient.transcribe.mockResolvedValueOnce({ text: '  ', segments: [{ start: 0, end: 1, text: '   ' }], durationSec: 1 });
+    const blank = await uploadAudio();
+    await runner.drain();
+    const rows = await prisma.meetingMinutes.findMany({ where: { id: { in: [silent.body.data.id, blank.body.data.id] } }, orderBy: { id: 'asc' } });
+    for (const row of rows) {
+      expect(row).toMatchObject({ meetingMinutesStatus: 'FAILED', transcript: null, transcriptionProgress: null });
+      expect(row.failureReason).toMatch(/^말소리를 찾지 못했어요/);
+    }
+  });
+
+  it('참석자 수를 최대 화자 수로, 참석자 이름·강종·원료·고객사를 짧은 용어 힌트로 보낸다 (이슈 #522)', async () => {
+    sttClient.transcribe.mockResolvedValueOnce({ text: '글', segments: [], durationSec: 1 });
+    await uploadAudio();
+    await runner.drain();
+    const [, input] = sttClient.transcribe.mock.calls[0] as [unknown, { maxSpeakers?: number; prompt?: string; onProgress?: unknown }];
+    expect(input.maxSpeakers).toBe(2);
+    expect(typeof input.onProgress).toBe('function');
+    expect(input.prompt?.length).toBeLessThanOrEqual(200);
+    expect(input.prompt).toMatch(/^참석자 정다은, /);
+    expect(input.prompt).toContain('강종 SM355A, SM355B');
+    expect(input.prompt).toContain('철광석 ORE01');
+    expect(input.prompt).toContain('가람중공업');
+  });
+
+  it('음성 서버가 알려 준 진행(조각 n/m)을 상세에 보이고 끝나면 지운다 (이슈 #522)', async () => {
+    let release: (value: SttTranscript) => void = () => undefined;
+    sttClient.transcribe.mockImplementation((...args: unknown[]) => {
+      const input = args[1] as { onProgress?: (p: { stage: 'diarize' | 'transcribe'; current: number; total: number }) => void };
+      input.onProgress?.({ stage: 'diarize', current: 1, total: 1 });
+      input.onProgress?.({ stage: 'transcribe', current: 3, total: 7 });
+      return new Promise<SttTranscript>((resolve) => (release = resolve));
+    });
+    const { body } = await uploadAudio();
+    expect(body.data.transcriptionProgress).toBeNull();
+    let progress: MeetingMinutesView['transcriptionProgress'] = null;
+    for (let i = 0; i < 50 && progress?.current !== 3; i += 1) {
+      progress = (await call<MeetingMinutesView>('GET', `/meeting-minutes/${body.data.id}`, purchaseCookie)).body.data.transcriptionProgress;
+      if (progress?.current !== 3) await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    expect(progress).toEqual({ phase: 'TRANSCRIBE', current: 3, total: 7 });
+
+    release({ text: '끝', segments: [{ start: 0, end: 1, text: '끝' }], durationSec: 1 });
+    await runner.drain();
+    const detail = await call<MeetingMinutesView>('GET', `/meeting-minutes/${body.data.id}`, purchaseCookie);
+    expect(detail.body.data).toMatchObject({ meetingMinutesStatus: 'TRANSCRIBED', transcriptionProgress: null });
+    expect((await prisma.meetingMinutes.findUniqueOrThrow({ where: { id: body.data.id } })).transcriptionProgress).toBeNull();
+  });
+
   it('음성 인식 실패는 FAILED와 한국어 이유로 남긴다', async () => {
     sttClient.transcribe.mockRejectedValueOnce(new SttRequestError('음성 인식 서버에 연결할 수 없어요'));
     const first = await uploadAudio();

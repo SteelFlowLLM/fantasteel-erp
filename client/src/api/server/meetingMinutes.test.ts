@@ -19,6 +19,7 @@ const view: MeetingMinutesView = {
   summary: null,
   analysisResult: null,
   analysisProgress: null,
+  transcriptionProgress: null,
   failureReason: null,
   creator: { id: 5, name: '정다은' },
   attendees: [{ employeeId: 5, employeeName: '정다은', departmentName: '구매부', roleCode: 'PURCHASE' }],

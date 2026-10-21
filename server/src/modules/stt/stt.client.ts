@@ -5,6 +5,12 @@ import { isBlockedServerHost, redactUrl } from '../../common/net/server-url';
 
 /** 긴 회의 녹음은 느린 엔진(VibeVoice 화자 분리 등)으로 돌리면 실시간보다 오래 걸릴 수 있다 */
 const SIDECAR_MODELS = new Set(['whisper-pyannote', 'vibevoice']);
+/**
+ * 진행(조각 n/m)을 한 줄 JSON으로 보내 주는 사이드카 엔진 (이슈 #522). 'whisper'는 사이드카에만 있는 이름이다
+ * (OpenAI는 whisper-1, whisper.cpp는 모델 이름과 모르는 칸을 무시한다)
+ */
+const SIDECAR_STREAM_MODELS = new Set(['whisper-pyannote', 'whisper', 'vibevoice']);
+const NDJSON_TYPE = 'application/x-ndjson';
 /** 모델 목록은 바로 와야 한다. 무음 확인은 whisper가 모델을 처음 올리는 동안 오래 걸릴 수 있다 */
 const MODEL_LIST_TIMEOUT_MS = 10_000;
 const MAX_MODEL_OPTIONS = 50;
@@ -36,8 +42,23 @@ export interface SttTranscribeInput {
   /** whisper.cpp는 무시한다. 비우면 OpenAI 호환 기본 이름을 보낸다 */
   model: string | null;
   language?: string;
-  /** 화자 분리 서버(tools/voice-sidecar)에만 보낸다. OpenAI는 모르는 칸을 거절할 수 있다 */
-  speakerCount?: number;
+  /**
+   * 화자 분리 서버(tools/voice-sidecar)에만 보낸다(OpenAI는 모르는 칸을 거절할 수 있다). 참석자 수를 최대 화자 수로 넘겨
+   * 말하지 않은 참석자가 있어도 한 사람을 둘로 쪼개지 않게 한다 (이슈 #522)
+   */
+  maxSpeakers?: number;
+  /** 용어 힌트(whisper initial prompt). whisper.cpp·OpenAI·사이드카 모두 받는다 (이슈 #522) */
+  prompt?: string;
+  /** 주면 사이드카에 진행을 함께 보내 달라고 한다(stream=progress). 다른 서버는 무시하고 한 번에 답한다 */
+  onProgress?: (progress: SttProgress) => void;
+}
+
+/** 사이드카가 알려 주는 진행: 화자 나누기(회의 전체 한 번) → 받아쓰기(조각마다) */
+export interface SttProgress {
+  stage: 'diarize' | 'transcribe';
+  /** 1부터 */
+  current: number;
+  total: number;
 }
 
 export interface SttSegment {
@@ -97,7 +118,9 @@ export class SttClient {
     form.append('language', input.language ?? 'ko');
     form.append('response_format', 'verbose_json');
     form.append('temperature', '0');
-    if (input.speakerCount && SIDECAR_MODELS.has(input.model ?? '')) form.append('num_speakers', String(input.speakerCount));
+    if (input.maxSpeakers && SIDECAR_MODELS.has(input.model ?? '')) form.append('max_speakers', String(input.maxSpeakers));
+    if (input.prompt) form.append('prompt', input.prompt);
+    if (input.onProgress && SIDECAR_STREAM_MODELS.has(input.model ?? '')) form.append('stream', 'progress');
 
     let res: Response;
     // 이 요청 하나만 쓰는 Agent: 응답 본문을 다 읽은 뒤(또는 실패하면 바로) 닫는다
@@ -119,13 +142,13 @@ export class SttClient {
         }
         throw new SttRequestError(connectFailureMessage(url, error), STT_CONNECT_PUBLIC_MESSAGE);
       }
-      return await this.readTranscribeResponse(res, url);
+      return await this.readTranscribeResponse(res, url, input.onProgress, timeoutMs);
     } finally {
       void agent.close().catch(() => undefined);
     }
   }
 
-  private async readTranscribeResponse(res: Response, url: string): Promise<SttTranscript> {
+  private async readTranscribeResponse(res: Response, url: string, onProgress: SttTranscribeInput['onProgress'], timeoutMs: number): Promise<SttTranscript> {
     if (res.status === 401 || res.status === 403) throw new SttRequestError('API 키가 맞지 않거나 권한이 없어요');
     if (res.status === 404) {
       // OpenAI는 모델 이름이 틀려도 404(model_not_found)를 주므로 서버가 준 이유를 함께 보인다
@@ -136,6 +159,7 @@ export class SttClient {
       );
     }
     if (!res.ok) throw new SttRequestError(`음성 인식 서버 오류 (HTTP ${res.status}): ${await errorMessageOf(res)}`);
+    if (res.headers.get('content-type')?.includes(NDJSON_TYPE)) return parseTranscript(await readProgressStream(res, onProgress, timeoutMs));
     let body: unknown;
     try {
       body = await res.json();
@@ -302,6 +326,69 @@ export function parseTranscript(body: unknown): SttTranscript {
     segments,
     durationSec: asNumber(root.duration) ?? lastEnd,
   };
+}
+
+const STREAM_CUT_MESSAGE = '음성 서버와 연결이 받아쓰는 도중에 끊겼어요';
+const STREAM_CUT_PUBLIC_MESSAGE = '음성 서버와 연결이 받아쓰는 도중에 끊겼어요. 녹음을 다시 올려 주세요';
+
+/**
+ * 사이드카의 진행 응답(이슈 #522): 한 줄에 JSON 하나 — {type:'progress', stage, current, total} … {type:'result', result}.
+ * 머리글을 보낸 뒤의 실패는 {type:'error', status, message} 줄로 온다. 결과 줄의 result를 돌려준다
+ */
+export async function readProgressStream(res: Response, onProgress: SttTranscribeInput['onProgress'], timeoutMs: number): Promise<unknown> {
+  if (!res.body) throw new SttRequestError('음성 인식 서버 응답이 비어 있어요');
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let result: { value: unknown } | null = null;
+  for (;;) {
+    let chunk: Awaited<ReturnType<typeof reader.read>>;
+    try {
+      chunk = await reader.read();
+    } catch (error) {
+      if (error instanceof Error && error.name === 'TimeoutError') {
+        throw new SttRequestError(`${Math.round(timeoutMs / 1000)}초 안에 받아쓰기가 끝나지 않았어요. 음성 서버 상태를 확인해 주세요`);
+      }
+      throw new SttRequestError(STREAM_CUT_MESSAGE, STREAM_CUT_PUBLIC_MESSAGE);
+    }
+    buffer += decoder.decode(chunk.value, { stream: !chunk.done });
+    // 마지막 줄은 줄바꿈 없이 끝날 수 있어 다 받은 뒤에는 남은 글도 한 줄로 읽는다
+    const lines = buffer.split('\n');
+    buffer = chunk.done ? '' : (lines.pop() ?? '');
+    for (const line of lines) result = progressLine(line, onProgress) ?? result;
+    if (chunk.done) break;
+  }
+  if (result === null) throw new SttRequestError(STREAM_CUT_MESSAGE, STREAM_CUT_PUBLIC_MESSAGE);
+  return result.value;
+}
+
+/** 진행 줄은 onProgress로 넘기고, 결과 줄이면 { value }를, 오류 줄이면 던진다. 모르는 줄은 버린다 */
+function progressLine(line: string, onProgress: SttTranscribeInput['onProgress']): { value: unknown } | null {
+  const text = line.trim();
+  if (!text) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new SttRequestError('음성 인식 서버 응답을 읽을 수 없어요');
+  }
+  if (typeof parsed !== 'object' || parsed === null) return null;
+  const row = parsed as Record<string, unknown>;
+  if (row.type === 'result') return { value: row.result };
+  if (row.type === 'error') {
+    const message = typeof row.message === 'string' ? row.message.slice(0, 200) : '알 수 없는 오류';
+    throw new SttRequestError(`음성 인식 서버 오류 (HTTP ${typeof row.status === 'number' ? row.status : 500}): ${message}`);
+  }
+  const current = asNumber(row.current);
+  const total = asNumber(row.total);
+  if (row.type === 'progress' && (row.stage === 'diarize' || row.stage === 'transcribe') && current !== null && total !== null && total >= 1) {
+    try {
+      onProgress?.({ stage: row.stage, current: Math.min(Math.max(1, Math.round(current)), Math.round(total)), total: Math.round(total) });
+    } catch {
+      // 진행 표시는 덤이다: 받는 쪽이 실패해도 받아쓰기는 이어 간다
+    }
+  }
+  return null;
 }
 
 /** 끝의 / 를 떼어 경로를 붙일 수 있게 한다 */
