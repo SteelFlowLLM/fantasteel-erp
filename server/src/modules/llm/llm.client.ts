@@ -168,8 +168,8 @@ interface LmStudioModelInfo {
 
 /** Unsloth Studio가 알려 주는 것 (이슈 #465) */
 interface UnslothInfo {
-  /** /v1/models의 loaded가 true인 모델 id */
-  loaded: string[];
+  /** /v1/models의 loaded가 true인 모델 id. 목록을 못 읽었으면 null(모름): 바쁜 서버가 시간 안에 못 준 것을 '불러온 모델 없음'으로 보면 안 된다 (#519) */
+  loaded: string[] | null;
   /** Settings > API > Model auto-switch. 못 읽으면 null */
   autoSwitch: boolean | null;
   /**
@@ -497,7 +497,8 @@ export class LlmClient {
    * 그사이 불러왔을 수 있어 한 번 다시 묻는다. auto-switch를 못 읽었으면 막지 않고 서버의 400을 바꿔 보인다.
    */
   private async readyServerInfo(endpoint: LlmEndpoint, model: string): Promise<LlmServerInfo> {
-    const notReady = (info: LlmServerInfo) => info.unsloth !== null && info.unsloth.autoSwitch === false && !info.unsloth.loaded.includes(model);
+    // 불러온 모델 목록을 못 읽었으면(모름) auto-switch를 못 읽었을 때처럼 막지 않는다. 정말 없으면 서버의 400을 바꿔 보인다
+    const notReady = (info: LlmServerInfo) => info.unsloth !== null && info.unsloth.autoSwitch === false && info.unsloth.loaded !== null && !info.unsloth.loaded.includes(model);
     let server = await this.serverInfo(endpoint);
     if (!notReady(server)) return server;
     server = await this.serverInfo(endpoint, { refresh: true });
@@ -557,7 +558,7 @@ export class LlmClient {
   private async serverInfo(endpoint: LlmEndpoint, { refresh = false } = {}): Promise<LlmServerInfo> {
     const root = normalizeBaseUrl(endpoint.baseUrl).replace(/\/v1$/, '');
     const cached = this.serverInfoCache.get(root);
-    if (!refresh && cached && Date.now() - cached.at < MODEL_INFO_TTL_MS) return cached.info;
+    if (!refresh && cached && Date.now() - cached.at < serverInfoTtlOf(cached.info)) return cached.info;
     const lmStudio = await this.lmStudioModelInfo(endpoint, root);
     const unsloth = lmStudio ? null : await this.unslothInfo(endpoint, root);
     const info: LlmServerInfo = { kind: lmStudio ? 'lmstudio' : unsloth ? 'unsloth' : 'openai', lmStudio, unsloth };
@@ -569,13 +570,13 @@ export class LlmClient {
   private async unslothInfo(endpoint: LlmEndpoint, root: string): Promise<UnslothInfo | null> {
     const status = await this.request<UnslothStatusWire>(endpoint, 'GET', '/status', undefined, MODELS_TIMEOUT_MS).catch(() => null);
     if (!status || typeof status.supports_reasoning !== 'boolean' || typeof status.reasoning_style !== 'string') return null;
-    const models = await this.request<{ data?: { id: string; loaded?: unknown }[] }>(endpoint, 'GET', '/models', undefined, MODELS_TIMEOUT_MS).catch(() => ({ data: [] }));
-    const loaded = (models.data ?? []).filter((m) => m.loaded === true).map((m) => m.id);
+    const models = await this.request<{ data?: { id: string; loaded?: unknown }[] }>(endpoint, 'GET', '/models', undefined, MODELS_TIMEOUT_MS).catch(() => null);
+    const loaded = models ? (models.data ?? []).filter((m) => m.loaded === true).map((m) => m.id) : null;
     const autoSwitch = await this.request<{ enabled?: unknown }>({ ...endpoint, baseUrl: root }, 'GET', '/api/settings/openai-auto-switch', undefined, MODELS_TIMEOUT_MS)
       .then((body) => (typeof body.enabled === 'boolean' ? body.enabled : null))
       .catch(() => null);
     const active =
-      loaded.length > 0 && new Set(loaded.map(unslothBaseName)).size === 1
+      loaded && loaded.length > 0 && new Set(loaded.map(unslothBaseName)).size === 1
         ? { ids: loaded, reasoningOptions: unslothReasoningOptions(status), vision: status.is_vision === true, contextLength: unslothContextLength(status) }
         : null;
     return { loaded, autoSwitch, active };
@@ -863,6 +864,10 @@ function unslothContextLength(status: UnslothStatusWire): number | null {
 function positiveInt(v: unknown): v is number {
   return typeof v === 'number' && Number.isInteger(v) && v > 0;
 }
+
+/** 불러온 모델 목록을 못 읽은(모름) 정보는 오래 기억하지 않고 곧 다시 묻는다 (#519) */
+const UNKNOWN_LOADED_TTL_MS = 5_000;
+const serverInfoTtlOf = (info: LlmServerInfo): number => (info.unsloth?.loaded === null ? UNKNOWN_LOADED_TTL_MS : MODEL_INFO_TTL_MS);
 
 /** Unsloth에 불러온 단 하나의 모델이 이 모델이면 그 정보 */
 function unslothActive(server: LlmServerInfo, model: string): UnslothInfo['active'] {
