@@ -66,6 +66,11 @@ export class ResearchErpLookup {
     private readonly llmClient: LlmClient,
   ) {}
 
+  /** 사원이 지금도 일하는지 (그만뒀으면 이미 모은 ERP 자료도 쓰지 않는다) */
+  async isActive(employeeId: number): Promise<boolean> {
+    return (await this.authUsers.load(employeeId)) !== null;
+  }
+
   async lookup(input: ErpLookupInput): Promise<ErpLookupResult> {
     const result: ErpLookupResult = { findings: [], calls: 0, failed: 0 };
     // 그만둔 사원은 권한을 알 수 없으니 ERP를 보지 않는다

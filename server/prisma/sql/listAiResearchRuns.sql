@@ -8,7 +8,7 @@ SELECT r.id,
        r.status,
        r.steps_used,
        (r.budget ->> 'maxSteps')::int AS max_steps,
-       jsonb_array_length(r.sources)::int AS source_count,
+       (SELECT count(*) FROM jsonb_array_elements(r.sources) AS s(source) WHERE s.source -> 'erp' IS NULL)::int AS source_count,
        r.created_at,
        r.updated_at,
        r.finished_at

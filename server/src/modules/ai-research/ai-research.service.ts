@@ -229,7 +229,7 @@ export class AiResearchService {
           last = 1;
         }
         const version = last + 1;
-        const started = revisionStart({ stepsUsed: run.stepsUsed, budget: readBudget(run.budget), state: storedState(run.researchState), sourceCount: storedSources(run.sources).length }, { version, instruction, search });
+        const started = revisionStart({ stepsUsed: run.stepsUsed, budget: readBudget(run.budget), state: storedState(run.researchState), sourceCount: storedSources(run.sources).filter((s) => !isErpSource(s)).length }, { version, instruction, search });
         // 그 사이 다른 요청(고치기·더 조사하기)이 먼저 줄에 세웠으면 updatedAt이 달라 0건이다
         const { count } = await this.repository.updateOwned(tx, { id, employeeId: user.employeeId, status: [AI_RESEARCH_STATUS.COMPLETED], updatedAt: run.updatedAt }, {
           status: AI_RESEARCH_STATUS.QUEUED,

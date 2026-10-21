@@ -338,7 +338,8 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     const session = this.webTools.session(run.employeeId, { offerTools: false, maxSearches: Number.MAX_SAFE_INTEGER, maxReads: Number.MAX_SAFE_INTEGER });
     // 계획을 복사한 다시 조사처럼 ERP 자료를 아직 살펴보지 않았거나, 더 검색하는 고치기의 부탁이 아직 살펴보지 않은 것이면 한 번 살펴본다 (이슈 #435)
     const askRevision = work.state.revision?.search === true && work.state.revision.erpChecked !== true ? work.state.revision : null;
-    if (!work.state.erpChecked || askRevision) {
+    // 검색 없는 고치기는 모은 것으로 다시 쓸 뿐이라 조회하지 않는다
+    if ((!work.state.erpChecked && work.state.revision?.search !== false) || askRevision) {
       const events = await this.gatherErp(ctx, endpoint, run.employeeId, run.question, work.sources, askRevision?.instruction);
       work.state = { ...work.state, erpChecked: true, ...(work.state.revision ? { revision: { ...work.state.revision, erpChecked: true as const } } : {}) };
       await this.save(ctx, AI_RESEARCH_STATUS.RUNNING, { researchState: json(work.state), ...(events.length ? { sources: json(work.sources) } : {}) }, events);
@@ -347,6 +348,11 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     for (const source of work.sources) {
       if (source.erp) session.observeErpResult(source.readText ?? '');
       else session.rememberVisited(source.url, source.title);
+    }
+    // 그만둔 사원의 조사는 이미 모은 ERP 자료도 근거로 쓰지 않는다 (거래처 이름 막기는 위에서 끝났다)
+    if (work.sources.some(isErpSource) && !(await this.erpLookup.isActive(run.employeeId))) {
+      work.sources = work.sources.filter((s) => !isErpSource(s));
+      await this.save(ctx, AI_RESEARCH_STATUS.RUNNING, { sources: json(work.sources) }, []);
     }
 
     const notes: string[] = [];

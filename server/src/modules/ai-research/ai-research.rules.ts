@@ -177,11 +177,30 @@ export function readPlan(value: unknown, question: string, partnerNames: readonl
   return { plan: { title: cutText(oneLine(title), AI_RESEARCH_LIMITS.planTitleMax), steps }, dropped };
 }
 
-/** 모델이 계획을 내지 못했을 때: 질문을 그대로 검색어로 (검색어 확인을 통과할 때만) */
+/**
+ * 모델이 계획을 내지 못했을 때: 질문을 그대로 검색어로 (검색어 확인을 통과할 때만).
+ * 조회한 ERP 자료의 거래처 이름 때문에만 막혔으면(질문에 이름을 직접 적은 경우) 이름을 뺀 일반 검색어로 대신한다. 사용자가 계획에서 고칠 수 있다 (이슈 #435)
+ */
 export function fallbackPlan(question: string, partnerNames: readonly string[] = []): AiResearchPlan | null {
-  const checked = checkResearchQuery(question, partnerNames);
-  if (!checked.ok) return null;
-  return { title: cutText(oneLine(question), AI_RESEARCH_LIMITS.planTitleMax), steps: [{ title: '질문 그대로 찾아보기', query: checked.query }] };
+  const exact = checkResearchQuery(question, partnerNames);
+  if (exact.ok) return { title: cutText(oneLine(question), AI_RESEARCH_LIMITS.planTitleMax), steps: [{ title: '질문 그대로 찾아보기', query: exact.query }] };
+  if (!checkResearchQuery(question).ok) return null;
+  const general = withoutPartnerNames(question, partnerNames);
+  const checked = general ? checkResearchQuery(general, partnerNames) : null;
+  if (!checked?.ok) return null;
+  return { title: cutText(oneLine(question), AI_RESEARCH_LIMITS.planTitleMax), steps: [{ title: '거래처 이름을 뺀 일반 검색', query: checked.query }] };
+}
+
+/** 글에서 거래처 이름을 뺀다 (이름 안의 공백·대소문자는 무시, 검색어 확인과 같은 기준) */
+function withoutPartnerNames(text: string, partnerNames: readonly string[]): string {
+  let result = text;
+  for (const name of partnerNames) {
+    const letters = [...name.replace(/\s+/g, '')];
+    if (letters.length < 2) continue;
+    const pattern = letters.map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s*');
+    result = result.replace(new RegExp(pattern, 'gi'), ' ');
+  }
+  return result.replace(/\s+/g, ' ').trim();
 }
 
 /** DB의 plan jsonb (서버가 쓴 값이라 모양만 확인) */

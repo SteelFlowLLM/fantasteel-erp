@@ -466,6 +466,18 @@ describe('Notion 내보내기 마크다운', () => {
     expect(markdown).toContain('심층 조사 #7');
   });
 
+  it('Notion 내보내기: ERP 출처는 링크 없는 글로 출처 목록에 넣는다 (본문의 [n]이 가리킬 곳)', () => {
+    const view = toRunView(
+      { ...run, report: '# 제목\n우리 재고 [1]. 시황 [2].', sources: [{ id: 1, title: 'ERP 조회(get_inventory)', url: 'erp:get_inventory', snippet: '', readText: '{}', erp: { tool: 'get_inventory', arguments: '{}' } }, { id: 2, title: '웹', url: 'https://example2.com/a', snippet: '' }] } as unknown as AiResearchRun,
+      [],
+      0,
+    );
+    const markdown = buildResearchNotionMarkdown(view);
+    expect(markdown).toContain('## 출처\n- \\[1\\] ERP 조회(get_inventory)\n- \\[2\\] [웹](https://example2.com/a)');
+    expect(markdown).not.toContain('erp:get_inventory');
+    expect(view.sourceCount).toBe(1);
+  });
+
   it('철강맨AI 질문의 보고서 맥락: 출처 목록 + 보고서(서버 목록 뺌), 답의 [n]만 출처로', () => {
     const context = buildResearchContext({ id: 7, question: '질문', plan: run.plan, report: run.report, sources: run.sources }, 2000);
     expect(context.text).toContain('<untrusted_web_content source="research:report">');
@@ -803,6 +815,19 @@ describe('우리 ERP 자료 (이슈 #435)', () => {
       expect(storedSources(JSON.parse(JSON.stringify([a, source(2)])))[0].erp).toEqual({ tool: 'get_inventory', arguments: '{}' });
     });
 
+    it('질문에 거래처 이름을 직접 적어 계획이 비면 이름을 뺀 일반 검색 단계로 대신한다 (조사를 실패시키지 않는다)', () => {
+      const partners = ['한빛철강'];
+      expect(fallbackPlan('한빛철강 납기 지연 사례', partners)).toEqual({ title: '한빛철강 납기 지연 사례', steps: [{ title: '거래처 이름을 뺀 일반 검색', query: '납기 지연 사례' }] });
+      // 이름 안의 공백·대소문자가 달라도 뺀다
+      expect(fallbackPlan('한빛 철강의 납기 지연', partners)?.steps[0].query).toBe('의 납기 지연');
+      // 이름 말고 막힌 이유(업무 번호)가 있으면 그대로 없다
+      expect(fallbackPlan('한빛철강 SO-2610-001 납기', partners)).toBeNull();
+      // 이름뿐이면 대신할 검색어가 없다
+      expect(fallbackPlan('한빛철강', partners)).toBeNull();
+      // 이름이 없으면 질문 그대로
+      expect(fallbackPlan('열연 가격 전망', partners)?.steps[0]).toEqual({ title: '질문 그대로 찾아보기', query: '열연 가격 전망' });
+    });
+
     it('조회 결과에 나온 거래처 이름은 계획·검색어 확인에서 막는다. 웹 출처 자리와 출처 없이 끝내기에는 ERP 출처를 세지 않는다', () => {
       const orders = erp(1, 'get_sales_orders', '{"수주":[{"고객사":"한빛철강","수량":10}]}');
       const partners = erpPartnerNames([orders, source(2)]);
@@ -812,7 +837,7 @@ describe('우리 ERP 자료 (이슈 #435)', () => {
       expect(checkResearchQuery('열연 가격 전망', partners).ok).toBe(true);
       const readable = readPlan({ title: 't', steps: [{ title: 'a', query: '한빛 철강 재무' }, { title: 'b', query: '열연 가격 전망' }] }, 'q', partners);
       expect(readable?.plan.steps.map((s) => s.query)).toEqual(['열연 가격 전망']);
-      expect(fallbackPlan('한빛철강 신용', partners)).toBeNull();
+      expect(fallbackPlan('한빛철강 신용', partners)?.steps.map((s) => s.query)).toEqual(['신용']);
       // 모델이 거래처 이름으로 검색하려 하면 계획의 다음 검색어로
       const ctx = { plan, searchedQueries: [] as string[], sources: [orders], maxSources: 1, partnerNames: partners };
       expect(decideAction(readTurn({ action: 'search', query: '한빛철강 거래 이력' }), ctx)).toEqual({ kind: 'search', query: '전기로 탄소 배출량', fallback: true });
