@@ -257,6 +257,8 @@ export const MESSAGE_SEARCH_SIZE = 30;
 export const MESSAGE_CONTENT_MAX = 4000;
 /** 그룹방 이름 최대 길이 */
 export const CHAT_ROOM_NAME_MAX = 100;
+/** 방 만들기·초대 한 번에 고를 수 있는 사원 수 (가정값, 이슈 #488). 회사 사원 수보다 넉넉하게 */
+export const CHAT_MEMBER_PICK_MAX = 200;
 /** 메시지 목록 한 번에 불러오는 기본·최대 개수 */
 export const MESSAGE_PAGE_SIZE = 50;
 export const MESSAGE_PAGE_SIZE_MAX = 100;
