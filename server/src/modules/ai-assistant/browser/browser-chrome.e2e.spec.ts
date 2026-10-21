@@ -441,6 +441,51 @@ e2e('브라우저 사용 — 설치된 Chrome (BROWSER_E2E=1)', () => {
     expect(pool.activeContexts).toBe(0);
   });
 
+  it('빈 탭을 미리 열어 두면 사람이 주소창에 넣어 옮긴 페이지를 다음 질문이 지금 페이지로 알고 다시 열 수 있다 (이슈 #433)', async () => {
+    const box = toolbox();
+    const link = web();
+    expect(await box.openWindow({ question: '', web: link }, 'win')).toBe('opened');
+    expect(pool.activeContexts).toBe(1);
+    // 아직 아무 페이지도 없다. 이미 열려 있으면 그대로 둔다
+    expect(box.openPage('win')).toBeNull();
+    expect(await box.openWindow({ question: '', web: link }, 'win')).toBe('already');
+    expect(pool.activeContexts).toBe(1);
+
+    // 사람이 창의 주소창에 넣어 옮긴 것을 흉내 낸다 (AI 동작이 아니다)
+    const page = contexts.at(-1)?.pages()[0];
+    if (!page) throw new Error('페이지 없음');
+    await page.goto('https://example.test/page/2?q=secret', { waitUntil: 'domcontentloaded' });
+    await until(() => box.openPage('win') !== null, 3_000);
+    expect(box.openPage('win')).toEqual({ title: '2쪽', url: 'https://example.test/page/2?q=secret' });
+    expect(link.visited).toContain('https://example.test/page/2?q=secret');
+
+    // 다음 질문은 그 탭을 이어 받고, 질문·웹 결과에 없던 그 주소도 browser_open으로 다시 열 수 있다
+    const next = web();
+    const second = box.session({ question: '이 화면에서 해 줘', web: next }, 'win');
+    try {
+      expect(next.visited).toContain('https://example.test/page/2?q=secret');
+      const snapshot = await second.run(call('browser_snapshot'));
+      expect(snapshot.content).toContain('두 번째 쪽이에요');
+      const reopened = await second.run(call('browser_open', { url: 'https://example.test/page/2?q=secret' }));
+      expect(reopened.content).toContain('두 번째 쪽이에요');
+      // 그 열쇠로 답하는 중에는 새 탭을 만들지 않는다
+      expect(await box.openWindow({ question: '', web: web() }, 'win')).toBe('busy');
+    } finally {
+      await box.finish(second, 'win', true);
+    }
+    expect(pool.activeContexts).toBe(0);
+
+    // 닫힌 탭은 이미 열려 있는 것으로 보지 않고 새로 연다
+    expect(await box.openWindow({ question: '', web: web() }, 'win')).toBe('opened');
+    await contexts.at(-1)?.pages()[0]?.close();
+    await until(() => pool.activeContexts === 0, 3_000);
+    expect(await box.openWindow({ question: '', web: web() }, 'win')).toBe('opened');
+    const reopenedPage = contexts.at(-1)?.pages()[0];
+    expect(reopenedPage?.url()).toBe('about:blank');
+    await box.finish(box.session({ question: '닫아줘', web: web() }, 'win'), 'win', true);
+    expect(pool.activeContexts).toBe(0);
+  });
+
   it('PDF 링크는 번호로 읽고, 모델용 사진에만 노란 번호 표가 있고 사람에게 보내는 사진·실시간 화면에는 없다 (이슈 #427)', async () => {
     const link = web();
     const live: BrowserLiveFrame[] = [];

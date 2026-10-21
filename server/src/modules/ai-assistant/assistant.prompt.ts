@@ -123,9 +123,11 @@ export function browserRules(options: { actionCards: boolean; openPage?: { title
     `B6. 브라우저로 알아낸 내용은 문장 끝에 [페이지 제목](주소)로 그 페이지 링크를 붙여 알려요(규칙 1의 예외). 한 답에 브라우저 동작은 ${options.maxActions ?? 40}번, ${options.timeLimitMinutes ?? 10}분까지예요(화면 읽기와 실패한 동작은 세지 않지만, 같은 동작을 연달아 되풀이하면 막혀요). 작업 중 "[사용자가 작업 중에 덧붙인 말]"이 오면 사용자의 새 부탁이니 반영해 이어 가요.`,
     ...(options.openPage
       ? [
-          `B7. 지난 질문에서 연 브라우저 탭이 아직 열려 있어요: "${options.openPage.title.replace(/["\n]/g, ' ').slice(0, 100)}" (${options.openPage.url.slice(0, 300)}). 그 페이지를 이어서 보라는 부탁("다음 페이지", "거기서 …")이면 browser_open 없이 browser_snapshot으로 지금 화면부터 읽어요. 지난 질문에서 본 주소는 다시 열 수 있어요.`,
+          `B7. 열어 둔 브라우저 탭이 아직 열려 있어요(지난 질문에서 연 것이거나 사용자가 창에서 직접 연 것): "${options.openPage.title.replace(/["\n]/g, ' ').slice(0, 100)}" (${options.openPage.url.slice(0, 300)}). 그 페이지를 이어서 보라는 부탁("다음 페이지", "거기서 …", "이 화면에서 해 줘")이면 browser_open 없이 browser_snapshot으로 지금 화면부터 읽어요. 지금까지 본 주소는 다시 열 수 있어요.`,
         ]
       : []),
+    // 사용자가 멈춘 동안 화면을 직접 조작하면 번호가 바뀌므로 먼저 다시 읽게 한다 (이슈 #433)
+    'B7-1. "사용자가 직접 조작했어요"라는 안내가 오면 사용자가 멈춘 동안 화면을 직접 눌렀거나 글을 넣은 거예요. 지난 번호는 쓰지 말고 browser_snapshot으로 지금 화면을 다시 읽은 뒤 이어 가요. 사용자가 넣은 글(특히 비밀번호 칸)은 화면 글에 나오지 않아도 그대로 두고, 다시 지우거나 건드리지 않아요.',
     // Chrome은 내려받기를 막아 PDF 링크를 눌러도 화면이 그대로다 (이슈 #427)
     'B8. PDF·문서 파일 링크는 누르지 말고 browser_read_file로 읽어요(ref에 링크 번호).',
     ...(options.vision

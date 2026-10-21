@@ -113,7 +113,7 @@ export class BrowserPool {
     if (this.env.AI_BROWSER_ENABLED?.trim().toLowerCase() !== 'true') return { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요' };
     if (!this.executable().found) return { available: false, reason: '서버에 Google Chrome이 없어요' };
     if (this.launchFailedAt !== null && this.now() - this.launchFailedAt < LAUNCH_RETRY_MS) return { available: false, reason: 'Chrome을 띄우지 못했어요' };
-    return { available: true };
+    return { available: true, windowed: !this.headless };
   }
 
   /**

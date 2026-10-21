@@ -5,6 +5,7 @@ import type {
   AiAssistantReplyView,
   AiAssistantStreamEvent,
   AiAssistantSuggestedQuestionsView,
+  AiBrowserWindowView,
   AiChatThreadSummaryView,
   AiChatThreadView,
   AuthUser,
@@ -14,7 +15,7 @@ import { AppException } from '../../common/errors/app.exception';
 import type { Response } from 'express';
 import { LlmAbortedError, LlmRequestError } from '../llm/llm.client';
 import { CurrentUser } from '../../common/auth/auth.decorators';
-import { AskAiAssistantDto, ExecuteAiActionCardDto, ListAiChatThreadsQuery, AgentControlDto, AgentInputDto, AgentNoteDto, ScreenActionResultDto, agentInputOf } from './dto/ai-assistant.dto';
+import { AskAiAssistantDto, ExecuteAiActionCardDto, ListAiChatThreadsQuery, AgentControlDto, AgentInputDto, AgentNoteDto, BrowserWindowDto, ScreenActionResultDto, agentInputOf } from './dto/ai-assistant.dto';
 import { AiAssistantService } from './ai-assistant.service';
 import { AiChatThreadService } from './chat/ai-chat-thread.service';
 
@@ -131,6 +132,16 @@ export class AiAssistantController {
   addAgentNote(@CurrentUser() user: AuthUser, @Param('controlId', new ParseUUIDPipe()) controlId: string, @Body() dto: AgentNoteDto): { accepted: true } {
     this.service.addAgentNote(user, controlId, dto.text);
     return { accepted: true };
+  }
+
+  /**
+   * [브라우저 창 열기] (문서에 없는 기능, 이슈 #433). 이 대화 열쇠의 빈 브라우저 탭을 미리 열어 둔다. 서버 컴퓨터에 창이 뜨는 설정(BROWSER_HEADLESS=false)에서
+   * 사람이 창의 주소창에 직접 넣어 옮긴 페이지를 다음 질문의 AI가 '지금 페이지'로 안다. 열쇠는 사원 번호와 묶여 남의 탭은 쓰지 않는다
+   */
+  @Post('ai-assistant/browser/window')
+  @HttpCode(200)
+  openBrowserWindow(@CurrentUser() user: AuthUser, @Body() dto: BrowserWindowDto): Promise<AiBrowserWindowView> {
+    return this.service.openBrowserWindow(user, dto.browserSessionId);
   }
 
   /** 지금 모델이 사진·생각 정도를 지원하는지, 웹 검색 엔진·장소 검색·브라우저 사용을 쓸 수 있는지 (문서에 없는 기능, 2026-10-16 추가, 이슈 #367·#373) */

@@ -137,6 +137,13 @@ export interface AiBrowserCapabilities {
   maxActions?: number;
   /** 관리자가 '모든 사이트 열기'를 켰는지 (이슈 #430). 켜면 목록 밖 주소도 연다 */
   openAllSites?: boolean;
+  /** 서버 컴퓨터에 Chrome 창이 뜨는지(BROWSER_HEADLESS=false). 그때만 [브라우저 창 열기]로 사람이 창 주소창에 직접 넣을 수 있다 (이슈 #433) */
+  windowed?: boolean;
+}
+
+/** POST /ai-assistant/browser/window 결과 (이슈 #433). opened: 새로 열었다, 이미 열려 있던 탭이면 false */
+export interface AiBrowserWindowView {
+  opened: boolean;
 }
 
 /** 웹 검색 엔진: 네이버 검색 API → 다음(카카오) 웹 검색(각각 키가 있을 때) → DuckDuckGo HTML → 위키백과 순으로 쓴다 */

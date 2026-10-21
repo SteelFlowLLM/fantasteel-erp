@@ -778,6 +778,9 @@ describe('AiAssistantService', () => {
       // 멈춘 동안 사람이 보낸 조작과, 브라우저가 돌려줄 결과 (이슈 #433)
       const humanInputs: AiAgentInput[] = [];
       let humanOutcome: 'ok' | 'blocked' | 'closed' = 'ok';
+      // [브라우저 창 열기]가 받은 열쇠와 입력, 돌려줄 결과 (이슈 #433)
+      const windows: Array<{ key: string; input: BrowserSessionInput }> = [];
+      let windowOutcome: 'opened' | 'already' | 'busy' = 'opened';
       const frame = { url: 'news.example.kr/a', title: '3고로 소식', imageBase64: '/9j/AAAA', at: '2026-10-17T00:00:00.000Z' };
       const toolbox = {
         capabilities: () => (available ? { available: true } : { available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요' }),
@@ -820,6 +823,10 @@ describe('AiAssistantService', () => {
           openPageKeys.push(key);
           return openPage;
         },
+        openWindow: async (input: BrowserSessionInput, key: string) => {
+          windows.push({ key, input });
+          return windowOutcome;
+        },
         // 실제 모음은 열쇠가 있고 멈추지 않았으면 탭을 열어 두므로, 가짜는 닫지 않고 기록만 한다 (열쇠 없음·멈춤은 닫는다)
         finish: async (session: { close: () => Promise<void> }, key: string | null, aborted: boolean) => {
           finishes.push({ key, aborted });
@@ -836,6 +843,8 @@ describe('AiAssistantService', () => {
         setOpenPage: (page: { title: string; url: string } | null) => void (openPage = page),
         setLive: (frame: { url: string; imageBase64: string; at: string } | null) => void (live = frame),
         setModelImages: (on: boolean) => void (modelImages = on),
+        windows,
+        setWindowOutcome: (outcome: 'opened' | 'already' | 'busy') => void (windowOutcome = outcome),
         humanInputs,
         setHumanOutcome: (outcome: 'ok' | 'blocked' | 'closed') => void (humanOutcome = outcome),
         closed: () => closed,
@@ -1039,6 +1048,41 @@ describe('AiAssistantService', () => {
       expect(second.calls[0].messages[0].content).toContain('바깥 웹 주소를 어디든 열 수 있어요');
       expect(second.calls[0].messages[0].content).not.toContain('시작 사이트(네이버·다음·위키백과·정부 go.kr 등)만 열 수 있어요');
       expect((await second.service.capabilities()).browser).toMatchObject({ available: true, maxActions: DEFAULT_BROWSER_MAX_ACTIONS, openAllSites: true });
+    });
+
+    describe('브라우저 창 열기 (이슈 #433)', () => {
+      const SESSION_ID = '3f2b8c1e-5d4a-4b7e-9a10-2c6d8e0f1a23';
+      const codeOf = async (promise: Promise<unknown>) => {
+        try {
+          await promise;
+          return 'ok';
+        } catch (error) {
+          return ((error as AppException).getResponse() as { code: string }).code;
+        }
+      };
+
+      it('사원 번호와 묶은 열쇠로 빈 탭을 열고, 이미 열려 있으면 새로 열지 않았다고 알린다', async () => {
+        const browser = fakeBrowser();
+        const { service } = setup({}, async () => answer(''), undefined, undefined, undefined, browser.toolbox);
+        expect(await service.openBrowserWindow(user, SESSION_ID)).toEqual({ opened: true });
+        expect(browser.windows.map((w) => w.key)).toEqual([`${user.employeeId}:${SESSION_ID}`]);
+        // 시작 사이트·모든 사이트 열기 설정은 답과 같은 값을 쓴다
+        expect(browser.windows[0].input).toMatchObject({ question: '', openAllSites: false });
+        browser.setWindowOutcome('already');
+        expect(await service.openBrowserWindow(user, SESSION_ID)).toEqual({ opened: false });
+      });
+
+      it('그 대화가 답하는 중이거나 탭이 꽉 찼으면(COM-004) 안내하고, 브라우저를 쓸 수 없어도 COM-004다', async () => {
+        const busy = fakeBrowser();
+        busy.setWindowOutcome('busy');
+        const first = setup({}, async () => answer(''), undefined, undefined, undefined, busy.toolbox);
+        expect(await codeOf(first.service.openBrowserWindow(user, SESSION_ID))).toBe('COM-004');
+
+        const off = fakeBrowser(false);
+        const second = setup({}, async () => answer(''), undefined, undefined, undefined, off.toolbox);
+        expect(await codeOf(second.service.openBrowserWindow(user, SESSION_ID))).toBe('COM-004');
+        expect(off.windows).toEqual([]);
+      });
     });
 
     describe('멈춤·한 단계·계속 (이슈 #425)', () => {

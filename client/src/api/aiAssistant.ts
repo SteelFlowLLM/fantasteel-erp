@@ -11,6 +11,7 @@ import type {
   AiAssistantReplyView,
   AiAssistantStreamEvent,
   AiAssistantSuggestedQuestionsView,
+  AiBrowserWindowView,
   AiChatThreadSummaryView,
   AiChatThreadView,
   AiScreenActionResultInput,
@@ -78,6 +79,8 @@ export const aiAssistantApi = {
   /** 답하는 중에 말 덧붙이기 (이슈 #430). 답이 이미 끝났으면 COM-003 */
   addAgentNote: (controlId: string, text: string): Promise<{ accepted: true }> =>
     serverRequest('POST', `/ai-assistant/agent-control/${encodeURIComponent(controlId)}/notes`, { body: { text } satisfies AiAgentNoteInput }),
+  /** [브라우저 창 열기] (이슈 #433): 이 대화 열쇠의 빈 브라우저 탭을 미리 열어 둔다. 브라우저를 쓸 수 없거나 바쁘면 COM-004 */
+  openBrowserWindow: (browserSessionId: string): Promise<AiBrowserWindowView> => serverRequest('POST', '/ai-assistant/browser/window', { body: { browserSessionId } }),
   /** 지금 모델이 사진을 보는지·생각 정도를 바꿀 수 있는지. LM Studio가 아니면 알 수 없어 null */
   getCapabilities: (): Promise<AiAssistantCapabilitiesView> => serverRequest('GET', '/ai-assistant/capabilities'),
   getSuggestedQuestions: (): Promise<AiAssistantSuggestedQuestionsView> => serverRequest('GET', '/ai-assistant/suggested-questions'),

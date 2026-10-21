@@ -110,6 +110,12 @@ export class AgentInputDto {
   deltaY?: number;
 }
 
+/** POST ai-assistant/browser/window (이슈 #433). 대화 열쇠의 빈 브라우저 탭을 미리 연다 */
+export class BrowserWindowDto {
+  @IsUUID('4', { message: '브라우저 대화 열쇠가 올바르지 않아요' })
+  browserSessionId!: string;
+}
+
 /** 검증을 통과한 DTO에서 그 종류의 칸만 꺼낸다 */
 export function agentInputOf(dto: AgentInputDto): AiAgentInput {
   switch (dto.kind) {

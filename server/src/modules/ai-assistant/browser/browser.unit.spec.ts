@@ -265,7 +265,9 @@ describe('브라우저 모음 (Chrome 없이)', () => {
     expect(new BrowserPool({ env: {} }).availability()).toEqual({ available: false, reason: '서버에서 브라우저 사용을 꺼 두었어요' });
     expect(new BrowserPool({ env: { AI_BROWSER_ENABLED: '1' }, platform: 'darwin', exists: chrome }).availability().available).toBe(false);
     expect(new BrowserPool({ env: on, platform: 'darwin', exists: () => false }).availability()).toEqual({ available: false, reason: '서버에 Google Chrome이 없어요' });
-    expect(new BrowserPool({ env: on, platform: 'darwin', exists: chrome }).availability()).toEqual({ available: true });
+    expect(new BrowserPool({ env: on, platform: 'darwin', exists: chrome }).availability()).toEqual({ available: true, windowed: false });
+    // 창을 띄우는 서버만 [브라우저 창 열기]가 의미가 있다 (이슈 #433)
+    expect(new BrowserPool({ env: { ...on, BROWSER_HEADLESS: 'false' }, platform: 'darwin', exists: chrome }).availability()).toEqual({ available: true, windowed: true });
     expect(new BrowserPool({ env: { ...on, BROWSER_EXECUTABLE_PATH: '/opt/chrome' }, platform: 'darwin', exists: chrome }).availability().available).toBe(false);
     expect(new BrowserPool({ env: { ...on, BROWSER_EXECUTABLE_PATH: '/opt/chrome' }, exists: (p) => p === '/opt/chrome' }).availability().available).toBe(true);
     expect(chromeCandidates('linux', {})).toEqual(['/opt/google/chrome/chrome']);

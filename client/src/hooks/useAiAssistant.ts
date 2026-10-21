@@ -132,6 +132,8 @@ async function answerUiAction(event: Extract<AiAssistantStreamEvent, { type: 'ui
  */
 const browserKeys = new Map<number, string>();
 let newConversationKey: string | null = null;
+/** 새 대화의 열쇠를 [브라우저 창 열기]가 먼저 만들었는지. 그 창을 첫 질문이 이어 쓰도록 첫 질문에서 새 열쇠로 바꾸지 않는다 (이슈 #433) */
+let keyFromWindow = false;
 
 export function browserSessionIdFor(threadId: number | null, firstQuestion: boolean): string {
   if (threadId !== null) {
@@ -139,7 +141,16 @@ export function browserSessionIdFor(threadId: number | null, firstQuestion: bool
     browserKeys.set(threadId, known);
     return known;
   }
-  if (firstQuestion || newConversationKey === null) newConversationKey = crypto.randomUUID();
+  if ((firstQuestion && !keyFromWindow) || newConversationKey === null) newConversationKey = crypto.randomUUID();
+  keyFromWindow = false;
+  return newConversationKey;
+}
+
+/** [브라우저 창 열기]가 쓰는 열쇠: 질문이 쓸 열쇠와 같다. 새 대화면 첫 질문이 이 열쇠를 이어 쓴다 (이슈 #433) */
+export function browserWindowSessionId(threadId: number | null): string {
+  if (threadId !== null) return browserSessionIdFor(threadId, false);
+  if (newConversationKey === null) newConversationKey = crypto.randomUUID();
+  keyFromWindow = true;
   return newConversationKey;
 }
 
@@ -148,6 +159,14 @@ export function bindBrowserSession(threadId: number): void {
   if (newConversationKey === null || browserKeys.has(threadId)) return;
   browserKeys.set(threadId, newConversationKey);
   newConversationKey = null;
+  keyFromWindow = false;
+}
+
+/** [브라우저 창 열기]: 이 대화의 빈 탭을 미리 열어 둔다. 서버 컴퓨터에 창이 뜨면 거기 주소창에 주소를 넣은 뒤 이어서 물을 수 있다 (이슈 #433) */
+export function useOpenBrowserWindow() {
+  return useAction(() => aiAssistantApi.openBrowserWindow(browserWindowSessionId(useAiChatStore.getState().threadId)), {
+    success: (view) => (view.opened ? '브라우저 창을 열었어요. 창의 주소창에 주소를 넣은 뒤 "이 화면에서 해 줘"라고 물어보세요' : '브라우저 창이 이미 열려 있어요'),
+  });
 }
 
 /** 스트림으로 답을 받아 대화 저장소에 쌓는다. 이미 addQuestion을 한 질문에 대해 부른다. 실행 카드는 done 이벤트의 답에 담겨 온다 */

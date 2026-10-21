@@ -257,6 +257,8 @@ export interface BrowserOpenPage {
  */
 export class AssistantBrowserToolbox implements OnModuleDestroy {
   private readonly parked = new Map<string, { session: BrowserToolSession; timer: NodeJS.Timeout }>();
+  /** 답하는 중인 열쇠. 그동안 [브라우저 창 열기]는 같은 열쇠에 새 탭을 만들지 않는다 (이슈 #433) */
+  private readonly inUse = new Set<string>();
 
   constructor(
     private readonly pool: BrowserPool,
@@ -273,6 +275,7 @@ export class AssistantBrowserToolbox implements OnModuleDestroy {
 
   /** 열쇠의 열어 둔 탭이 있으면 그 세션을 이어 쓰고, 없으면 새 세션 */
   session(input: BrowserSessionInput, key: string | null = null): BrowserToolSession {
+    if (key) this.inUse.add(key);
     const kept = key ? this.parked.get(key) : undefined;
     if (key && kept) {
       clearTimeout(kept.timer);
@@ -293,6 +296,7 @@ export class AssistantBrowserToolbox implements OnModuleDestroy {
    * 쉬는 탭도 서버 전체 탭 수(2개)를 차지하므로, 새 탭이 필요하면 가장 오래 쉰 탭부터 닫는다(closeOldestParked)
    */
   async finish(session: BrowserToolSessionLike, key: string | null, aborted: boolean): Promise<void> {
+    if (key) this.inUse.delete(key);
     if (!key || aborted || !(session instanceof BrowserToolSession) || !session.park()) {
       await session.close();
       return;
@@ -302,12 +306,52 @@ export class AssistantBrowserToolbox implements OnModuleDestroy {
       clearTimeout(previous.timer);
       void previous.session.close();
     }
+    this.parked.set(key, { session, timer: this.keepTimer(key, session) });
+    // 쉬는 동안 사람이 창에서 페이지를 옮기면 그 시점부터 다시 센다 (이슈 #433)
+    session.onHumanActivity = () => {
+      const kept = this.parked.get(key);
+      if (kept?.session !== session || session.tooOld()) return;
+      clearTimeout(kept.timer);
+      kept.timer = this.keepTimer(key, session);
+    };
+  }
+
+  private keepTimer(key: string, session: BrowserToolSession): NodeJS.Timeout {
     const timer = setTimeout(() => {
       if (this.parked.get(key)?.session === session) this.parked.delete(key);
       void session.close();
     }, BROWSER_KEEP_MS);
     timer.unref();
-    this.parked.set(key, { session, timer });
+    return timer;
+  }
+
+  /**
+   * 대화 열쇠의 빈 탭을 미리 열어 둔다 (이슈 #433): 사람이 창의 주소창에 직접 넣어 옮긴 페이지를 다음 질문의 AI가 '지금 페이지'로 안다.
+   * 이미 열어 둔 탭이 있으면 그대로 두고 'already', 그 열쇠로 답하는 중이거나 서버 탭이 꽉 찼으면 'busy'. Chrome을 쓸 수 없으면 BrowserUnavailableError
+   */
+  async openWindow(input: BrowserSessionInput, key: string): Promise<'opened' | 'already' | 'busy'> {
+    if (this.inUse.has(key)) return 'busy';
+    const kept = this.parked.get(key);
+    if (kept?.session.isOpen()) {
+      clearTimeout(kept.timer);
+      kept.timer = this.keepTimer(key, kept.session);
+      return 'already';
+    }
+    const session = new BrowserToolSession(this.pool, input, this.options, () => this.closeOldestParked());
+    this.inUse.add(key);
+    try {
+      if (!(await session.openBlank())) {
+        await session.close();
+        return 'busy';
+      }
+      await this.finish(session, key, false);
+      return 'opened';
+    } catch (error) {
+      await session.close();
+      throw error;
+    } finally {
+      this.inUse.delete(key);
+    }
   }
 
   /** 가장 오래 쉰 탭 하나를 닫는다. 닫았으면 true */
@@ -411,6 +455,24 @@ export class BrowserToolSession implements BrowserToolSessionLike {
     return isAiAssistantBrowserTool(name);
   }
 
+  /** 쉬는 탭에서 사람이 페이지를 옮겼을 때 부른다 (열어 두는 시간을 다시 세려고, 이슈 #433) */
+  onHumanActivity: (() => void) | null = null;
+
+  /** 탭이 아직 열려 있는지 */
+  isOpen(): boolean {
+    return this.page !== null && !this.closed && !this.page.isClosed();
+  }
+
+  /** 한 탭을 쓰는 최대 시간을 넘었는지 */
+  tooOld(): boolean {
+    return Date.now() - this.startedAt >= BROWSER_SESSION_MAX_MS;
+  }
+
+  /** 빈 탭만 연다. 서버 탭이 꽉 찼으면 false (이슈 #433) */
+  async openBlank(): Promise<boolean> {
+    return (await this.ensurePage()) !== null;
+  }
+
   /** 지금 보고 있는 페이지 (열어 둔 탭을 다음 질문에 알릴 때) */
   currentPage(): BrowserOpenPage | null {
     return this.page && !this.closed ? this.lastPage : null;
@@ -435,6 +497,7 @@ export class BrowserToolSession implements BrowserToolSessionLike {
   attach(input: BrowserSessionInput): boolean {
     if (!this.page || this.closed || this.page.isClosed()) return false;
     this.input = input;
+    this.onHumanActivity = null;
     for (const key of questionUrlKeys(input.question)) this.questionUrls.add(key);
     input.signal?.addEventListener('abort', this.onAbort, { once: true });
     this.actions = 0;
@@ -981,6 +1044,7 @@ export class BrowserToolSession implements BrowserToolSessionLike {
     if (key) this.visited.add(key);
     this.lastPage = { title: title || displayUrl(url), url };
     this.input.web.rememberVisited(url, this.lastPage.title);
+    this.onHumanActivity?.();
   }
 
   /** 움직이지 않고 마지막 자리에 마우스를 그린다. 못 그려도 동작은 그대로 한다 */

@@ -10,6 +10,7 @@ import {
   type AiAssistantStreamEvent,
   type AiAssistantSource,
   type AiAssistantSuggestedQuestionsView,
+  type AiBrowserWindowView,
   type AiAssistantToolTrace,
   type AiChatThreadRef,
   type AiWebSource,
@@ -48,6 +49,7 @@ import { AssistantToolbox, type ToolRunResult } from './tools/assistant-toolbox'
 import { AssistantWebToolbox } from './web/assistant-web-toolbox';
 import { AgentControlRegistry, type AgentGate } from './agent-control';
 import { AssistantBrowserToolbox, type BrowserToolSessionLike } from './browser/assistant-browser-toolbox';
+import { BrowserUnavailableError } from './browser/browser-pool';
 import { browserMaxActions, browserTimeLimitMs, browserVisionEnabled, displayUrl, effectiveStartSites } from './browser/browser-rules';
 import { AssistantScreenToolbox, type ScreenControlSession } from './screen/assistant-screen-toolbox';
 import { AssistantNotionToolbox, NOTION_CARD_TOOL, type NotionToolSession } from './notion/assistant-notion-toolbox';
@@ -170,6 +172,27 @@ export class AiAssistantService {
     if (outcome === 'not_paused') throw new AppException('COM-004', '멈춰서 기다리는 동안에만 직접 조작할 수 있어요');
     if (outcome === 'closed') throw new AppException('COM-003', '브라우저 탭이 이미 닫혔어요');
     if (outcome === 'blocked') throw new AppException('COM-004', '열 수 없는 주소로 이동해서 탭을 비웠어요');
+  }
+
+  /**
+   * 이 대화 열쇠의 빈 브라우저 탭을 미리 연다 (이슈 #433). 열쇠는 사원 번호와 묶는다(남의 탭을 쓰지 않게).
+   * 브라우저를 쓸 수 없으면 COM-004, 그 대화가 답하는 중이거나 서버 탭이 꽉 찼으면 COM-004(바쁨)
+   */
+  async openBrowserWindow(user: AuthUser, browserSessionId: string): Promise<AiBrowserWindowView> {
+    const availability = this.browserTools.capabilities();
+    if (!availability.available) throw new AppException('COM-004', availability.reason ?? '브라우저를 쓸 수 없어요');
+    const saved = await this.browserSettings.read();
+    try {
+      const outcome = await this.browserTools.openWindow(
+        { question: '', web: this.webTools.session(user.employeeId, { offerTools: false }), startSites: effectiveStartSites(saved.startSites), openAllSites: saved.openAllSites === true },
+        `${user.employeeId}:${browserSessionId}`,
+      );
+      if (outcome === 'busy') throw new AppException('COM-004', '지금은 브라우저가 바빠요. 답이 끝난 뒤나 잠시 뒤에 다시 눌러 주세요');
+      return { opened: outcome === 'opened' };
+    } catch (error) {
+      if (error instanceof BrowserUnavailableError) throw new AppException('COM-004', error.message);
+      throw error;
+    }
   }
 
   /** 답하는 중에 사용자가 말을 덧붙인다 (이슈 #430). 묻는 사원 본인의 답하는 중인 열쇠만 */
