@@ -78,7 +78,7 @@ npm run build -w @fantasteel/client
 |---|---|
 | `npm run db:reset` | 개발 DB를 지우고 스키마 + 시드(조직·권한·기준정보·검사 기준)를 넣습니다. **데이터가 모두 사라집니다** |
 | `npm run migrate` | 스키마를 바꾼 뒤 마이그레이션 만들기 (스키마 담당자) |
-| `npm test` | 서버 테스트. 묶음별 테스트 전용 DB(`fs_*`)를 새로 만들어 돌립니다(개발 DB는 건드리지 않음). DB가 떠 있어야 합니다 |
+| `npm test` | 서버 테스트. 묶음별 테스트 전용 DB(`fs_*`)를 새로 만들어 돌립니다(개발 DB는 건드리지 않음). DB가 떠 있어야 합니다. `npx jest`로 바로 돌리면 DB 시험은 막힙니다(이슈 #447) |
 | `npm run typecheck` | shared·server·client 타입 검사 |
 
 DB만 따로 띄우려면 `npm run db`. 테스트 계정은 [docs/backend/seed.md](docs/backend/seed.md) (비밀번호 `fantasteel`).
