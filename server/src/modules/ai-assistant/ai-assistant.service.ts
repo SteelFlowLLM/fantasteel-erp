@@ -26,6 +26,7 @@ import {
 import { runAsVoiceApproved } from '../../common/business-event/ai-assisted.context';
 import { AppException } from '../../common/errors/app.exception';
 import { seoulToday } from '../../common/time/seoul-date';
+import { llmFailureException, noModelException } from '../llm/llm-failure';
 import { LlmAbortedError, LlmClient, LlmRequestError, splitThinking, type LlmEndpoint, type LlmImage, type LlmToolDefinition, type LlmToolMessage, type LlmToolReply } from '../llm/llm.client';
 import { BrowserSettingsStore } from '../llm/browser-settings.store';
 import { llmEndpointOf, LlmSettingsStore } from '../llm/llm-settings.store';
@@ -83,7 +84,6 @@ export interface PrepareOptions {
 
 const NO_VISION = '지금 모델은 사진을 볼 수 없어요. 사진을 빼고 물어보거나, 관리자에게 사진을 보는 모델을 요청해 주세요';
 
-const MODEL_NOT_SET = 'AI 모델이 아직 정해지지 않았어요. 관리자에게 LLM 연결 설정을 요청해 주세요';
 
 /** 한 질문에서 도구를 부르는 횟수 상한. 넘으면 도구 없이 지금까지의 결과로 답하게 한다 (모델이 같은 조회를 되풀이하는 것을 막음) */
 export const MAX_TOOL_ROUNDS = 4;
@@ -278,7 +278,7 @@ export class AiAssistantService {
     } catch (error) {
       if (!(error instanceof LlmRequestError)) throw error;
       this.logger.warn(`AI 어시스턴트 LLM 호출 실패: ${error.message}`);
-      throw new AppException('COM-999', error.message, HttpStatus.SERVICE_UNAVAILABLE);
+      throw llmFailureException(error);
     }
   }
 
@@ -288,7 +288,7 @@ export class AiAssistantService {
    */
   async prepare(user: AuthUser, input: AiAssistantMessageInput, options: PrepareOptions = {}): Promise<PreparedAsk> {
     const settings = await this.settingsStore.read();
-    if (!settings.model) throw new AppException('COM-999', MODEL_NOT_SET, HttpStatus.SERVICE_UNAVAILABLE);
+    if (!settings.model) throw noModelException();
     const model = settings.model;
 
     // 없는 회의록이면 VOC-001(404). 회의록은 전 역할이 볼 수 있어 따로 권한을 보지 않는다

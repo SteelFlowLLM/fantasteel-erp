@@ -107,7 +107,7 @@ export class MeetingAnalysisRunner implements OnApplicationBootstrap, OnModuleDe
     const row = await this.repository.findDetail(this.prisma, id);
     if (!row || row.transcript === null) throw new LlmRequestError('분석할 회의 기록이 없어요');
     const settings = await this.llmSettings.read();
-    if (!settings.model) throw new LlmRequestError(NO_MODEL_REASON);
+    if (!settings.model) throw new LlmRequestError(NO_MODEL_REASON, undefined, 'NO_MODEL');
 
     const transcriptSegments = readSegments(row.transcriptSegments);
     const segments = transcriptSegments.map((s) => s.text);

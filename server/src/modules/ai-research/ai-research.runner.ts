@@ -73,7 +73,10 @@ const RESEARCH_ERROR_REASON = '조사 중 오류가 났어요. 새 조사로 다
 const NO_PLAN_REASON = '계획에 쓸 검색어를 만들지 못했어요. 업무·LOT 번호 같은 회사 안 정보를 빼고 새 조사로 다시 물어봐 주세요';
 
 export interface ResearchRunnerConfig {
-  /** QUEUED·PLANNING을 찾는 간격 */
+  /**
+   * 할 일이 없을 때 QUEUED·PLANNING·끊긴 RUNNING을 찾는 간격. 이 서버에서 새 조사·시작·더 조사하기·고치기가 생기면 wake()가 바로 깨우므로
+   * 이 간격은 안전망이다: 다른 서버가 만든 조사나 표시가 끊긴 조사를 이만큼 늦게 알아챈다 (서버 여러 대여도 같은 DB의 조건부 맡기로 겹치지 않는다)
+   */
   pollMs: number;
   /** 맡은 표시의 유효 시간. 이만큼 갱신이 없으면 다른 서버(또는 다시 뜬 이 서버)가 이어서 맡는다 */
   leaseMs: number;
@@ -91,7 +94,7 @@ export interface ResearchRunnerConfig {
 }
 
 export const DEFAULT_RUNNER_CONFIG: ResearchRunnerConfig = {
-  pollMs: 2000,
+  pollMs: 30_000,
   leaseMs: 120_000,
   renewMs: 30_000,
   wallClockMs: 30 * 60_000,
@@ -152,6 +155,8 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
   config: ResearchRunnerConfig = { ...DEFAULT_RUNNER_CONFIG };
   private timer: NodeJS.Timeout | null = null;
   private busy = false;
+  /** 일하는 중에 깨우는 신호가 왔다: 끝나고 한 번 더 찾는다 (찾기를 마친 직후에 만든 조사를 다음 간격까지 놓치지 않게) */
+  private wakeAgain = false;
   private current: RunContext | null = null;
 
   constructor(
@@ -187,9 +192,11 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     this.timer = null;
   }
 
-  /** 새 조사·시작 뒤 2초를 기다리지 않고 바로 찾는다 */
+  /** 새 조사·시작·더 조사하기·고치기 뒤 다음 간격을 기다리지 않고 바로 찾는다 (같은 프로세스 신호) */
   wake(): void {
-    if (this.timer) void this.tick();
+    if (!this.timer) return;
+    if (this.busy) this.wakeAgain = true;
+    else void this.tick();
   }
 
   /** 이 서버가 하고 있는 조사가 취소됐다: 하던 LLM 요청·페이지 읽기를 바로 끊는다 */
@@ -201,9 +208,12 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     if (this.busy) return;
     this.busy = true;
     try {
-      while (this.timer && (await this.processNext())) {
-        // 맡을 것이 없을 때까지 차례로
-      }
+      do {
+        this.wakeAgain = false;
+        while (this.timer && (await this.processNext())) {
+          // 맡을 것이 없을 때까지 차례로
+        }
+      } while (this.timer && this.wakeAgain);
     } catch (error) {
       this.logger.warn(`심층 조사 일꾼 오류: ${error instanceof Error ? error.name : 'unknown'}`);
     } finally {

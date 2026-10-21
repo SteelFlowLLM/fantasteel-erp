@@ -179,7 +179,7 @@ function LlmSettingsForm({ saved, canEdit }: { saved: LlmSettingsView; canEdit: 
               label={<span data-pet-term="API 키">API 키</span>}
               hint={
                 saved.hasApiKey && !clearApiKey
-                  ? '저장된 키가 있어요. 바꿀 때만 입력해요'
+                  ? '저장된 키가 있어요. 바꿀 때만 입력해요. 주소의 호스트·포트를 바꾸면 저장된 키를 보내지 않으니 다시 넣어요'
                   : 'LM Studio는 비워 둬요. Unsloth Studio는 꼭 넣어요(Settings > API에서 만든 키). 외부 LLM이나 LM Studio에서 인증을 켰을 때도 입력해요'
               }
             >

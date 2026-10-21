@@ -6,7 +6,6 @@ import { MEETING_MINUTES_STATUS, MEETING_MINUTES_STATUS_LABEL, type MeetingMinut
 import { useState } from 'react';
 import type { MeetingMinutesListItem, MeetingMinutesView } from '@/api/meetingMinutes';
 import { Button } from '@/components/Button';
-import { Icon } from '@/components/Icon';
 import { Input, Select } from '@/components/Input';
 import { MasterPane, PageMain } from '@/components/Page';
 import { QueryBoundary } from '@/components/QueryBoundary';

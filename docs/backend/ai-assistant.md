@@ -389,7 +389,8 @@ AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸
   - auto-switch: `GET /api/settings/openai-auto-switch`의 `enabled`.
   - 임베딩 모델: `/v1/models`에 종류가 없어 모델마다 `GET /api/models/check-embedding/{모델}`의 `is_embedding`으로 `type`(`embeddings`·`llm`)을 채운다(화면이 임베딩 모델을 목록에서 뺀다).
   - 문맥 길이: 불러온 모델의 status `context_length`(불러올 때 정한 Context Length, 예 8192)가 먼저, 없으면 `max_context_length`. 모델 목록(`contextLength`)·대화 기억 몫·심층 조사 예산(`modelContextLength`)에 쓴다.
-  - Unsloth는 요청의 `model`을 보지 않고 **불러온 모델로 답한다**(API 문서 "informational; the active model is used"). 그래서 auto-switch가 꺼져 있고 고른 모델이 불러와 있지 않으면 부르기 전에 막는다(`LlmModelNotLoadedError`): "고른 모델(…)이 Unsloth Studio에 불러와 있지 않아요 (지금 불러온 모델: …). Unsloth Studio에서 모델을 불러오거나 Settings > API > Model auto-switch를 켜 주세요". 기억해 둔 정보가 '없음'이면 한 번 다시 묻는다. 서버가 400 "No model loaded"를 주면 "Unsloth Studio에 불러온 모델이 없어요. …"로 바꾸고 JSON 형식 없이 다시 부르지 않는다. 연결 확인·응답 확인·철강맨AI·회의록 분석 등 모든 LLM 호출이 같은 문구를 보인다.
+  - Unsloth는 요청의 `model`을 보지 않고 **불러온 모델로 답한다**(API 문서 "informational; the active model is used"). 그래서 auto-switch가 꺼져 있고 고른 모델이 불러와 있지 않으면 부르기 전에 막는다(`LlmModelNotLoadedError`, 종류 `NO_MODEL` → AST-002): "고른 모델(…)이 Unsloth Studio에 불러와 있지 않아요 (지금 불러온 모델: …). Unsloth Studio에서 모델을 불러오거나 Settings > API > Model auto-switch를 켜 주세요". 기억해 둔 정보가 '없음'이면 한 번 다시 묻는다. 서버가 400 "No model loaded"를 주면 "Unsloth Studio에 불러온 모델이 없어요. …"로 바꾸고 JSON 형식 없이 다시 부르지 않는다. 오류 코드는 AST-002(이슈 #462의 '모델 없음' 흐름 하나로 합침)이고, 고치는 방법이 문구에 있으므로 연결 확인·응답 확인·철강맨AI·심층 조사 모두 이 안내 문구를 그대로 보인다(모델을 안 골랐을 때만 AST-002 코드 문구). 연결 확인·설정 저장 때는 기억해 둔 서버·모델 정보를 버린다(`forgetServerInfo`): Unsloth에서 모델을 바꾼 직후 옛 정보로 부르지 않게.
+- API 키: 연결 확인·저장에서 키 칸을 비우면 저장된 키를 쓰되, 주소의 출처(scheme·호스트·포트)가 바뀌었으면 보내지 않는다(STT 설정과 같은 규칙). 저장하면 키가 지워지고, 연결 확인이 실패하면 '주소가 바뀌어 저장된 API 키를 보내지 않았어요. 새 주소의 API 키를 다시 넣어 주세요'를 덧붙인다.
   - 요청 필드: `top_k`(100까지)·`min_p`·`repetition_penalty`(LM Studio의 `repeat_penalty` 대신). 생각 정도는 `reasoning_effort`와 `enable_thinking`(끄기면 `false`)을 함께 보낸다. `reasoning_effort` 값 `none·minimal·low·medium·high·max·xhigh`는 Unsloth가 검증을 통과시킨다(틀린 값은 400, 2026-10-21 확인).
 - 그 밖의 OpenAI 호환: `temperature`·`top_p`·`presence_penalty`만 보낸다. 관리자가 생각 정도 지원을 켜면 `reasoning_effort`(끄기는 `none`)를 보낸다(가정: 받지 않는 서버는 관리자가 켜지 않는다).
 - 관리자 문맥 길이(`llm.json`의 `contextLength`, 1024 이상 정수, `null` = 모름): LM Studio가 아니고 모델 정보가 없을 때 `modelContextLength`가 쓴다.
@@ -422,10 +423,15 @@ AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸
 | 코드 | 언제 |
 | --- | --- |
 | COM-004 | 질문 비었음·길이 초과·`history` 형식 오류 (ValidationPipe) |
-| COM-999 (HTTP 503) | LLM 모델 미설정, LLM 연결 실패·시간 초과(120초). 메시지는 이유 그대로(`LlmRequestError`) |
+| 🟡 AST-002 (503) | LLM 모델 미설정. 응답을 시작하기 전에 JSON 오류로 알린다 (이슈 #462) |
+| 🟡 AST-003 (503) | LLM 연결 실패. 문구는 코드의 안내(내부 LLM 주소를 싣지 않음), 이유는 서버 로그 (이슈 #462) |
+| 🟡 AST-004 (503) | LLM 시간 초과(요청 120초, 스트림은 한 조각 없이 일정 시간) (이슈 #462) |
+| 🟡 AST-005 (503) | 그 밖의 LLM 실패(LLM 서버의 HTTP 오류·API 키·읽을 수 없는 응답). 문구는 LLM 서버가 알려 준 이유 그대로 (이슈 #462) |
 | 🟡 AST-001 (404) | 저장한 대화가 없거나 남의 대화(보기·지우기·이어 묻기). 9.3에 없어 새로 둠(이슈 #399) |
 | 🟡 VOC-010 (400) | 말로 승인할 수 없는 카드를 `approvedByVoice`로 실행하려 함(이슈 #457) |
 | 🟡 VOC-012 (403) | 관리자가 말로 승인을 꺼 두었는데 `approvedByVoice`로 실행하려 함(이슈 #457) |
+
+LLM 실패 코드(AST-002~005)는 `LlmRequestError`의 종류(`kind`)로 나눈다: 모델 없음 `NO_MODEL`(회의 분석 일꾼이 같은 종류를 쓴다), 연결 실패 `CONNECT`, 시간 초과 `TIMEOUT`(스트림이 한참 조용한 경우 포함), 나머지 `SERVER`. 사내 채팅 @AI는 같은 service를 불러 AppException의 문구를 방에 알린다. 심층 조사의 계획 말로 고치기도 같은 코드를 쓴다(`docs/backend/ai-research.md` 5장).
 
 도구 실패는 HTTP 오류가 아니다: 모델이 이유를 설명한 답으로 돌아온다.
 
@@ -507,6 +513,8 @@ DB·LLM 없이 가짜 객체로 돈다.
 
 - Drive (이슈 #398 2단계): `drive/drive-tools.unit.spec.ts`(`npm run test:unit`에 포함: MIME별 읽는 방법·글 파일 종류·이름 검색어 막기, PDF 실제 worker 글 뽑기, BOM·CR·자르기·빈 파일·글 없는 PDF·깨진 PDF, 사진 base64·녹음 이유, 찾기 인자·감싸기·크기, 이름으로 읽기, 폴더 밖 이유, 사진은 볼 수 있는 모델에만·한 답 4개, 쓸 수 있는지). `ai-assistant.spec.ts` 'Drive': 켜면 도구·`[Drive 규칙]`·출처, 사진은 tool 뒤 user 메시지, 상한 8번, 끔·@AI면 도구 없음, @로 붙인 글·사진이 질문에 붙고 출처가 됨·사진 못 보는 모델은 시작 전에 막음. `integration/google-drive/google-drive.spec.ts` '철강맨AI Drive 읽기'(DB + 가짜 Google 서버): 칩 조건(Google 안 부름), 이름 찾기·폴더 밖 안 나옴, 글 파일·스프레드시트 CSV 내보내기·실제 PDF 글, 폴더 밖·20MB 넘는 PDF·Word·녹음 이유, @ 읽기의 `INT-012`. 화면 `client/src/lib/aiDrive.test.ts`(@ 여는 조건·@ 빼기·목록 거르기·↑↓·붙이기 3개).
 
+LLM 실패 오류 코드(이슈 #462): `llm/llm-failure.unit.spec.ts`(종류별 코드·503·내부 주소 숨김·번호 겹침 없음), `llm/llm.client.spec.ts`(연결·시간 초과·HTTP 오류의 `kind`), `ai-assistant.spec.ts`(모델 없음 AST-002, 종류별 AST-003~005), `meeting-ask.spec.ts`(스트림 `error` 이벤트의 `code`, 시작 전 AST-002).
+
 실행: `npm test -w @fantasteel/server -- ai-assistant`(묶음 `fs_collab`). DB가 필요 없어 `npx jest src/modules/ai-assistant`로도 돈다.
 
 ## 8. 확인 필요 🟡
@@ -515,7 +523,7 @@ DB·LLM 없이 가짜 객체로 돈다.
 | --- | --- | --- |
 | 대화 기록 저장 | 철강맨AI 패널 대화를 저장(질문·답·출처·카드). 제목 40자, 보관 기간 없음·사용자가 지움 | [02] 21장 미결정 → 2026-10-19 사용자 결정(이슈 #399) |
 | 업무 매뉴얼 | 초안 4개 업무(수주 등록·구매요청 등록·검사 입력·출고 확정)를 화면 절차 답변 근거로 쓴다. 검수 전이라 답에 "초안" 안내를 붙인다. 나머지 업무·검수 담당·개수는 미결정 | [02] 21장 "업무 매뉴얼 작성 담당과 개수" |
-| LLM 실패 오류 코드 | 9.3에 없어 COM-999 + 503 | [04] 9.3 |
+| LLM 실패 오류 코드 | 9.3에 없어 AST-002~005(503)를 새로 둠. 이전에는 COM-999 + 503이었다. `LlmRequestError.kind`(NO_MODEL·CONNECT·TIMEOUT·SERVER)로 나누고 `llm/llm-failure.ts`가 코드로 바꾼다. 실시간 답의 `error` 이벤트에도 `code`를 싣는다. 팀 확인 후 9.3·API 명세서 공통 규약에 올린다(API 명세서 08에는 올렸다) | [04] 9.3, 이슈 #462 |
 | 추천 질문 내용 | 디자인 단계 예시 그대로 | [02] REQ-AST-008 "구현 단계에서 확정" |
 | 질문 길이·대화 수 상한 | 1000자·20개(서버 사용 10개) | 문서에 없음(가정값) |
 | 도구 결과 상한 | 목록 15줄·8000자·도구 호출 4번 | 문서에 없음(가정값, 작은 로컬 모델 기준) |

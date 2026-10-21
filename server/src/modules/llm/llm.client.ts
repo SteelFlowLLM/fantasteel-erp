@@ -89,19 +89,30 @@ interface WireToolCall {
   function?: { name?: string; arguments?: string };
 }
 
+/**
+ * LLM 실패의 종류. 철강맨AI 등이 오류 코드(AST-002~005)로 나눌 때 쓴다 (이슈 #462).
+ * NO_MODEL 모델이 정해지지 않았거나 LLM 서버에 불러와 있지 않음(Unsloth Studio, 이슈 #465) / CONNECT 연결할 수 없음 / TIMEOUT 시간 안에 답이 없음 / SERVER 그 밖(HTTP 오류·API 키·읽을 수 없는 응답)
+ */
+export type LlmFailureKind = 'NO_MODEL' | 'CONNECT' | 'TIMEOUT' | 'SERVER';
+
 /** 화면에 그대로 보일 연결 실패 이유 */
 export class LlmRequestError extends Error {
   constructor(
     message: string,
     /** LLM 서버가 돌려준 HTTP 상태. 연결 실패·시간 초과면 없다 */
     readonly status?: number,
+    readonly kind: LlmFailureKind = 'SERVER',
   ) {
     super(message);
   }
 }
 
-/** Unsloth Studio에 고른 모델이 불러와 있지 않다. 형식을 바꿔 다시 불러도 소용없다 */
-export class LlmModelNotLoadedError extends LlmRequestError {}
+/** Unsloth Studio에 고른 모델이 불러와 있지 않다 (모델 없음 NO_MODEL → AST-002). 고치는 방법이 문구에 있어 철강맨AI에도 그대로 보인다 */
+export class LlmModelNotLoadedError extends LlmRequestError {
+  constructor(message: string, status?: number) {
+    super(message, status, 'NO_MODEL');
+  }
+}
 
 /**
  * Unsloth Studio에 모델이 없을 때 화면에 보일 안내. Unsloth는 요청의 model을 보지 않고 불러온 모델로 답하므로
@@ -228,6 +239,12 @@ export class LlmClient {
     }));
   }
 
+  /** 기억해 둔 서버·모델 정보를 버린다 (연결 확인·설정 저장 때: Unsloth에서 모델을 바꾼 직후 옛 정보로 부르지 않게) */
+  forgetServerInfo(): void {
+    this.serverInfoCache.clear();
+    this.unslothCheckCache.clear();
+  }
+
   /** 서버 종류와 Unsloth auto-switch (연결 확인 결과에 싣는다). listModels 바로 뒤에 부르면 다시 묻지 않는다 */
   async serverSummary(endpoint: LlmEndpoint): Promise<{ kind: LlmServerKind; autoSwitch: boolean | null }> {
     const server = await this.serverInfo(endpoint);
@@ -315,7 +332,8 @@ export class LlmClient {
         options.signal,
       );
     } catch (error) {
-      if (!(error instanceof LlmRequestError) || error.status !== 400 || error instanceof LlmModelNotLoadedError) throw error;
+      // 모델 없음(Unsloth No model loaded)은 형식을 바꿔 다시 불러도 소용없다
+      if (!(error instanceof LlmRequestError) || error.status !== 400 || error.kind === 'NO_MODEL') throw error;
       body = await this.request<Reply>(endpoint, 'POST', '/chat/completions', base, options.timeoutMs, options.signal);
     }
     const message = body.choices?.[0]?.message;
@@ -451,7 +469,7 @@ export class LlmClient {
    * 기능별 샘플링 값과 생각 정도를 요청 필드로 바꾼다.
    * top_k·min_p·반복 벌점은 OpenAI 표준에 없어 외부 LLM이 거절할 수 있으므로 LM Studio(repeat_penalty)·Unsloth Studio(repetition_penalty)일 때만 보낸다.
    * 생각 설정을 모르는 모델에 reasoning_effort를 보내면 무시되거나 오류가 나므로, 모델이 받는다고 알렸거나 관리자가 지원한다고 정한 때만 보낸다.
-   * Unsloth Studio는 고른 모델이 불러와 있지 않으면 부르기 전에 LlmModelNotLoadedError를 던진다 (다른 모델로 답하지 않게).
+   * Unsloth Studio는 고른 모델이 불러와 있지 않으면 부르기 전에 모델 없음(NO_MODEL) 오류를 던진다 (다른 모델로 답하지 않게).
    */
   private async profileFields(endpoint: LlmEndpoint, model: string, profile: LlmProfile): Promise<{ fields: Record<string, unknown>; reasoningApplied: boolean }> {
     const server = await this.readyServerInfo(endpoint, model);
@@ -615,7 +633,7 @@ export class LlmClient {
     } catch (error) {
       const known = readError(error, signal, timeoutMs);
       if (known instanceof LlmRequestError) throw known;
-      throw new LlmRequestError(`${url}에 연결할 수 없어요. LLM 서버(LM Studio의 Developer 탭 서버, Unsloth Studio)를 켰는지, 주소가 맞는지 확인해 주세요`);
+      throw new LlmRequestError(`${url}에 연결할 수 없어요. LLM 서버(LM Studio의 Developer 탭 서버, Unsloth Studio)를 켰는지, 주소가 맞는지 확인해 주세요`, undefined, 'CONNECT');
     }
     if (res.status === 401 || res.status === 403) throw new LlmRequestError('API 키가 맞지 않거나 권한이 없어요');
     if (!res.ok) {
@@ -647,7 +665,7 @@ function readError(error: unknown, signal: AbortSignal, timeoutMs: number): unkn
   if (error instanceof LlmRequestError) return error;
   const reason: unknown = signal.aborted ? signal.reason : error;
   if (reason instanceof Error && reason.name === 'TimeoutError') {
-    return new LlmRequestError(`${timeoutMs / 1000}초 안에 응답이 없어요. LLM 서버(LM Studio·Unsloth Studio)와 모델 상태를 확인해 주세요`);
+    return new LlmRequestError(`${timeoutMs / 1000}초 안에 응답이 없어요. LLM 서버(LM Studio·Unsloth Studio)와 모델 상태를 확인해 주세요`, undefined, 'TIMEOUT');
   }
   if (signal.aborted) return new LlmAbortedError();
   return error;
