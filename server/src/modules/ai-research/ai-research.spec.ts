@@ -13,14 +13,14 @@ import { AssistantToolbox } from '../ai-assistant/tools/assistant-toolbox';
 import { AssistantWebToolbox, UserSearchLimiter } from '../ai-assistant/web/assistant-web-toolbox';
 import type { WebSearchClient } from '../ai-assistant/web/web-search.client';
 import { KakaoPlaceClient } from '../ai-assistant/web/web-search.client';
-import { LlmAbortedError, LlmClient, LlmJsonParseError, LlmRequestError, type ChatMessage, type LlmJsonOptions, type LlmJsonSchema, type LlmToolMessage } from '../llm/llm.client';
+import { LlmAbortedError, LlmClient, LlmJsonParseError, LlmRequestError, type ChatMessage, type LlmFailureKind, type LlmJsonOptions, type LlmJsonSchema, type LlmToolMessage } from '../llm/llm.client';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
 import { AiResearchRunner } from './ai-research.runner';
 import { REVISION_REPORT_RULE, SEED_PLAN_RULE } from './ai-research.prompt';
 import { SEED_SOURCE_SNIPPET } from './ai-research.rules';
 
 /** parseError: JSON이 깨진 답, error: LLM 연결 실패, hang: 끊길(abort) 때까지 기다림 */
-type Turn = Record<string, unknown> | { parseError: string } | { error: string } | { hang: true };
+type Turn = Record<string, unknown> | { parseError: string } | { error: string; kind?: LlmFailureKind } | { hang: true };
 
 let app: INestApplication;
 let baseUrl: string;
@@ -76,7 +76,7 @@ const llmClient = {
     if (format.name === 'research_plan' && messages.some((m) => m.content.includes('[고칠 부탁]'))) {
       suggestPrompts.push(messages.map((m) => m.content).join('\n'));
       if ('parseError' in suggestReply) throw new LlmJsonParseError('AI 응답을 JSON으로 읽지 못했어요', String(suggestReply.parseError), null);
-      if ('error' in suggestReply) throw new LlmRequestError(String(suggestReply.error));
+      if ('error' in suggestReply) throw new LlmRequestError(String(suggestReply.error), undefined, suggestReply.kind as LlmFailureKind | undefined);
       return wrap(suggestReply);
     }
     if (format.name === 'research_plan') planPrompts.push(messages.map((m) => m.content).join('\n'));
@@ -1026,16 +1026,27 @@ describe('심층 조사 — 계획을 말로 고치기 (이슈 #416)', () => {
     expect(res.body.data.plan).toEqual({ title: '전기로와 고로 비교', steps: [{ title: '철강 수출 통계 2026', query: '철강 수출 통계 2026' }] });
   });
 
-  it('쓸 단계가 없거나 LLM이 실패하면 RES-008(502), 깨진 JSON은 너그럽게 읽는다', async () => {
+  it('쓸 단계가 없으면 RES-008(502), LLM 실패는 AST-003~005(503), 깨진 JSON은 너그럽게 읽는다', async () => {
     const run = await planned('고치기 실패');
     suggestReply = { title: 't', steps: [{ title: '막힘', query: 'SO-2610-001 납기' }] };
     let res = await suggest(run.id, { instruction: '검색어 바꿔 줘', plan: draft });
     expect(res.status).toBe(502);
     expect(res.body.error?.code).toBe('RES-008');
-    suggestReply = { error: 'connect ECONNREFUSED' };
+    // 연결 실패·시간 초과·그 밖은 종류별 오류 코드 (이슈 #462). 연결 실패 문구의 내부 주소는 사용자에게 가지 않는다
+    suggestReply = { error: 'http://10.0.0.5:1234/v1에 연결할 수 없어요', kind: 'CONNECT' };
     res = await suggest(run.id, { instruction: '검색어 바꿔 줘', plan: draft });
-    expect(res.body.error?.code).toBe('RES-008');
-    expect(res.body.error?.message).toContain('AI 응답을 받지 못했어요');
+    expect(res.status).toBe(503);
+    expect(res.body.error?.code).toBe('AST-003');
+    expect(JSON.stringify(res.body)).not.toContain('10.0.0.5');
+    suggestReply = { error: '180초 안에 응답이 없어요', kind: 'TIMEOUT' };
+    res = await suggest(run.id, { instruction: '검색어 바꿔 줘', plan: draft });
+    expect(res.status).toBe(503);
+    expect(res.body.error?.code).toBe('AST-004');
+    suggestReply = { error: 'LLM 서버 오류 (HTTP 500): 모델 오류' };
+    res = await suggest(run.id, { instruction: '검색어 바꿔 줘', plan: draft });
+    expect(res.status).toBe(503);
+    expect(res.body.error?.code).toBe('AST-005');
+    expect(res.body.error?.message).toContain('모델 오류');
     suggestReply = { parseError: '답: {"title":"깨진 답에서 읽음","steps":[{"title":"원료","query":"철광석 가격 통계"}]} 끝' };
     res = await suggest(run.id, { instruction: '원료만', plan: draft });
     expect(res.status).toBe(200);

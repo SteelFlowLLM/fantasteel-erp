@@ -3,6 +3,7 @@ import type { INestApplication } from '@nestjs/common';
 import { ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { AddressInfo } from 'node:net';
+import { ERROR_CODE } from '@fantasteel/shared';
 import type { AiAssistantCapabilitiesView, AiAssistantReplyView, AiAssistantStreamEvent, MeetingMinutesView } from '@fantasteel/shared';
 import { AppModule } from '../../app.module';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -147,17 +148,19 @@ describe('POST ai-assistant/messages/stream', () => {
   it('스트리밍이 시작된 뒤 LLM이 실패하면 error 이벤트로 끝내고 상태는 그대로 200', async () => {
     llmClient.streamWithTools.mockImplementation(async (_endpoint, _model, _messages, _tools, _profile, handlers) => {
       handlers.onThinking('생각 중');
-      throw new LlmRequestError('LLM 서버에 연결할 수 없어요');
+      throw new LlmRequestError('http://llm.test/v1에 연결할 수 없어요', undefined, 'CONNECT');
     });
 
     const res = await stream({ question: '예약이 뭐야?' });
 
     expect(res.status).toBe(200);
     expect(res.contentType).toContain('application/x-ndjson');
+    // 연결 실패는 내부 주소 대신 코드의 안내 문구와 AST-003을 싣는다 (이슈 #462)
     expect(res.events).toEqual([
       { type: 'thinking', text: '생각 중' },
-      { type: 'error', message: 'LLM 서버에 연결할 수 없어요' },
+      { type: 'error', code: 'AST-003', message: ERROR_CODE['AST-003'].message },
     ]);
+    expect(res.text).not.toContain('llm.test');
   });
 
   it('LLM 밖의 예기치 않은 오류는 내부 내용을 숨기고 일반 문구의 error 이벤트로 보낸다', async () => {
@@ -176,7 +179,7 @@ describe('POST ai-assistant/messages/stream', () => {
     const noModel = await stream({ question: '예약이 뭐야?' });
     expect(noModel.status).toBe(503);
     expect(noModel.contentType).toContain('application/json');
-    expect(JSON.parse(noModel.text)).toMatchObject({ error: { code: 'COM-999' } });
+    expect(JSON.parse(noModel.text)).toMatchObject({ error: { code: 'AST-002' } });
 
     const missing = await stream({ question: '요약해 줘', meetingMinutesId: startId + 100000 });
     expect(missing.status).toBe(404);

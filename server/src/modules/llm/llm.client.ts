@@ -80,12 +80,19 @@ interface WireToolCall {
   function?: { name?: string; arguments?: string };
 }
 
+/**
+ * LLM 실패의 종류. 철강맨AI 등이 오류 코드(AST-002~005)로 나눌 때 쓴다 (이슈 #462).
+ * NO_MODEL 모델이 정해지지 않음 / CONNECT 연결할 수 없음 / TIMEOUT 시간 안에 답이 없음 / SERVER 그 밖(HTTP 오류·API 키·읽을 수 없는 응답)
+ */
+export type LlmFailureKind = 'NO_MODEL' | 'CONNECT' | 'TIMEOUT' | 'SERVER';
+
 /** 화면에 그대로 보일 연결 실패 이유 */
 export class LlmRequestError extends Error {
   constructor(
     message: string,
     /** LLM 서버가 돌려준 HTTP 상태. 연결 실패·시간 초과면 없다 */
     readonly status?: number,
+    readonly kind: LlmFailureKind = 'SERVER',
   ) {
     super(message);
   }
@@ -469,7 +476,7 @@ export class LlmClient {
     } catch (error) {
       const known = readError(error, signal, timeoutMs);
       if (known instanceof LlmRequestError) throw known;
-      throw new LlmRequestError(`${url}에 연결할 수 없어요. LM Studio의 Developer 탭에서 서버를 켰는지, 주소가 맞는지 확인해 주세요`);
+      throw new LlmRequestError(`${url}에 연결할 수 없어요. LM Studio의 Developer 탭에서 서버를 켰는지, 주소가 맞는지 확인해 주세요`, undefined, 'CONNECT');
     }
     if (res.status === 401 || res.status === 403) throw new LlmRequestError('API 키가 맞지 않거나 권한이 없어요');
     if (!res.ok) throw new LlmRequestError(`LLM 서버 오류 (HTTP ${res.status}): ${await errorMessageOf(res)}`, res.status);
@@ -496,7 +503,7 @@ function readError(error: unknown, signal: AbortSignal, timeoutMs: number): unkn
   if (error instanceof LlmRequestError) return error;
   const reason: unknown = signal.aborted ? signal.reason : error;
   if (reason instanceof Error && reason.name === 'TimeoutError') {
-    return new LlmRequestError(`${timeoutMs / 1000}초 안에 응답이 없어요. LM Studio 서버와 모델 상태를 확인해 주세요`);
+    return new LlmRequestError(`${timeoutMs / 1000}초 안에 응답이 없어요. LM Studio 서버와 모델 상태를 확인해 주세요`, undefined, 'TIMEOUT');
   }
   if (signal.aborted) return new LlmAbortedError();
   return error;

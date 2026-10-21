@@ -28,7 +28,7 @@ import { businessEventLabelOf } from '@/features/agent/lib/businessEventLabel';
 import { lotTraceHref } from '@/features/businessEvents/lib/eventTargets';
 import { PastCaseEditModal } from '@/features/pastCases/PastCaseEditModal';
 import { CASE_CALL_SITES, CASE_PERIOD_DAYS, CASE_REGISTER_STEPS, exampleHistoryOf, sameCategoryCases, summaryQuestion } from '@/features/pastCases/pastCaseExample';
-import { sourceText } from '@/features/shell/AiPanel';
+import { sourceText } from '@/features/shell/aiSourceDisplay';
 import { useAction } from '@/hooks/useAction';
 import { useDebouncedValue } from '@/hooks/useGlobalSearch';
 import { useCanUse } from '@/hooks/usePermission';
