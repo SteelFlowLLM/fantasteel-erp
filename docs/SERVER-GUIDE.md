@@ -69,7 +69,7 @@ server/
 | 인증·권한 | `auth/` | 모든 API는 로그인 필요(전역 가드). `@Public()`은 로그인만. `@RequirePermission(PERMISSION.SALES_ORDER_CREATE, 'USE')` (조회는 `'VIEW'`). 로그인 사원은 `@CurrentUser() user: AuthUser` |
 | 부서장 확인 | `auth/department-head.ts` | 구매요청 승인·반려: `assertDepartmentHead(user, requester.departmentId)` (권한 코드 아님, REQ-AUTH-004) |
 | 작업 로그 | `business-event/business-event.recorder.ts` | 본 거래와 같은 tx에서 `businessEventRecorder.record(tx, { type, actor: user 또는 'SYSTEM', target: { table, id }, salesOrderId, lotIds, before, after, reason })` |
-| 채번 | `numbering/` | `numbering.nextDocumentNumber(tx, 'SALES_ORDER')` · `nextLotNumber(tx, 'HEAT', 'BOF1')` · `nextMillSheetNumber(tx, id, no)` · 슬래브·코일은 `formatSlabNumber`·`formatCoilNumber` |
+| 채번 | `numbering/` | `numbering.nextDocumentNumber(tx, 'SALES_ORDER')` · `nextLotNumber(tx, 'HEAT', 'BOF1')` · `nextMillSheetNumber(tx, id, no)` · 슬래브·코일은 `formatSlabNumber`·`formatCoilNumber` · 잠금 순서를 맞출 때만 `lockDocumentNumber(tx, 'BUSINESS_EVENT')`(번호 없이 앞부분 잠금만, 예: 원료 LOT보다 작업 로그 잠금을 먼저 — 제선 실적이 EV → 원료 LOT 순이다) |
 | 날짜 | `time/seoul-date.ts` | `seoulToday()`, `seoulDateOnly()` — "오늘"·채번 날짜는 Asia/Seoul. 사람이 고른 시각 글은 `seoulDateTimeOf()`(시간대가 없으면 서울 시각, `new Date(글)` 금지) |
 | 파일 | `storage/storage.service.ts` | `save(folder, fileName, buffer)` → 경로, `read(path)`. 지금은 로컬 폴더, Supabase Storage로 옮길 때 이 파일만 바꾼다 |
 | 메신저 소켓 인증 | `auth/auth-token.service.ts` | handshake에서 `verifyCookieHeader(socket.handshake.headers.cookie)` |

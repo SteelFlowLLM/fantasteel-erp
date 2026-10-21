@@ -617,8 +617,8 @@ export class PurchasingService {
     const lot = await this.repository.findLotOfReceipt(tx, receipt.id);
     if (!lot) throw new AppException('COM-003', '이 입고로 만든 원료 LOT을 찾을 수 없어요');
     // 잠금 순서: 발주 → 작업 로그 채번 → 원료 LOT. 제선 실적은 시작 작업 로그(EV 채번 잠금)를 남긴 뒤 원료 LOT을 FIFO로 잠그므로
-    // LOT을 먼저 잡고 작업 로그를 남기면 서로 기다린다(교착). 이 번호는 쓰지 않고, 아래 작업 로그가 같은 번호를 다시 받는다
-    await this.numbering.nextDocumentNumber(tx, 'BUSINESS_EVENT');
+    // LOT을 먼저 잡고 작업 로그를 남기면 서로 기다린다(교착)
+    await this.numbering.lockDocumentNumber(tx, 'BUSINESS_EVENT');
     const lotBefore = await this.repository.cancelRawMaterialLot(tx, lot.id);
     if (!lotBefore) throw new AppException('PUR-006', `원료 LOT ${lot.lotNo} · 이미 투입·배정했거나 잔량이 줄어 입고를 취소할 수 없어요`);
 
