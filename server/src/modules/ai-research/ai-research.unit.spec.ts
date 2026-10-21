@@ -8,7 +8,7 @@ import { evenEvidence, notesFor, renderNote, sourceCatalog } from './ai-research
 import { continuationMessages, mergeContinuation } from './ai-research.runner';
 import { finalizeReport, incompleteNotice, REPORT_TRUNCATED_NOTICE, reportBodyForRevision } from './ai-research.report';
 import { checkCharts, numbersIn } from './ai-research.charts';
-import { DEFAULT_RESEARCH_LIMITS, modelBudget, researchLimits } from './ai-research.config';
+import { DEFAULT_RESEARCH_LIMITS, modelBudget, reportTimeoutMs, researchLimits } from './ai-research.config';
 import { buildResearchNotionMarkdown, chartToNotionTable, reportToNotion } from './ai-research.notion';
 import { buildChartMessages } from './ai-research.prompt';
 import { toRunView } from './ai-research.view';
@@ -96,6 +96,23 @@ describe('행동 확인과 대신하기', () => {
   it('출처가 꽉 차면 새 검색을 하지 않는다', () => {
     const sources = [source(1, { readText: 'x' }), source(2, { readText: 'y' })];
     expect(decideAction(readTurn({ action: 'search', query: '새 검색' }), { ...ctx, sources, maxSources: 2 })).toEqual({ kind: 'finish', fallback: true });
+  });
+});
+
+describe('보고서 시간 제한과 대체본 표시 (이슈 #521)', () => {
+  it('기본 10분, AI_RESEARCH_REPORT_TIMEOUT_MINUTES로 1~60분', () => {
+    expect(reportTimeoutMs({})).toBe(10 * 60_000);
+    expect(reportTimeoutMs({ AI_RESEARCH_REPORT_TIMEOUT_MINUTES: '20' })).toBe(20 * 60_000);
+    expect(reportTimeoutMs({ AI_RESEARCH_REPORT_TIMEOUT_MINUTES: '0' })).toBe(60_000);
+    expect(reportTimeoutMs({ AI_RESEARCH_REPORT_TIMEOUT_MINUTES: '999' })).toBe(60 * 60_000);
+    for (const bad of ['', ' ', '십분', '5.5', '-3']) expect(reportTimeoutMs({ AI_RESEARCH_REPORT_TIMEOUT_MINUTES: bad })).toBe(10 * 60_000);
+  });
+
+  it('저장된 대체본 표시는 알려진 까닭만 읽고, 없으면 null', () => {
+    expect(storedAudit({ thesis: '답', reportFallback: { reason: 'TIMEOUT', previous: false } })?.reportFallback).toEqual({ reason: 'TIMEOUT', previous: false });
+    expect(storedAudit({ thesis: '답', reportFallback: { reason: 'ERROR', previous: true } })?.reportFallback).toEqual({ reason: 'ERROR', previous: true });
+    expect(storedAudit({ thesis: '답', reportFallback: { reason: 'NOPE' } })?.reportFallback).toBeNull();
+    expect(storedAudit({ thesis: '답' })?.reportFallback).toBeNull();
   });
 });
 

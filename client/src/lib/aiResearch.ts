@@ -2,9 +2,11 @@
 // 출처 제목·요약·보고서는 웹에서 온 글이다. 여기서는 글 조각으로만 나누고 HTML로 바꾸지 않는다.
 import {
   AI_RESEARCH_LIMITS,
+  AI_RESEARCH_REPORT_FALLBACK_LABEL,
   type AiResearchEventView,
   type AiResearchPlan,
   type AiResearchPlanStep,
+  type AiResearchReportFallback,
   type AiResearchReportVersionSummary,
   type AiResearchRunView,
   type AiResearchSourceView,
@@ -118,8 +120,12 @@ export function timelineLineOf(event: AiResearchEventView): TimelineLine {
     }
     case 'report.ready': {
       const p = event.payload;
+      // 보고서 LLM이 쓰지 못해 조사 메모로 대신 쓴 보고서는 다 쓴 것처럼 보이지 않게 한다 (이슈 #521)
+      if (p.fallback) return { ...base, tone: 'wait', title: `대체본을 남겼어요 · ${AI_RESEARCH_REPORT_FALLBACK_LABEL[p.fallback]}`, detail: `${p.chars.toLocaleString('ko-KR')}자` };
       return { ...base, tone: 'ok', title: '보고서를 썼어요', detail: `${p.chars.toLocaleString('ko-KR')}자 · 인용한 출처 ${p.citedCount}개${p.truncated ? ' · 길이 한도에 걸려 끝까지 쓰지 못했어요' : ''}` };
     }
+    case 'report.retry':
+      return { ...base, tone: 'wait', title: `보고서가 ${event.payload.timeoutMinutes}분 안에 오지 않아 한 번 더 부탁했어요` };
     case 'failed':
       return { ...base, tone: 'danger', title: '조사에 실패했어요', detail: cut(event.payload.reason, 300) };
     case 'cancelled':
@@ -429,4 +435,11 @@ export function revisionBlockReason(run: Pick<AiResearchRunView, 'status' | 'can
 export function progressText(run: Pick<AiResearchRunView, 'stepsUsed' | 'budget' | 'sources'>): string {
   // 우리 ERP에서 조회한 출처·사내 지식은 웹 출처 자리에 세지 않는다
   return `${run.stepsUsed}/${run.budget.maxSteps} 단계 · 출처 ${run.sources.filter((source) => sourceKindOf(source.url) === 'web').length}/${run.budget.maxSources}`;
+}
+
+/** 대체본 표시 (이슈 #521): 조사 메모로 대신 쓴 것은 '대체본(까닭)', 고치기에서 앞 판을 그대로 둔 것은 '앞 판 그대로(까닭)' */
+export function reportFallbackLabel(fallback: AiResearchReportFallback | null | undefined): string | null {
+  if (!fallback) return null;
+  const why = AI_RESEARCH_REPORT_FALLBACK_LABEL[fallback.reason];
+  return fallback.previous ? `앞 판 그대로(${why})` : `대체본(${why})`;
 }

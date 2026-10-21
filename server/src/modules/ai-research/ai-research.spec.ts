@@ -44,7 +44,9 @@ let chartValue: unknown = { charts: [] };
 let chartError: string | null = null;
 /** 보고서 답 차례 (비면 reportText). 길이 한도로 끊긴 답·이어 쓰기를 흉내 낸다 */
 let reportReplies: { text: string; truncated: boolean }[] = [];
-const reportCalls: { messages: ChatMessage[]; maxTokens: number | undefined }[] = [];
+/** 보고서 요청이 차례로 실패할 것 (이슈 #521: 시간 초과 다시 시도). 비면 reportError·reportReplies */
+let reportFailures: { message: string; kind?: LlmFailureKind }[] = [];
+const reportCalls: { messages: ChatMessage[]; maxTokens: number | undefined; timeoutMs: number }[] = [];
 /** LM Studio가 알려 주는 문맥 길이 (null이면 모름) */
 let contextLength: number | null = null;
 /** 철강맨AI 답 (보고서에 대해 묻기) */
@@ -116,7 +118,9 @@ const llmClient = {
   }),
   chatText: jest.fn(async (_endpoint: unknown, _model: string, messages: ChatMessage[], options: LlmJsonOptions) => {
     if (!options.signal) throw new Error('signal 없음');
-    reportCalls.push({ messages, maxTokens: options.maxTokens });
+    reportCalls.push({ messages, maxTokens: options.maxTokens, timeoutMs: options.timeoutMs });
+    const failure = reportFailures.shift();
+    if (failure) throw new LlmRequestError(failure.message, undefined, failure.kind);
     if (reportError) throw new LlmRequestError(reportError);
     const next = reportReplies.shift();
     return { text: next?.text ?? reportText, thinking: null, truncated: next?.truncated ?? false };
@@ -253,6 +257,7 @@ beforeEach(async () => {
   notionPages.length = 0;
   llmClient.chatText.mockClear();
   reportReplies = [];
+  reportFailures = [];
   reportCalls.length = 0;
   contextLength = null;
   runner.config = { ...runner.config, now: Date.now, renewMs: 30_000 };
@@ -562,6 +567,52 @@ describe('심층 조사 — 실패해도 모은 것을 버리지 않는다 · �
     expect(done.incompleteReason).toContain('AI가 보고서를 쓰지 못해 조사 메모로 대신 정리했어요');
     expect(done.report).toContain('전기로가 배출이 적다');
     expect(done.report).toContain('- 전기로 배출이 적다 [1]');
+    // 시간 초과가 아닌 실패는 다시 하지 않고 대체본으로 보인다 (이슈 #521)
+    expect(reportCalls).toHaveLength(1);
+    expect(done.reportFallback).toEqual({ reason: 'ERROR', previous: false });
+    expect(done.events.find((e) => e.type === 'report.ready')?.payload).toMatchObject({ fallback: 'ERROR', incomplete: true });
+  });
+
+  it('보고서 LLM 시간 제한은 기본 10분이고, 시간 초과면 한 번 더 부탁해 그 보고서를 쓴다 (report.retry)', async () => {
+    const run = await queued('보고서 시간 초과 한 번');
+    turns = [{ action: 'search', query: '시간 초과 전 검색', sourceId: 0, researchState: state('메모') }];
+    reportFailures = [{ message: '600초 안에 응답이 없어요', kind: 'TIMEOUT' }];
+    reportText = '# 다시 쓴 보고서\n전기로가 적다 [1].';
+    await runner.processNext();
+    const done = await getRun(run.id);
+    expect(done.status).toBe('COMPLETED');
+    expect(reportCalls.map((c) => c.timeoutMs)).toEqual([10 * 60_000, 10 * 60_000]);
+    expect(done.report).toContain('전기로가 적다 [1].');
+    expect(done.reportFallback).toBeNull();
+    expect(done.incompleteReason).toBeNull();
+    const types = done.events.map((e) => e.type);
+    expect(types.indexOf('report.retry')).toBeGreaterThan(types.indexOf('audit.ready'));
+    expect(types.indexOf('report.retry')).toBeLessThan(types.indexOf('report.ready'));
+    expect(done.events.find((e) => e.type === 'report.retry')?.payload).toEqual({ timeoutMinutes: 10 });
+    expect(done.events.find((e) => e.type === 'report.ready')?.payload).not.toHaveProperty('fallback');
+  });
+
+  it('다시 해도 시간 초과면 조사 메모로 대체본을 쓰고 화면에 대체본(보고서 생성 시간 초과)으로 알린다. 시간 제한은 환경 변수로 바꾼다', async () => {
+    process.env.AI_RESEARCH_REPORT_TIMEOUT_MINUTES = '15';
+    try {
+      const run = await queued('보고서 시간 초과 두 번');
+      turns = [{ action: 'search', query: '두 번 초과 전 검색', sourceId: 0, researchState: state('메모') }];
+      reportFailures = [
+        { message: '900초 안에 응답이 없어요', kind: 'TIMEOUT' },
+        { message: '900초 안에 응답이 없어요', kind: 'TIMEOUT' },
+      ];
+      await runner.processNext();
+      const done = await getRun(run.id);
+      expect(done.status).toBe('COMPLETED');
+      expect(reportCalls.map((c) => c.timeoutMs)).toEqual([15 * 60_000, 15 * 60_000]);
+      expect(done.reportFallback).toEqual({ reason: 'TIMEOUT', previous: false });
+      expect(done.incompleteReason).toContain('AI가 보고서를 15분 안에 쓰지 못해(한 번 더 부탁해도) 조사 메모로 대신 정리했어요');
+      expect(done.report).toContain('**이 보고서는 완전하지 않아요.**');
+      expect(done.events.filter((e) => e.type === 'report.retry')).toHaveLength(1);
+      expect(done.events.find((e) => e.type === 'report.ready')?.payload).toMatchObject({ fallback: 'TIMEOUT', incomplete: true });
+    } finally {
+      delete process.env.AI_RESEARCH_REPORT_TIMEOUT_MINUTES;
+    }
   });
 
   it('취소하면 하던 LLM 요청을 바로 끊는다 (이 서버: interrupt)', async () => {
@@ -1208,6 +1259,7 @@ describe('심층 조사 — 보고서를 말로 고치기 (판, 이슈 #418)', (
     const after = await getRun(done.id);
     expect(after.status).toBe('COMPLETED');
     expect(after.incompleteReason).toContain('AI가 보고서를 쓰지 못해 앞 판 내용을 그대로 두었어요');
+    expect(after.reportFallback).toEqual({ reason: 'ERROR', previous: true });
     expect(after.report).toContain('첫 보고서 [1]');
     expect(after.versions).toHaveLength(2);
   });

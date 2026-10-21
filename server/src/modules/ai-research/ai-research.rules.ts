@@ -1,4 +1,4 @@
-import { AI_RESEARCH_LIMITS, AI_RESEARCH_STATUS, type AiResearchAudit, type AiResearchBudget, type AiResearchPlan, type AiResearchSeed, type AiResearchState, type AiResearchStatus } from '@fantasteel/shared';
+import { AI_RESEARCH_LIMITS, AI_RESEARCH_STATUS, type AiResearchAudit, type AiResearchBudget, type AiResearchPlan, type AiResearchReportFallback, type AiResearchReportFallbackReason, type AiResearchSeed, type AiResearchState, type AiResearchStatus } from '@fantasteel/shared';
 import { parseJsonContent } from '../llm/llm.client';
 import { cutText, internalReferenceIn, partnerNamesIn, redactQuery, stripInvisible, urlKey } from '../ai-assistant/web/web-text';
 import { RESEARCH_CAPS, researchLimits, type ResearchLimits } from './ai-research.config';
@@ -87,6 +87,16 @@ export interface StoredAudit extends AiResearchAudit {
   reportTruncated: boolean;
   /** 조사를 다 마치지 못하고 모은 것으로 보고서를 쓴 이유 (시간 상한·LLM 실패). 다 마쳤으면 null */
   incompleteReason?: string | null;
+  /** 보고서가 대체본이면 그 까닭 (이슈 #521). 보고서 LLM이 썼으면 null */
+  reportFallback?: AiResearchReportFallback | null;
+}
+
+const FALLBACK_REASONS: readonly AiResearchReportFallbackReason[] = ['TIMEOUT', 'ERROR', 'EMPTY', 'LLM_DOWN'];
+
+/** 저장된 대체본 표시 (모양이 틀리면 null) */
+export function storedReportFallback(value: unknown): AiResearchReportFallback | null {
+  if (!isRecord(value) || !FALLBACK_REASONS.includes(value.reason as AiResearchReportFallbackReason)) return null;
+  return { reason: value.reason as AiResearchReportFallbackReason, previous: value.previous === true };
 }
 
 const SUMMARY_MAX = 1500;
@@ -406,6 +416,7 @@ export function storedAudit(value: unknown): StoredAudit | null {
     ok: value.ok !== false,
     reportTruncated: value.reportTruncated === true,
     incompleteReason: typeof value.incompleteReason === 'string' ? value.incompleteReason : null,
+    reportFallback: storedReportFallback(value.reportFallback),
   };
 }
 

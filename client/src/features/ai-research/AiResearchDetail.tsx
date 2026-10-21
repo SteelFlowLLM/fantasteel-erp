@@ -29,7 +29,7 @@ import { useUrlParams } from '@/features/purchasing/hooks/useUrlParams';
 import { errorCodeOf } from '@/api/http';
 import { useAction } from '@/hooks/useAction';
 import { useAiResearchRun, useAiResearchVersion } from '@/hooks/useAiResearch';
-import { canCancelRun, canRenameRun, canRerunRun, planTitleProblem, progressText, timelineLines, versionLabel } from '@/lib/aiResearch';
+import { canCancelRun, canRenameRun, canRerunRun, planTitleProblem, progressText, reportFallbackLabel, timelineLines, versionLabel } from '@/lib/aiResearch';
 import { openableWebSources } from '@/lib/aiWebLinks';
 import { AiAnswerText } from '@/features/shell/AiWebAnswer';
 import { toast } from '@/stores/useToastStore';
@@ -177,7 +177,7 @@ function ReportWithVersions({ run }: { run: AiResearchRunView }) {
         )
       ) : (
         <>
-          <AiResearchReport run={run} title={latest ? `보고서 · ${latest}판` : '보고서'} />
+          <AiResearchReport run={run} title={latest ? `보고서 · ${latest}판` : '보고서'} fallbackLabel={reportFallbackLabel(run.reportFallback)} />
           <AiResearchCharts run={run} />
         </>
       )}
@@ -319,6 +319,14 @@ function Body({ run }: { run: AiResearchRunView }) {
                   ))}
                 </ul>
               ) : null}
+            </Banner>
+          ) : null}
+          {run.reportFallback ? (
+            <Banner tone="wait">
+              <b>{reportFallbackLabel(run.reportFallback)}</b>
+              <div className="mt-0.5 text-cap whitespace-pre-line break-words">
+                {run.incompleteReason ?? 'AI가 보고서를 쓰지 못해 대신 정리했어요.'} 아래 &lsquo;보고서 고치기&rsquo;로 다시 쓰게 하거나 다시 조사할 수 있어요.
+              </div>
             </Banner>
           ) : null}
           {!incomplete && run.canExtend ? (

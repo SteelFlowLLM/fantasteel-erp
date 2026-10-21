@@ -1,6 +1,6 @@
 import type { AiResearchEventView, AiResearchPlan, AiResearchRunView } from '@fantasteel/shared';
 import { describe, expect, it } from 'vitest';
-import { addPlanStep, canCancelRun, canRenameRun, canRerunRun, inlineOf, isPlanChanged, mergeRunView, movePlanStep, nextAfterSeq, normalizePlan, planBlockReason, planQueryKey, revisionBlockReason, revisionTurns, versionLabel, planSuggestionDiff, planSuggestionSummary, planTitleProblem, progressText, removePlanStep, reportBlocks, shouldPollRun, sourceRows, stripSourceSection, timelineLineOf, validatePlan } from '@/lib/aiResearch';
+import { addPlanStep, canCancelRun, canRenameRun, canRerunRun, inlineOf, isPlanChanged, mergeRunView, movePlanStep, nextAfterSeq, normalizePlan, planBlockReason, planQueryKey, revisionBlockReason, revisionTurns, versionLabel, planSuggestionDiff, planSuggestionSummary, planTitleProblem, progressText, removePlanStep, reportBlocks, reportFallbackLabel, shouldPollRun, sourceRows, stripSourceSection, timelineLineOf, validatePlan } from '@/lib/aiResearch';
 
 const at = '2026-10-17T01:00:00.000Z';
 const sources = [
@@ -88,6 +88,19 @@ describe('타임라인', () => {
     const payload = { title: '계획', stepCount: 2, revision: 1, fallback: false };
     expect(timelineLineOf({ seq: 1, type: 'plan.ready', createdAt: at, payload: { ...payload, copiedFrom: 7 } }).title).toBe('조사 #7의 계획을 가져왔어요 · 2단계');
     expect(timelineLineOf({ seq: 1, type: 'plan.ready', createdAt: at, payload }).title).toBe('계획을 세웠어요 · 2단계');
+  });
+  it('보고서 시간 초과 다시 시도와 대체본 보고서는 경고 톤으로 까닭을 보인다 (이슈 #521)', () => {
+    const retry = timelineLineOf({ seq: 6, type: 'report.retry', createdAt: at, payload: { timeoutMinutes: 10 } });
+    expect(retry).toMatchObject({ tone: 'wait', title: '보고서가 10분 안에 오지 않아 한 번 더 부탁했어요' });
+    const ready = { chars: 1200, truncated: false, citedCount: 0, incomplete: true };
+    expect(timelineLineOf({ seq: 7, type: 'report.ready', createdAt: at, payload: { ...ready, fallback: 'TIMEOUT' } })).toMatchObject({ tone: 'wait', title: '대체본을 남겼어요 · 보고서 생성 시간 초과' });
+    expect(timelineLineOf({ seq: 7, type: 'report.ready', createdAt: at, payload: ready })).toMatchObject({ tone: 'ok', title: '보고서를 썼어요' });
+  });
+  it('대체본 표시: 조사 메모로 대신 쓴 것과 앞 판을 그대로 둔 것을 나눈다', () => {
+    expect(reportFallbackLabel({ reason: 'TIMEOUT', previous: false })).toBe('대체본(보고서 생성 시간 초과)');
+    expect(reportFallbackLabel({ reason: 'ERROR', previous: true })).toBe('앞 판 그대로(보고서 생성 실패)');
+    expect(reportFallbackLabel({ reason: 'LLM_DOWN', previous: false })).toBe('대체본(AI 응답 끊김)');
+    expect(reportFallbackLabel(null)).toBeNull();
   });
   it('조사 메모는 요약과 모자란 것 개수를 보인다', () => {
     const line = timelineLineOf({ seq: 5, type: 'state.updated', createdAt: at, payload: { summary: '요약', gapCount: 2, unsupportedCount: 0 } });

@@ -42,14 +42,28 @@ function Inline({ parts }: { parts: ReportInline[] }) {
 
 const HEADING = ['text-lg font-semibold', 'text-base font-semibold', 'text-sm font-semibold', 'text-sm font-semibold text-ink-2'];
 
-/** report를 주면 그 판의 보고서를 그린다 (없으면 지금 보고서). 출처는 판과 상관없이 조사의 출처다 (출처는 늘기만 한다) */
-export function AiResearchReport({ run, report = run.report, title = '보고서' }: { run: AiResearchRunView; report?: string | null; title?: string }) {
+/**
+ * report를 주면 그 판의 보고서를 그린다 (없으면 지금 보고서). 출처는 판과 상관없이 조사의 출처다 (출처는 늘기만 한다).
+ * fallbackLabel은 보고서 LLM이 쓰지 못해 남긴 대체본 표시다 (이슈 #521). 다 쓴 보고서와 헷갈리지 않게 제목 옆에 둔다
+ */
+export function AiResearchReport({ run, report = run.report, title = '보고서', fallbackLabel = null }: { run: AiResearchRunView; report?: string | null; title?: string; fallbackLabel?: string | null }) {
   const blocks = useMemo(() => reportBlocks(report ?? '', run.sources), [report, run.sources]);
   const rows = useMemo(() => sourceRows(run.sources), [run.sources]);
   return (
     <>
       <Card className="flex-none">
-        <CardHead title={title} />
+        <CardHead
+          title={
+            fallbackLabel ? (
+              <span className="flex items-center gap-2">
+                {title}
+                <Badge tone="wait">{fallbackLabel}</Badge>
+              </span>
+            ) : (
+              title
+            )
+          }
+        />
         <CardBody className="gap-2.5 text-sm leading-relaxed">
           {blocks.length === 0 ? <p className="text-ink-3">보고서 내용이 없어요</p> : null}
           {blocks.map((block, index) => {

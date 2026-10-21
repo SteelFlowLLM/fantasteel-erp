@@ -133,6 +133,7 @@ export const AI_RESEARCH_EVENT_TYPES = [
   'charts.ready',
   'revision.requested',
   'revision.ready',
+  'report.retry',
 ] as const;
 export type AiResearchEventType = (typeof AI_RESEARCH_EVENT_TYPES)[number];
 
@@ -146,7 +147,8 @@ export interface AiResearchEventPayloads {
   'page.read': { sourceId: number; title: string; chars: number; error: string | null };
   'state.updated': { summary: string; gapCount: number; unsupportedCount: number };
   'audit.ready': { claimCount: number; contradictionCount: number; missingCount: number; ok: boolean };
-  'report.ready': { chars: number; truncated: boolean; citedCount: number; incomplete?: boolean };
+  /** fallback: 보고서 LLM 대신 쓴 대체본이면 그 까닭 (이슈 #521) */
+  'report.ready': { chars: number; truncated: boolean; citedCount: number; incomplete?: boolean; fallback?: AiResearchReportFallbackReason };
   failed: { reason: string };
   cancelled: Record<string, never>;
   'budget.exhausted': { stepsUsed: number; maxSteps: number; gapCount: number; reason?: string };
@@ -156,6 +158,27 @@ export interface AiResearchEventPayloads {
   'revision.requested': { version: number; instruction: string; search: boolean; addedSteps: number };
   /** 고친 보고서를 version판으로 남겼다 */
   'revision.ready': { version: number; chars: number };
+  /** 보고서 LLM이 timeoutMinutes분 안에 답하지 않아 한 번 더 부탁했다 (이슈 #521) */
+  'report.retry': { timeoutMinutes: number };
+}
+
+/**
+ * 보고서 LLM이 쓴 보고서 대신 남긴 대체본의 까닭 (이슈 #521). TIMEOUT 시간 초과(한 번 더 해도) · ERROR 그 밖의 LLM 실패 ·
+ * EMPTY 빈 답 · LLM_DOWN 앞 단계(조사·점검)에서 AI 응답이 끊겨 보고서 LLM을 부르지 않음
+ */
+export type AiResearchReportFallbackReason = 'TIMEOUT' | 'ERROR' | 'EMPTY' | 'LLM_DOWN';
+
+export const AI_RESEARCH_REPORT_FALLBACK_LABEL: Record<AiResearchReportFallbackReason, string> = {
+  TIMEOUT: '보고서 생성 시간 초과',
+  ERROR: '보고서 생성 실패',
+  EMPTY: 'AI가 빈 보고서를 냄',
+  LLM_DOWN: 'AI 응답 끊김',
+};
+
+/** 대체본. previous면 조사 메모가 아니라 앞 판 보고서를 그대로 둔 것 (보고서 고치기) */
+export interface AiResearchReportFallback {
+  reason: AiResearchReportFallbackReason;
+  previous: boolean;
 }
 
 /** 보고서 판 하나 (목록용, 본문 없음). instruction이 null이면 1판(처음 보고서)이거나 더 조사하기로 다시 쓴 판 */
@@ -236,6 +259,8 @@ export interface AiResearchRunView extends AiResearchRunSummaryView {
   reportTruncated: boolean;
   /** 조사를 다 마치지 못하고(30분 상한·LLM 실패) 그때까지 모은 출처로 보고서를 쓴 이유. 다 마쳤으면 null (보고서 맨 위에도 알림이 있다) */
   incompleteReason?: string | null;
+  /** 지금 보고서가 보고서 LLM이 쓴 것이 아니라 대체본이면 그 까닭 (이슈 #521). 아니면 null */
+  reportFallback: AiResearchReportFallback | null;
   failureReason: string | null;
   /** 단계를 다 써서 끝났고 아직 모르는 것이 남아 더 조사할 수 있는지 */
   canExtend: boolean;

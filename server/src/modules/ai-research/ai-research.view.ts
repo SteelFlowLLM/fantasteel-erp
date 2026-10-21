@@ -61,6 +61,7 @@ export function toRunView(row: AiResearchRun, events: AiResearchEvent[], lastSeq
     report: row.report,
     reportTruncated: audit?.reportTruncated ?? false,
     incompleteReason: audit?.incompleteReason ?? null,
+    reportFallback: row.report ? (audit?.reportFallback ?? null) : null,
     failureReason: row.failureReason,
     canExtend: canExtend({ status, stepsUsed: row.stepsUsed, budget, state }) && (versions.length === 0 || hasVersionRoom(versions.length)),
     charts: storedCharts(row.charts),

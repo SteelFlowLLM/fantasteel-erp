@@ -1,7 +1,7 @@
 import { Injectable, Logger, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
-import { AI_RESEARCH_LIMITS, AI_RESEARCH_STATUS, type AiResearchChart, type AiResearchPlan, type AiResearchStatus } from '@fantasteel/shared';
+import { AI_RESEARCH_LIMITS, AI_RESEARCH_STATUS, type AiResearchChart, type AiResearchPlan, type AiResearchReportFallback, type AiResearchReportFallbackReason, type AiResearchStatus } from '@fantasteel/shared';
 import type { Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
@@ -11,7 +11,7 @@ import { LlmClient, LlmRequestError, type ChatMessage, type LlmJsonSchema } from
 import { LLM_PROFILE } from '../llm/llm-profiles';
 import { llmEndpointOf, LlmSettingsStore } from '../llm/llm-settings.store';
 import { checkCharts } from './ai-research.charts';
-import { modelBudget, researchLimits, type ModelBudget } from './ai-research.config';
+import { modelBudget, reportTimeoutMs, researchLimits, type ModelBudget } from './ai-research.config';
 import { erpSourcesFrom, ResearchErpLookup } from './ai-research.erp';
 import { knowledgeSourcesFrom, ResearchKnowledgeFinder } from './ai-research.knowledge';
 import { askResearchJson, withNoThinkHint } from './ai-research.llm';
@@ -91,7 +91,8 @@ export interface ResearchRunnerConfig {
   rateLimitWaitMs: number;
   rateLimitRetries: number;
   jsonTimeoutMs: number;
-  reportTimeoutMs: number;
+  /** 보고서 LLM 한 번의 시간 제한. 없으면 부를 때마다 AI_RESEARCH_REPORT_TIMEOUT_MINUTES(기본 10분)를 읽는다 (이슈 #521) */
+  reportTimeoutMs?: number;
   now: () => number;
   sleep: (ms: number, signal: AbortSignal) => Promise<void>;
 }
@@ -104,7 +105,6 @@ export const DEFAULT_RUNNER_CONFIG: ResearchRunnerConfig = {
   rateLimitWaitMs: 20_000,
   rateLimitRetries: 3,
   jsonTimeoutMs: 3 * 60_000,
-  reportTimeoutMs: 5 * 60_000,
   now: Date.now,
   sleep: abortableSleep,
 };
@@ -439,6 +439,10 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     await this.assertMine(ctx);
     let body = '';
     let truncated = false;
+    /** 보고서 LLM 대신 대체본을 남기게 된 까닭 (이슈 #521). 화면에 '대체본(…)'으로 보인다 */
+    let fallback: AiResearchReportFallbackReason | null = null;
+    const timeoutMs = this.config.reportTimeoutMs ?? reportTimeoutMs();
+    const timeoutMinutes = Math.round(timeoutMs / 60_000);
     if (!llmDown)
       try {
         const messages = buildReportMessages({
@@ -452,8 +456,20 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
           revision: revision && previousReport ? { instruction: revision.instruction, previousReport } : null,
         });
         const maxTokens = ctx.model.reportMaxTokens;
-        const ask = (msgs: ChatMessage[]) =>
-          this.llmClient.chatText(endpoint, endpoint.model, msgs, { timeoutMs: this.config.reportTimeoutMs, maxTokens, profile: LLM_PROFILE.RESEARCH_REPORT, signal: ctx.abort.signal });
+        const askOnce = (msgs: ChatMessage[]) => this.llmClient.chatText(endpoint, endpoint.model, msgs, { timeoutMs, maxTokens, profile: LLM_PROFILE.RESEARCH_REPORT, signal: ctx.abort.signal });
+        let retried = false;
+        // 로컬 LLM은 긴 보고서를 시간 안에 다 쓰지 못할 때가 있어(#493 실측) 시간 초과는 보고서 단계에서 한 번만 같은 요청으로 다시 한다
+        const ask = async (msgs: ChatMessage[]) => {
+          try {
+            return await askOnce(msgs);
+          } catch (error) {
+            if (retried || !(error instanceof LlmRequestError) || error.kind !== 'TIMEOUT' || ctx.abort.signal.aborted) throw error;
+            retried = true;
+            this.logger.warn(`조사 ${ctx.id} 보고서가 ${timeoutMinutes}분 안에 오지 않아 한 번 더 부탁해요`);
+            await this.save(ctx, AI_RESEARCH_STATUS.RUNNING, { updatedAt: new Date(this.config.now()) }, [{ type: 'report.retry', payload: { timeoutMinutes } }]);
+            return askOnce(msgs);
+          }
+        };
         let reply = await ask(messages);
         // 생각만 하다 예산을 다 쓴 답은 한 번만 더 생각 없이 부탁한다
         if (reply.text.trim().length < NEAR_EMPTY_CHARS) {
@@ -478,17 +494,25 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
           }
         }
         if (body.length < NEAR_EMPTY_CHARS) body = '';
-        if (!body) notes.push(`AI가 빈 보고서를 내 ${replacement}.`);
+        if (!body) {
+          fallback = 'EMPTY';
+          notes.push(`AI가 빈 보고서를 내 ${replacement}.`);
+        }
       } catch (error) {
         if (!(error instanceof LlmRequestError) || ctx.abort.signal.aborted) throw error;
-        notes.push(`AI가 보고서를 쓰지 못해 ${replacement}(${cutText(error.message, 160)}).`);
+        fallback = error.kind === 'TIMEOUT' ? 'TIMEOUT' : 'ERROR';
+        notes.push(fallback === 'TIMEOUT' ? `AI가 보고서를 ${timeoutMinutes}분 안에 쓰지 못해(한 번 더 부탁해도) ${replacement}.` : `AI가 보고서를 쓰지 못해 ${replacement}(${cutText(error.message, 160)}).`);
       }
-    else notes.push(`보고서는 ${replacement}.`);
+    else {
+      fallback = 'LLM_DOWN';
+      notes.push(`보고서는 ${replacement}.`);
+    }
     if (!body) {
       // 조사 메모·앞 판은 끊긴 글이 아니므로 '길이 한도' 알림을 겹쳐 달지 않는다
       truncated = false;
       body = previousReport ?? fallbackReportBody(run.question, audit, state);
-    }
+    } else fallback = null;
+    const reportFallback: AiResearchReportFallback | null = fallback ? { reason: fallback, previous: previousReport !== null } : null;
     const incompleteReason = notes.length ? notes.join(' ') : null;
     const { report, citedIds } = finalizeReport(body, sources, truncated, incompleteReason);
     // 차트는 덤이다: LLM이 끊겼으면 부르지 않고, 실패하면 차트 없이 끝낸다
@@ -503,7 +527,7 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
       {
         status: AI_RESEARCH_STATUS.COMPLETED,
         report,
-        audit: json({ ...audit, reportTruncated: truncated, incompleteReason }),
+        audit: json({ ...audit, reportTruncated: truncated, incompleteReason, reportFallback }),
         charts: json(charts),
         researchState: json(finished),
         finishedAt: new Date(this.config.now()),
@@ -511,7 +535,7 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
         ...released,
       },
       [
-        { type: 'report.ready', payload: { chars: report.length, truncated, citedCount: citedIds.length, incomplete: incompleteReason !== null } },
+        { type: 'report.ready', payload: { chars: report.length, truncated, citedCount: citedIds.length, incomplete: incompleteReason !== null, ...(fallback ? { fallback } : {}) } },
         ...(charted ? [{ type: 'charts.ready' as const, payload: { count: charted.charts.length, droppedPoints: charted.droppedPoints } }] : []),
       ],
       async (tx) => {
