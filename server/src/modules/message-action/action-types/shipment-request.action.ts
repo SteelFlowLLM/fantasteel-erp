@@ -14,7 +14,7 @@ import { AppException } from '../../../common/errors/app.exception';
 import type { Tx } from '../../../prisma/prisma.service';
 import { ShipmentService } from '../../shipment/shipment.service';
 import { MessageActionRepository, type DraftRow, type SalesOrderItemBrief } from '../message-action.repository';
-import type { ActionDefinition } from './action-definition';
+import { memoized, type ActionDefinition, type LookupMemo } from './action-definition';
 import { EXTRACTION_CANDIDATE_LIMIT, executedResultOf, originOf, salesOrderItemGuideLine, salesOrderItemLabel, salesOrderItemOf } from './business-refs';
 import {
   dateOrNull,
@@ -28,6 +28,7 @@ import {
   linesOf,
   linesPatch,
   matchOne,
+  MAX_DRAFT_QTY,
   qtyOrNull,
   qtyPatch,
   rejectUnknownFields,
@@ -137,7 +138,7 @@ export class ShipmentRequestAction implements ActionDefinition<ShipmentRequestDr
     if (lines !== undefined) {
       next.items = lines.map((line, index) => ({
         salesOrderItemId: idPatch(line.salesOrderItemId, `품목 ${index + 1}의 수주 품목을 골라 주세요`) ?? null,
-        requestQty: qtyPatch(line.requestQty, `품목 ${index + 1}의 매수는 1 이상의 정수로 입력해 주세요`),
+        requestQty: qtyPatch(line.requestQty, `품목 ${index + 1}의 매수는 1 이상의 정수(${MAX_DRAFT_QTY.toLocaleString('ko-KR')}매까지)로 입력해 주세요`),
       }));
       const ids = next.items.map((l) => l.salesOrderItemId).filter((id): id is number => id !== null);
       const found = ids.length > 0 ? await this.repository.findSalesOrderItems(tx, { id: { in: ids } }) : [];
@@ -147,8 +148,8 @@ export class ShipmentRequestAction implements ActionDefinition<ShipmentRequestDr
     return next;
   }
 
-  async unresolvedFields(tx: Tx, payload: ShipmentRequestDraftPayload): Promise<string[]> {
-    const customerExists = payload.customerId !== null && (await this.repository.findCustomers(tx)).some((c) => c.id === payload.customerId);
+  async unresolvedFields(tx: Tx, payload: ShipmentRequestDraftPayload, memo?: LookupMemo): Promise<string[]> {
+    const customerExists = payload.customerId !== null && (await memoized(memo, 'customers', () => this.repository.findCustomers(tx))).some((c) => c.id === payload.customerId);
     return shipmentRequestUnresolvedFields(payload, customerExists, await this.salesOrderItemsOf(tx, payload));
   }
 
@@ -165,10 +166,10 @@ export class ShipmentRequestAction implements ActionDefinition<ShipmentRequestDr
     }
   }
 
-  async payloadLabels(tx: Tx, payload: ShipmentRequestDraftPayload): Promise<Record<string, string>> {
+  async payloadLabels(tx: Tx, payload: ShipmentRequestDraftPayload, memo?: LookupMemo): Promise<Record<string, string>> {
     const labels: Record<string, string> = {};
     if (payload.customerId !== null) {
-      const customer = (await this.repository.findCustomers(tx)).find((c) => c.id === payload.customerId);
+      const customer = (await memoized(memo, 'customers', () => this.repository.findCustomers(tx))).find((c) => c.id === payload.customerId);
       if (customer) labels.customerId = customer.customerName;
     }
     const rows = await this.salesOrderItemsOf(tx, payload);

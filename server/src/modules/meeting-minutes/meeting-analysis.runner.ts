@@ -3,7 +3,7 @@ import { MEETING_MINUTES_STATUS, ROLE_LABEL, type MeetingAnalysis, type MeetingA
 import { PrismaService } from '../../prisma/prisma.service';
 import { Prisma } from '../../generated/prisma/client';
 import { LlmClient, LlmJsonParseError, LlmRequestError, type LlmJsonReply } from '../llm/llm.client';
-import { LlmSettingsStore } from '../llm/llm-settings.store';
+import { llmEndpointOf, LlmSettingsStore } from '../llm/llm-settings.store';
 import { LLM_PROFILE } from '../llm/llm-profiles';
 import { candidateLimit, joinSummaries, lineText, mergeChunkResults, restrictToChunk, splitTranscript, type TranscriptChunk } from './meeting-analysis.chunks';
 import {
@@ -163,7 +163,7 @@ export class MeetingAnalysisRunner implements OnApplicationBootstrap, OnModuleDe
       departmentName: a.employee.department.departmentName,
       roleLabel: ROLE_LABEL[a.employee.role.roleCode as Role] ?? a.employee.role.roleCode,
     }));
-    const endpoint = { baseUrl: settings.baseUrl, apiKey: settings.apiKey };
+    const endpoint = llmEndpointOf(settings);
     // 긴 전사는 조각으로 나눠 조각마다 1차 분석·2차 검토를 한다. 번호는 회의 전체 기준이라 근거가 원문 위치를 그대로 가리킨다
     const chunks = splitTranscript(transcriptSegments.map((segment, index) => ({ number: index + 1, speaker: speakerLabelOf(segment) ?? undefined, text: segment.text })));
     const promptOf = (chunk: TranscriptChunk): AnalysisPromptInput => ({

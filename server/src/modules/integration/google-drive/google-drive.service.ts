@@ -11,6 +11,8 @@ import {
   buildDriveFolderQuery,
   buildDriveListQuery,
   buildDriveSearchQuery,
+  driveSearchTerms,
+  type DriveSearchMatch,
   driveReadPlan,
   type DriveReadPlan,
   DRIVE_COUNT_PAGE_SIZE,
@@ -144,22 +146,28 @@ export class GoogleDriveService {
   }
 
   /**
-   * 철강맨AI의 drive_search (이슈 #398): 이름에 query가 든 파일(없으면 모두), 최신 수정순 limit개.
+   * 철강맨AI의 drive_search (이슈 #398, 내용 검색 #473): 이름이나 내용에 query의 낱말이 든 파일(없으면 모두), 최신 수정순 limit개.
+   * 낱말이 여럿이면 모두 든 파일을 먼저 찾고, 하나도 없으면 하나라도 든 파일을 찾는다. content를 false로 하면 이름만 본다.
    * 폴더·휴지통·종류는 목록과 같이 다시 거른다.
    */
-  async searchFiles(query: string | null, kind: DriveFileListKind, limit: number): Promise<DriveFileView[]> {
+  async searchFiles(query: string | null, kind: DriveFileListKind, limit: number, content = true): Promise<DriveFileView[]> {
     const folderId = await this.assertReady();
-    let page: { files: DriveFileMeta[] };
-    try {
-      page = await this.client.listFiles({ q: buildDriveSearchQuery(folderId, kind, query), fields: `files(${DRIVE_FILE_FIELDS})`, pageSize: limit, orderBy: 'modifiedTime desc' });
-    } catch (error) {
-      throw this.folderMissing(error);
-    }
-    return page.files.flatMap((f) => {
-      const fileKind = driveFileKind(f.mimeType, f.name);
-      if (f.trashed || !f.parents.includes(folderId) || !fileKind || (kind !== 'all' && fileKind !== kind)) return [];
-      return [toDriveFileView(f, fileKind)];
-    });
+    const list = async (match: DriveSearchMatch): Promise<DriveFileView[]> => {
+      let page: { files: DriveFileMeta[] };
+      try {
+        page = await this.client.listFiles({ q: buildDriveSearchQuery(folderId, kind, query, match, content), fields: `files(${DRIVE_FILE_FIELDS})`, pageSize: limit, orderBy: 'modifiedTime desc' });
+      } catch (error) {
+        throw this.folderMissing(error);
+      }
+      return page.files.flatMap((f) => {
+        const fileKind = driveFileKind(f.mimeType, f.name);
+        if (f.trashed || !f.parents.includes(folderId) || !fileKind || (kind !== 'all' && fileKind !== kind)) return [];
+        return [toDriveFileView(f, fileKind)];
+      });
+    };
+    const strict = await list('all');
+    if (strict.length > 0 || driveSearchTerms(query).length < 2) return strict;
+    return list('any');
   }
 
   /**

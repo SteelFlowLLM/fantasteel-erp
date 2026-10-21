@@ -616,7 +616,7 @@ model QualityInspectionValue {
 model PastCase {
   id Int @id @default(autoincrement()) /// 시퀀스 6부터 (예시 사례 CASE-0001~0005와 겹치지 않게, 마이그레이션 SQL)
   caseNo String @unique @map("case_no") @db.VarChar /// CASE-{id 4자리} (번호 형식 TBD, 가정값)
-  caseCategory String @map("case_category") @db.VarChar /// CASE_CATEGORY 🟡: QUALITY·EQUIPMENT
+  caseCategory String @map("case_category") @db.VarChar /// CASE_CATEGORY: QUALITY·EQUIPMENT
   title String @db.VarChar
   phenomenon String
   cause String?
@@ -1035,7 +1035,7 @@ model MessageAttachment {
   @@map("message_attachment")
 }
 
-/// / 부분 unique: (message_id, action_type) /   WHERE draft_status IN ('AI_GENERATED', 'WAITING_APPROVAL', 'APPROVED')  (미처리 초안 중복 방지) / 결과는 생성된 업무 테이블의 action_draft_id로 연결 (purchase_requisition.action_draft_id) /
+/// / 부분 unique: (message_id, action_type) /   WHERE draft_status IN ('AI_GENERATED', 'WAITING_APPROVAL', 'APPROVED')  (미처리 초안 중복 방지) / 부분 unique: (payload->'agent'->>'targetKey') /   WHERE message_id IS NULL AND payload->'agent'->>'targetKey' IS NOT NULL /   AND draft_status IN ('AI_GENERATED', 'WAITING_APPROVAL', 'APPROVED')  (Agent 대응 후보의 같은 대상 미처리 중복 방지, REQ-AGT-005, 2026-10-21) /   마이그레이션이 만들기 전에 이미 있는 중복은 가장 진행된 1건(APPROVED > WAITING_APPROVAL > AI_GENERATED, 같으면 id가 작은 것)만 남기고 나머지를 REJECTED('[자동] …')로 닫는다 / 결과는 생성된 업무 테이블의 action_draft_id로 연결 (purchase_requisition.action_draft_id) /
 model ActionDraft {
   id Int @id @default(autoincrement())
   actionType String @map("action_type") @db.VarChar /// ACTION_TYPE. P1은 PURCHASE_REQUISITION_CREATE

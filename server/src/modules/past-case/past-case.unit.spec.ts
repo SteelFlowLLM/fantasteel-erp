@@ -1,4 +1,4 @@
-import { PAST_CASE_EXAMPLES, caseKeywords, searchPastCases } from '@fantasteel/shared';
+import { PAST_CASE_EXAMPLES, ROLE, canModifyPastCase, caseKeywords, searchPastCases } from '@fantasteel/shared';
 import { buildDraftMessages, failedItemText, parseDraft, ruleDraft, similarQueryOf, type FailureFacts } from './past-case.draft';
 
 const facts: FailureFacts = {
@@ -58,5 +58,23 @@ describe('사례 초안 (REQ-CASE-002)', () => {
     expect(user?.content).toContain('CASE-0005');
     expect(user?.content).toContain('(예시 사례)');
     expect(similarQueryOf(facts)).toBe('SM355A 히트 망가니즈 불합격');
+  });
+});
+
+describe('사례 수정·삭제 권한 (canModifyPastCase)', () => {
+  const registered = { createdEmployeeId: 7, createdEmployeeDepartmentId: 3 };
+  const user = (over: Partial<{ employeeId: number; roleCode: (typeof ROLE)[keyof typeof ROLE]; headDepartmentIds: number[] }>) => ({ employeeId: 9, roleCode: ROLE.QUALITY, headDepartmentIds: [], ...over });
+
+  it('등록한 본인·그 소속 부서의 부서장·관리자만 할 수 있다', () => {
+    expect(canModifyPastCase(user({ employeeId: 7 }), registered)).toBe(true);
+    expect(canModifyPastCase(user({ headDepartmentIds: [3] }), registered)).toBe(true);
+    expect(canModifyPastCase(user({ roleCode: ROLE.ADMIN }), registered)).toBe(true);
+    expect(canModifyPastCase(user({}), registered)).toBe(false);
+    expect(canModifyPastCase(user({ headDepartmentIds: [4] }), registered)).toBe(false);
+  });
+
+  it('예시 사례는 관리자도 못 고친다', () => {
+    const example = PAST_CASE_EXAMPLES[0]!;
+    expect(canModifyPastCase(user({ roleCode: ROLE.ADMIN }), example)).toBe(false);
   });
 });

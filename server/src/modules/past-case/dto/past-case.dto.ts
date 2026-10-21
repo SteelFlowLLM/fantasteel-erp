@@ -1,6 +1,6 @@
 import { Transform, Type } from 'class-transformer';
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsDateString, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, MaxLength, Min } from 'class-validator';
-import { PAST_CASE_CATEGORY, type CreatePastCaseInput, type PastCaseCategory, type PastCaseSearchInput } from '@fantasteel/shared';
+import { PAST_CASE_CATEGORY, type CreatePastCaseInput, type PastCaseCategory, type PastCaseSearchInput, type UpdatePastCaseInput } from '@fantasteel/shared';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 const CATEGORIES = Object.values(PAST_CASE_CATEGORY);
@@ -65,4 +65,11 @@ export class CreatePastCaseDto implements CreatePastCaseInput {
   @IsInt({ each: true })
   @Min(1, { each: true })
   lotIds!: number[];
+}
+
+/** 과거 사례 수정: 등록과 같은 항목·같은 검사 + 불러온 시각(동시 수정 확인) */
+export class UpdatePastCaseDto extends CreatePastCaseDto implements UpdatePastCaseInput {
+  @IsOptional()
+  @IsDateString({ strict: true }, { message: 'expectedUpdatedAt은 시각(ISO 8601)으로 보내 주세요' })
+  expectedUpdatedAt?: string | null;
 }

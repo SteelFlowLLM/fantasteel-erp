@@ -5,6 +5,22 @@ import type { Tx } from '../../../prisma/prisma.service';
 import type { DraftRow } from '../message-action.repository';
 
 /** 만들 때 AI가 채운 칸이 있던 초안은 확정·실행 작업 로그를 AI 경유로 남긴다 (REQ-AST-010, 모듈 문서 10장) */
+/**
+ * 여러 초안을 한꺼번에 보일 때 같은 기준정보(고객사·규격 목록)를 한 번만 읽으려고 나눠 쓰는 기억 (#471 리뷰).
+ * 한 번의 목록·상세 응답 안에서만 쓴다
+ */
+export type LookupMemo = Map<string, Promise<unknown>>;
+
+/** memo가 있으면 key로 한 번만 읽는다 */
+export function memoized<T>(memo: LookupMemo | undefined, key: string, load: () => Promise<T>): Promise<T> {
+  if (!memo) return load();
+  const hit = memo.get(key);
+  if (hit) return hit as Promise<T>;
+  const loading = load();
+  memo.set(key, loading);
+  return loading;
+}
+
 export const isAiAssisted = (payload: ActionDraftPayload): boolean => (payload.aiFilledFields?.length ?? 0) > 0;
 
 /** 확정 주체: 메시지 작성자(구매요청, BP-ACT-01) 또는 초안을 만든 사원(확장 유형, BP-ACT-02) */
@@ -26,13 +42,13 @@ export interface ActionDefinition<P extends ActionDraftPayload = ActionDraftPayl
   /** 수정 요청의 칸을 검증해 반영한다. 보내지 않은 칸은 그대로, null이면 비운다. 형식이 틀리면 COM-004, 없는 기준정보는 COM-003 */
   applyPatch(tx: Tx, current: P, patch: Record<string, unknown>): Promise<P>;
   /** 확정 전에 채워야 할 칸 (표시명). 비면 확정할 수 있다 */
-  unresolvedFields(tx: Tx, payload: P): Promise<string[]>;
+  unresolvedFields(tx: Tx, payload: P, memo?: LookupMemo): Promise<string[]>;
   /** 확정 주체가 실행할 수 있는지 미리 본다(예: 구매요청 승인권자). 실행이 늘 실패해 APPROVED에 갇히지 않게 */
   assertCanExecute(tx: Tx, actor: AuthUser): Promise<void>;
   /** 칸은 다 찼지만 지금 업무 데이터로 실행할 수 없는 값을 확정 전에 막는다(예: 출하 가능 매수 초과). 없으면 확인하지 않는다 */
   assertPayloadExecutable?(tx: Tx, payload: P): Promise<void>;
   /** payload의 id 칸을 사람이 읽을 이름으로 (칸 경로 → 이름). 화면이 확정 주체가 아닐 때 값을 보여 줄 때 쓴다 */
-  payloadLabels(tx: Tx, payload: P): Promise<Record<string, string>>;
+  payloadLabels(tx: Tx, payload: P, memo?: LookupMemo): Promise<Record<string, string>>;
   /** 확정 작업 로그(DRAFT_CONFIRMED)의 사유 */
   confirmReason(tx: Tx, payload: P): Promise<string>;
   /** 업무를 만든다. 실행 트랜잭션 안에서 부른다 */

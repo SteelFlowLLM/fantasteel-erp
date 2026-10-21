@@ -7,6 +7,7 @@ import type { Tx } from '../../../prisma/prisma.service';
 import { isValidDate, PurchasingService, TON_PATTERN } from '../../purchasing/purchasing.service';
 import { MessageActionRepository, type DraftRow } from '../message-action.repository';
 import { isAiAssisted, type ActionDefinition } from './action-definition';
+import { aiExtractionOf } from './draft-values';
 
 const REQUEST_REASON_MAX = 500;
 const PATCH_FIELDS = new Set(['itemId', 'requestedTon', 'desiredReceiptDate', 'requestReason']);
@@ -33,6 +34,7 @@ export function payloadOf(raw: unknown): PurchaseRequisitionDraftPayload {
     requestReason: textOrNull(p.requestReason),
     sourceText: textOrNull(p.sourceText),
     aiFilledFields: Array.isArray(p.aiFilledFields) ? p.aiFilledFields.filter((f): f is string => typeof f === 'string') : [],
+    aiExtraction: aiExtractionOf(p.aiExtraction),
   };
 }
 

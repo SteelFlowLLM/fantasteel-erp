@@ -526,13 +526,29 @@ export class InventoryService {
    * 출하요청 품목의 FIFO 추천 LOT id (조회만, 작업 로그 없음). 미배정 매수만큼 앞에서부터.
    * Message → ERP 배정 확정 초안은 LOT을 AI가 아니라 이 추천으로 채운다 (message-action.md 10장)
    */
-  async recommendedShipmentLotIds(tx: Tx, shipmentRequestItemId: number): Promise<number[]> {
+  async recommendedShipmentLotIds(tx: Tx, shipmentRequestItemId: number, excludeLotIds: readonly number[] = []): Promise<number[]> {
     const requestItem = await this.repository.findShipmentRequestItem(tx, shipmentRequestItemId);
     if (!requestItem) return [];
     const unallocatedQty = requestItem.requestQty - (await this.repository.countConfirmedShipmentAllocations(tx, requestItem.id));
     if (unallocatedQty <= 0) return [];
+    // 다른 미처리 초안이 이미 추천받은 LOT은 빼고 추천한다 (같은 LOT을 두 초안이 가져가 뒤 초안이 INV-003으로 막히지 않게)
+    const excluded = new Set(excludeLotIds);
     const lots = await this.repository.findAllocatableLots(tx, requestItem.salesOrderItem.itemId);
-    return lots.slice(0, unallocatedQty).map((l) => l.id);
+    return lots.filter((l) => !excluded.has(l.id)).slice(0, unallocatedQty).map((l) => l.id);
+  }
+
+  /**
+   * 출하 배정을 확정할 수 있는지만 본다 (잠그지 않고, 아무것도 바꾸지 않는다). 배정 확정과 같은 규칙:
+   * 출고 전 출하요청, 미배정 매수 이내, LOT마다 같은 규격·재고 상태·적격·확정 배정 없음.
+   * Message → ERP 배정 확정 초안이 확정 전에 불러, 실행이 늘 실패해 승인(APPROVED)에 갇히는 초안을 막는다
+   */
+  async assertShipmentAllocatable(tx: Tx, shipmentRequestItemId: number, lotIds: readonly number[]): Promise<void> {
+    const requestItem = await this.repository.findShipmentRequestItem(tx, shipmentRequestItemId);
+    if (!requestItem) throw new AppException('COM-003', '출하요청 품목을 찾을 수 없어요');
+    this.assertOpenShipmentRequest(requestItem.shipmentRequest.shipmentRequestStatus);
+    const unallocatedQty = requestItem.requestQty - (await this.repository.countConfirmedShipmentAllocations(tx, requestItem.id));
+    if (lotIds.length > unallocatedQty) throw new AppException('INV-001', `미배정 매수는 ${Math.max(0, unallocatedQty)}매예요`);
+    for (const lotId of lotIds) await this.assertAllocatableLot(tx, lotId, requestItem.salesOrderItem.itemId);
   }
 
   /** 배정 해제(newLotId 없음) 또는 변경(기존 해제 + 새 LOT 확정을 한 트랜잭션에서). 소진된 배정은 바꿀 수 없다 (INV-004) */

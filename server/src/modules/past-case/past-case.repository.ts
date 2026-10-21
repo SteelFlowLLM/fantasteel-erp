@@ -36,7 +36,9 @@ const CASE_SELECT = {
   equipmentText: true,
   occurredDate: true,
   createdAt: true,
-  createdEmployee: { select: { employeeName: true } },
+  updatedAt: true,
+  createdEmployeeId: true,
+  createdEmployee: { select: { employeeName: true, departmentId: true } },
   pastCaseLots: { orderBy: { id: 'asc' }, select: { lot: { select: { id: true, lotNo: true } } } },
 } as const;
 
@@ -56,6 +58,32 @@ export class PastCaseRepository {
 
   createCase(tx: Tx, data: Omit<Prisma.PastCaseUncheckedCreateInput, 'pastCaseLots'>, lotIds: readonly number[]) {
     return tx.pastCase.create({ data: { ...data, pastCaseLots: { create: lotIds.map((lotId) => ({ lotId })) } }, select: { id: true } });
+  }
+
+  /**
+   * 항목을 바꾸고 관련 LOT을 보낸 목록으로 맞춘다 (이미 있는 LOT 행은 그대로 둔다).
+   * 읽은 뒤 아무도 고치지 않았을 때(updatedAt이 같을 때)만 바꾼다. 바꿨으면 true
+   * 잠그는 순서는 사례(부모) → 관련 LOT(자식)이고 삭제도 같다.
+   */
+  async updateCase(tx: Tx, id: number, readUpdatedAt: Date, data: Prisma.PastCaseUncheckedUpdateManyInput, lotIds: readonly number[]): Promise<boolean> {
+    const { count } = await tx.pastCase.updateMany({ where: { id, updatedAt: readUpdatedAt }, data });
+    if (count === 0) return false;
+    await tx.pastCaseLot.deleteMany({ where: { pastCaseId: id, lotId: { notIn: [...lotIds] } } });
+    await tx.pastCaseLot.createMany({ data: lotIds.map((lotId) => ({ pastCaseId: id, lotId })), skipDuplicates: true });
+    return true;
+  }
+
+  /**
+   * 관련 LOT과 함께 지운다. 사례가 없으면 false.
+   * 수정과 같은 순서(사례 → 관련 LOT)로 잠그려고 먼저 사례 행을 건드려 잠근 뒤 자식을 지운다
+   * (DB에 FK가 없고 Prisma가 자식이 있는 부모 삭제를 막아서 자식을 먼저 지워야 하지만, 잠금은 부모가 먼저다).
+   */
+  async deleteCase(tx: Tx, id: number): Promise<boolean> {
+    const { count: locked } = await tx.pastCase.updateMany({ where: { id }, data: { updatedAt: new Date() } });
+    if (locked === 0) return false;
+    await tx.pastCaseLot.deleteMany({ where: { pastCaseId: id } });
+    const { count } = await tx.pastCase.deleteMany({ where: { id } });
+    return count === 1;
   }
 
   updateCaseNo(tx: Tx, id: number, caseNo: string) {

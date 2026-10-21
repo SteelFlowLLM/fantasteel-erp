@@ -9,7 +9,7 @@ import { AssistantWebToolbox, type WebToolSession } from '../ai-assistant/web/as
 import { cutText, stripInvisible, urlKey } from '../ai-assistant/web/web-text';
 import { LlmClient, LlmRequestError, type ChatMessage, type LlmJsonSchema } from '../llm/llm.client';
 import { LLM_PROFILE } from '../llm/llm-profiles';
-import { LlmSettingsStore } from '../llm/llm-settings.store';
+import { llmEndpointOf, LlmSettingsStore } from '../llm/llm-settings.store';
 import { checkCharts } from './ai-research.charts';
 import { modelBudget, researchLimits, type ModelBudget } from './ai-research.config';
 import { erpSourcesFrom, ResearchErpLookup } from './ai-research.erp';
@@ -664,7 +664,7 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
   private async endpoint(): Promise<Endpoint> {
     const settings = await this.llmSettings.read();
     if (!settings.model) throw new ResearchFailure(RESEARCH_NO_MODEL_REASON);
-    return { baseUrl: settings.baseUrl, apiKey: settings.apiKey, model: settings.model };
+    return { ...llmEndpointOf(settings), model: settings.model };
   }
 
   /** JSON으로 묻는다 (askResearchJson). 끊겼으면(취소·표시 잃음) 결과를 버리고 멈춘다 */
