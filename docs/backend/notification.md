@@ -57,7 +57,7 @@ Prisma 관계 이름: `Employee.tasksAsAssignee`, `Employee.tasksAsCreator`, `Em
 | `notifyEmployees(tx, { type, recipientIds, content, linkPath, messageId?, businessEventId? })` | 개인 알림. `createMany({ skipDuplicates: true })`로 부분 unique 중복을 건너뛴다 |
 | `notifyDepartment(tx, departmentId, {...})` | 부서 알림. 그 부서의 재직 중 사원별 행으로 펼친다([ERD] Note, REQ-ORG-004). 하위 부서는 넣지 않는다(8장). P1에서는 부르는 곳이 없다(8장 "부서 알림 쓰는 곳") |
 
-- 유형 값은 [06] NOTIFICATION_TYPE: MENTION·WORK_ROOM_MESSAGE·TASK_ASSIGNED·APPROVAL_REQUESTED·APPROVAL_RESULT(뒤의 셋은 2026-10-07 확정). `link_path`는 프론트 화면 경로(REQ-MSG-006 "ERP 화면 이동").
+- 유형 값은 [06] NOTIFICATION_TYPE: MENTION·WORK_ROOM_MESSAGE·TASK_ASSIGNED·APPROVAL_REQUESTED·APPROVAL_RESULT(뒤의 셋은 2026-10-07 확정). `link_path`는 프론트 화면 경로(REQ-MSG-006 "ERP 화면 이동"). Agent 알림 유형 DUE_RISK·QUALITY_RATE_RISE·AGENT_CANDIDATE(2026-10-21 확정)는 [factory-agent.md](factory-agent.md)에서 보낸다.
 - 알림은 본 거래와 같은 tx에서 저장한다(본 거래가 롤백되면 알림도 없어야 한다).
 
 ## 5. 오류 코드·작업 로그

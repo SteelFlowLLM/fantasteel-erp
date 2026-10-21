@@ -11,7 +11,7 @@ export const ACTOR_TYPE_LABEL: Record<ActorType, string> = {
   SYSTEM: '시스템',
 };
 
-/** 확정 31개 (REQ-LOG-002와 1:1) */
+/** 공통 코드 정의서 2장 BUSINESS_EVENT_TYPE (REQ-LOG-002 목록 + 문서에 없는 값 추가분) */
 export const BUSINESS_EVENT_TYPE = {
   SALES_ORDER_CREATED: 'SALES_ORDER_CREATED',
   SALES_ORDER_CANCELLED: 'SALES_ORDER_CANCELLED',
@@ -47,6 +47,7 @@ export const BUSINESS_EVENT_TYPE = {
   MEETING_MINUTES_CONFIRMED: 'MEETING_MINUTES_CONFIRMED',
   SCHEDULE_EVENT_CREATED: 'SCHEDULE_EVENT_CREATED',
   TASK_CREATED: 'TASK_CREATED',
+  CASE_REGISTERED: 'CASE_REGISTERED',
 } as const;
 export type BusinessEventType = (typeof BUSINESS_EVENT_TYPE)[keyof typeof BUSINESS_EVENT_TYPE];
 export const BUSINESS_EVENT_TYPE_LABEL: Record<BusinessEventType, string> = {
@@ -84,9 +85,10 @@ export const BUSINESS_EVENT_TYPE_LABEL: Record<BusinessEventType, string> = {
   MEETING_MINUTES_CONFIRMED: '회의록 확정',
   SCHEDULE_EVENT_CREATED: '일정 등록',
   TASK_CREATED: '업무 등록',
+  CASE_REGISTERED: '과거 사례 등록',
 };
 
-export const BUSINESS_EVENT_AREAS = ['수주', '생산', '품질', '재고', '구매', '출하', '초안', '회의록', '일정', '업무'] as const;
+export const BUSINESS_EVENT_AREAS = ['수주', '생산', '품질', '재고', '구매', '출하', '초안', '회의록', '일정', '업무', '사례'] as const;
 export type BusinessEventArea = (typeof BUSINESS_EVENT_AREAS)[number];
 export const BUSINESS_EVENT_AREA: Record<BusinessEventType, BusinessEventArea> = {
   SALES_ORDER_CREATED: '수주',
@@ -123,24 +125,22 @@ export const BUSINESS_EVENT_AREA: Record<BusinessEventType, BusinessEventArea> =
   MEETING_MINUTES_CONFIRMED: '회의록',
   SCHEDULE_EVENT_CREATED: '일정',
   TASK_CREATED: '업무',
+  CASE_REGISTERED: '사례',
 };
 
 /**
- * 🟡 제안 값 (공통 코드 정의서 3장). 해당 기능(P2·EX)을 구현할 때 위 확정 표로 옮긴다.
+ * 🟡 제안 값 (공통 코드 정의서 3장). 해당 기능(P2)을 구현할 때 위 확정 표로 옮긴다.
  * 지금은 '준비 중' 화면의 표시에만 쓰고, 작업 로그 기록에는 쓰지 않는다.
  */
 export const PROPOSED_BUSINESS_EVENT_TYPE = {
   AGENT_RISK_DETECTED: 'AGENT_RISK_DETECTED',
-  CASE_REGISTERED: 'CASE_REGISTERED',
 } as const;
 export type ProposedBusinessEventType = (typeof PROPOSED_BUSINESS_EVENT_TYPE)[keyof typeof PROPOSED_BUSINESS_EVENT_TYPE];
 export const PROPOSED_BUSINESS_EVENT_TYPE_LABEL: Record<ProposedBusinessEventType, string> = {
   AGENT_RISK_DETECTED: 'Agent 위험 감지',
-  CASE_REGISTERED: '과거 사례 등록',
 };
-export const PROPOSED_BUSINESS_EVENT_TYPE_GRADE: Record<ProposedBusinessEventType, 'P2' | 'EX'> = {
+export const PROPOSED_BUSINESS_EVENT_TYPE_GRADE: Record<ProposedBusinessEventType, 'P2'> = {
   AGENT_RISK_DETECTED: 'P2',
-  CASE_REGISTERED: 'EX',
 };
 
 /**

@@ -65,7 +65,7 @@ export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
   DONE: '완료',
 };
 
-/** MENTION·WORK_ROOM_MESSAGE는 확정, 나머지 3개는 🟡 제안 값이다 (PLAN 7장: 알림 유형 5개). */
+/** 공통 코드 정의서 2장 NOTIFICATION_TYPE. DUE_RISK·QUALITY_RATE_RISE·AGENT_CANDIDATE는 Agent 알림(2026-10-21). */
 export const NOTIFICATION_TYPE = {
   MENTION: 'MENTION',
   WORK_ROOM_MESSAGE: 'WORK_ROOM_MESSAGE',
@@ -74,6 +74,9 @@ export const NOTIFICATION_TYPE = {
   APPROVAL_RESULT: 'APPROVAL_RESULT',
   MEETING_MINUTES_SHARED: 'MEETING_MINUTES_SHARED',
   SCHEDULE_EVENT_ASSIGNED: 'SCHEDULE_EVENT_ASSIGNED',
+  DUE_RISK: 'DUE_RISK',
+  QUALITY_RATE_RISE: 'QUALITY_RATE_RISE',
+  AGENT_CANDIDATE: 'AGENT_CANDIDATE',
 } as const;
 export type NotificationType = (typeof NOTIFICATION_TYPE)[keyof typeof NOTIFICATION_TYPE];
 export const NOTIFICATION_TYPE_LABEL: Record<NotificationType, string> = {
@@ -84,9 +87,12 @@ export const NOTIFICATION_TYPE_LABEL: Record<NotificationType, string> = {
   APPROVAL_RESULT: '승인 결과',
   MEETING_MINUTES_SHARED: '회의록 공유',
   SCHEDULE_EVENT_ASSIGNED: '일정 등록',
+  DUE_RISK: '납기 위험',
+  QUALITY_RATE_RISE: '불합격률 상승',
+  AGENT_CANDIDATE: '대응 후보',
 };
 
-/** 🟡 제안 값 (EX 과거 사례) */
+/** 공통 코드 정의서 2장 CASE_CATEGORY (EX 과거 사례) */
 export const CASE_CATEGORY = {
   QUALITY: 'QUALITY',
   EQUIPMENT: 'EQUIPMENT',

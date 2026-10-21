@@ -62,7 +62,7 @@ await this.businessEventRecorder.record(tx, {
 - 사유는 [04] 9.3 제안 코드(STOCK_FIRST, FIFO_RECOMMENDATION, ORDER_SHORTAGE, ORDER_CANCELLED, QUALITY_FAILURE, SURPLUS_CONVERSION, ALLOCATION_CHANGE, DRAFT_CONFIRMED)와 사람이 읽을 문장을 함께 쓴다.
 - Message → ERP로 생긴 기록은 `actionDraftId`·`messageId`를 채운다(REQ-LOG-001 "원본 메시지·Action Draft 연결"). `isAiAssisted`는 AI 초안 확정일 때만 true(REQ-AST-010, P2).
 
-**이벤트 유형 ↔ 기록 모듈**([06] BUSINESS_EVENT_TYPE 31개)
+**이벤트 유형 ↔ 기록 모듈**([06] BUSINESS_EVENT_TYPE, REQ-LOG-002 31개 + 문서 밖 값)
 
 | 유형 | 기록 모듈 | target | salesOrderId | lotIds |
 | --- | --- | --- | --- | --- |
@@ -78,6 +78,7 @@ await this.businessEventRecorder.record(tx, {
 | MEETING_MINUTES_CONFIRMED (문서 밖) | meeting-minutes | `meeting_minutes` | | |
 | SCHEDULE_EVENT_CREATED (문서 밖, 이슈 #434) | ai-assistant (일정 실행 카드) | `schedule_event` | | |
 | TASK_CREATED (문서 밖, 이슈 #457) | ai-assistant (업무 실행 카드) | `task` | | |
+| CASE_REGISTERED (문서 밖, 이슈 #464) | past-case | `past_case` | | 관련 LOT |
 
 철강맨 부르기로 말로 승인한 실행 카드(이슈 #457)는 기록기가 사유 끝에 `철강맨 말로 승인`을 붙인다(`runAsVoiceApproved`, 같은 트랜잭션). 화면의 작업 로그에는 사유로 보인다.
 
