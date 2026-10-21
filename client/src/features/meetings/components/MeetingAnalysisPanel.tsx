@@ -15,6 +15,7 @@ import { Textarea } from '@/components/Input';
 import { groupsOfChart } from '@/features/meetings/components/AttendeePicker';
 import { CandidateEditor } from '@/features/meetings/components/MeetingCandidateEditor';
 import { MeetingTracePanel } from '@/features/meetings/components/MeetingTracePanel';
+import { NotionSyncValue } from '@/features/schedule/NotionSyncToggle';
 import { useAction } from '@/hooks/useAction';
 import { useAdminOrgChart } from '@/hooks/useAdminOrganization';
 import { useItemList } from '@/hooks/useLookups';
@@ -100,7 +101,9 @@ export function fields(c: CandidateFieldsSource, names: Names): React.ReactNode 
           {c.endAssumed ? <span className="ml-1 text-cap text-ink-3">(끝 시각은 가정)</span> : null}
         </Field>
         <Field label="참석자">{c.attendeeIds.length > 0 ? c.attendeeIds.map(names.employee).join(', ') : <span className="text-ink-3">미정</span>}</Field>
-        <Field label="Notion 캘린더">{notionSyncOf(c) ? '함께 넣음' : <span className="text-ink-3">넣지 않음 (ERP 일정만)</span>}</Field>
+        <Field label="Notion 캘린더">
+          <NotionSyncValue on={notionSyncOf(c)} />
+        </Field>
       </>
     );
   }
