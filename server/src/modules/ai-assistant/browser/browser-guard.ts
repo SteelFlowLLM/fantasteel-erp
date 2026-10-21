@@ -28,6 +28,8 @@ export interface RequestGuardOptions {
   policy?: FetchPolicy;
   /** 시험은 이름을 정해진 주소로 푸는 함수를 넣는다 */
   resolve?: LookupFunction;
+  /** 지금 사람이 직접 한 이동(폼 제출)이라 POST를 허용하는지 (이슈 #433). 없으면 늘 막는다. 주소·사내망·프록시 확인은 그대로다 */
+  allowPost?: () => boolean;
 }
 
 /** 요청 하나를 보낼지 (Chrome 없이 시험한다) */
@@ -41,7 +43,7 @@ export async function decideBrowserRequest(request: BrowserRequestInfo, options:
   }
   if (url.protocol === 'data:' || url.protocol === 'blob:') return request.isNavigation ? { allow: false, reason: 'data·blob 주소로는 이동하지 않아요' } : { allow: true };
   const method = request.method.toUpperCase();
-  if (request.isNavigation && method !== 'GET' && method !== 'HEAD') return { allow: false, reason: '정보를 보내는 폼(POST)은 제출하지 않아요' };
+  if (request.isNavigation && method !== 'GET' && method !== 'HEAD' && !options.allowPost?.()) return { allow: false, reason: '정보를 보내는 폼(POST)은 제출하지 않아요' };
   try {
     assertFetchableUrl(request.url, policy);
   } catch (error) {

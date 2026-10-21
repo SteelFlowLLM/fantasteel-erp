@@ -1,4 +1,5 @@
 import { AI_CHAT_TITLE_MAX, type AiActionCard } from '@fantasteel/shared';
+import { browserTraceArguments, savedTraceArguments } from '../tools/trace-arguments';
 import { AI_CHAT_ROLE, answerMeta, cardsWithDone, chatHistoryTurns, chatThreadTitle, questionMeta, readyCards, toChatMessageView, TRACE_STEPS_MAX, traceStepsOf } from './ai-chat-thread.view';
 
 const card = (key: string) => ({ key, kind: 'TASK', title: `업무 ${key}` }) as unknown as AiActionCard;
@@ -158,5 +159,33 @@ describe('생각 과정과 도구 동작 기록 저장 (이슈 #433)', () => {
     const old = toChatMessageView(row({ role: AI_CHAT_ROLE.ASSISTANT, meta: { reasoning: 'low', reasoningApplied: true } }));
     expect(old).not.toHaveProperty('thinking');
     expect(old).not.toHaveProperty('trace');
+  });
+});
+
+describe('저장하는 도구 입력 줄이기 (이슈 #433)', () => {
+  it('브라우저 도구는 허용한 칸만 남긴다: 주소는 쿼리·#조각 없이, browser_type의 글은 남기지 않는다', () => {
+    expect(browserTraceArguments('browser_open', '{"url":"https://a.example.kr/x/y?token=SECRET&q=1#frag"}')).toBe('{"url":"a.example.kr/x/y"}');
+    expect(browserTraceArguments('browser_type', '{"ref":"r12","text":"비밀 검색어 hunter2","submit":true}')).toBe('{"ref":"r12","submit":true}');
+    expect(browserTraceArguments('browser_click', '{"ref":"r3","extra":"x"}')).toBe('{"ref":"r3"}');
+    expect(browserTraceArguments('browser_scroll', '{"direction":"down"}')).toBe('{"direction":"down"}');
+    expect(browserTraceArguments('browser_read_file', '{"url":"https://a.example.kr/f.pdf?sig=abc"}')).toBe('{"url":"a.example.kr/f.pdf"}');
+    expect(browserTraceArguments('browser_snapshot', '{}')).toBe('{}');
+    // JSON이 아니거나 이상한 값이면 빈 입력, 브라우저 도구가 아니면 null(그대로 둔다)
+    expect(browserTraceArguments('browser_open', '{"url":')).toBe('{}');
+    expect(browserTraceArguments('browser_open', '{"url":"not a url"}')).toBe('{}');
+    expect(browserTraceArguments('get_inventory', '{"keyword":"SS275"}')).toBeNull();
+  });
+
+  it('나머지 도구는 긴 글 값(본문·긴 검색어)을 앞부분만 남기고, 잘린 JSON은 앞 글자만 남긴다', () => {
+    const long = '가'.repeat(300);
+    const saved = JSON.parse(savedTraceArguments(JSON.stringify({ title: '제목', content: long, n: 3 }), 500)) as { title: string; content: string; n: number };
+    expect(saved).toEqual({ title: '제목', content: `${'가'.repeat(80)}…`, n: 3 });
+    expect(savedTraceArguments('{"a":"' + 'b'.repeat(300), 50)).toHaveLength(51);
+    expect(savedTraceArguments('{"keyword":"SS275"}', 200)).toBe('{"keyword":"SS275"}');
+  });
+
+  it('동작 기록에는 줄인 입력이 남는다', () => {
+    const [step] = traceStepsOf([{ name: 'notion_create', arguments: JSON.stringify({ content: '나'.repeat(400) }), resultPreview: '', durationMs: 1 }]);
+    expect(step.arguments.length).toBeLessThan(120);
   });
 });

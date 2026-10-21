@@ -175,6 +175,7 @@ describe('멈춘 동안 직접 조작 (이슈 #433)', () => {
     expect(paused).toContain('aria-label="브라우저 화면 (눌러서 그 자리를 직접 누르기)"');
     expect(paused).toContain('aria-label="화면에 넣을 글"');
     expect(paused).toContain('입력한 글은 저장하지 않아요');
+    expect(paused).toContain('화면에 보이는 내용은 철강맨AI가 읽을 수 있어요');
 
     // 멈추기만 눌러 아직 기다리는 중이 아니거나, 조작 중이거나, onInput이 없으면 보기만 한다
     for (const html of [

@@ -52,6 +52,7 @@ import { AssistantBrowserToolbox, type BrowserToolSessionLike } from './browser/
 import { BrowserUnavailableError } from './browser/browser-pool';
 import { browserMaxActions, browserTimeLimitMs, browserVisionEnabled, displayUrl, effectiveStartSites } from './browser/browser-rules';
 import { AssistantScreenToolbox, type ScreenControlSession } from './screen/assistant-screen-toolbox';
+import { browserTraceArguments } from './tools/trace-arguments';
 import { AssistantNotionToolbox, NOTION_CARD_TOOL, type NotionToolSession } from './notion/assistant-notion-toolbox';
 import { AiNotionCardService } from './notion/ai-notion-card.service';
 import { AiUpdateCardService } from './ai-update-card.service';
@@ -172,6 +173,8 @@ export class AiAssistantService {
     if (outcome === 'not_paused') throw new AppException('COM-004', '멈춰서 기다리는 동안에만 직접 조작할 수 있어요');
     if (outcome === 'closed') throw new AppException('COM-003', '브라우저 탭이 이미 닫혔어요');
     if (outcome === 'blocked') throw new AppException('COM-004', '열 수 없는 주소로 이동해서 탭을 비웠어요');
+    if (outcome === 'reverted') throw new AppException('COM-004', '열 수 없는 주소로 가는 이동을 막아서 이전 페이지로 돌아왔어요');
+    if (outcome === 'busy') throw new AppException('COM-004', '직접 조작이 밀려 있어요. 잠시 뒤에 다시 해 주세요', HttpStatus.TOO_MANY_REQUESTS);
   }
 
   /**
@@ -181,6 +184,8 @@ export class AiAssistantService {
   async openBrowserWindow(user: AuthUser, browserSessionId: string): Promise<AiBrowserWindowView> {
     const availability = this.browserTools.capabilities();
     if (!availability.available) throw new AppException('COM-004', availability.reason ?? '브라우저를 쓸 수 없어요');
+    // 창이 뜨지 않는 서버(기본 headless)에서는 사람이 주소를 넣을 곳이 없어 빈 탭이 서버 자리만 차지한다
+    if (availability.windowed !== true) throw new AppException('COM-004', '서버에 브라우저 창이 뜨지 않는 설정이라 창을 열 수 없어요(BROWSER_HEADLESS=false일 때만 열 수 있어요)');
     const saved = await this.browserSettings.read();
     try {
       const outcome = await this.browserTools.openWindow(
@@ -501,7 +506,8 @@ export class AiAssistantService {
               const seenUrl = browser?.has(toolCall.name) ? webSources?.find((source) => source.url)?.url : undefined;
               const trace = {
                 name: toolCall.name,
-                arguments: cut(toolCall.arguments, TRACE_ARGUMENTS_MAX),
+                // 브라우저 도구는 허용한 칸만(주소 쿼리·browser_type의 글은 남기지 않는다). 이 기록이 저장한 대화에도 간다 (이슈 #433)
+                arguments: cut(browserTraceArguments(toolCall.name, toolCall.arguments) ?? toolCall.arguments, TRACE_ARGUMENTS_MAX),
                 resultPreview: cut(result.content, TRACE_RESULT_MAX),
                 durationMs: Date.now() - callStarted,
                 ...(result.source?.label ? { label: result.source.label } : {}),
