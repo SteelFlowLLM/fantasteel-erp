@@ -49,6 +49,13 @@ describe('LLM 값 읽기', () => {
 });
 
 describe('수주 등록 초안 (SALES_ORDER_CREATE)', () => {
+  it('매수는 수주 등록과 같은 한 줄 상한(9,999매)까지만 받는다: 추출·저장값·수정 (#496)', () => {
+    const extracted = salesOrderFromExtraction({ customerName: '가람중공업', items: [{ itemCode: 'SL-SS275-250x1200x10000', orderedQty: '1,000,000매', dueDate: '2026-10-30' }] }, customers, items, null);
+    expect(extracted.items[0]?.orderedQty).toBeNull();
+    expect(salesOrderPayloadOf({ customerId: 1, items: [{ itemId: 11, orderedQty: 10_000, dueDate: '2026-10-30' }, { itemId: 11, orderedQty: 9_999, dueDate: '2026-10-30' }] }).items.map((l) => l.orderedQty)).toEqual([null, 9_999]);
+    expect(salesOrderUnresolvedFields(salesOrderPayloadOf({ customerId: 1, items: [{ itemId: 11, orderedQty: 10_000, dueDate: '2026-10-30' }] }), true, new Set([11]))).toEqual(['품목 1 매수']);
+  });
+
   it('맞는 고객사·규격·매수·납기만 채우고 채운 칸을 남긴다. 빈 줄은 버린다', () => {
     const payload = salesOrderFromExtraction(
       {

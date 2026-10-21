@@ -1,7 +1,7 @@
 // 수주 등록 초안 (REQ-ACT-005, BP-ACT-02, 업무 프로세스 12.3). 확정 주체는 초안을 만든 사원(수주 등록 사용 권한)이고,
 // 실행하면 수주 등록과 같이 합격 재고 우선 예약·부족분 생산계획이 생긴다 (BP-SO-01).
 import { Injectable } from '@nestjs/common';
-import { ACTION_TYPE, PERMISSION, type ActionDraftResultView, type AuthUser, type SalesOrderDraftLine, type SalesOrderDraftPayload } from '@fantasteel/shared';
+import { ACTION_TYPE, MAX_ORDERED_QTY, PERMISSION, type ActionDraftResultView, type AuthUser, type SalesOrderDraftLine, type SalesOrderDraftPayload } from '@fantasteel/shared';
 import { AppException } from '../../../common/errors/app.exception';
 import type { Tx } from '../../../prisma/prisma.service';
 import { SalesOrderService } from '../../sales-order/sales-order.service';
@@ -20,7 +20,6 @@ import {
   linesOf,
   linesPatch,
   matchOne,
-  MAX_DRAFT_QTY,
   qtyOrNull,
   qtyPatch,
   rejectUnknownFields,
@@ -36,7 +35,7 @@ export function salesOrderPayloadOf(raw: unknown): SalesOrderDraftPayload {
   const p = isRecord(raw) ? raw : {};
   return {
     customerId: idOrNull(p.customerId),
-    items: linesOf(p.items).map((line) => ({ itemId: idOrNull(line.itemId), orderedQty: qtyOrNull(line.orderedQty), dueDate: dateOrNull(line.dueDate) })),
+    items: linesOf(p.items).map((line) => ({ itemId: idOrNull(line.itemId), orderedQty: qtyOrNull(line.orderedQty, MAX_ORDERED_QTY), dueDate: dateOrNull(line.dueDate) })),
     ...draftBaseOf(p),
   };
 }
@@ -46,7 +45,7 @@ export function salesOrderFromExtraction(extracted: Record<string, unknown>, cus
   const customer = matchOne(customers, extracted.customerName, (c) => [c.customerName, c.customerCode]);
   const lines: SalesOrderDraftLine[] = linesOf(extracted.items).map((line) => ({
     itemId: matchOne(items, line.itemCode, (i) => [i.itemCode, i.itemName])?.id ?? null,
-    orderedQty: extractedQtyOf(line.orderedQty),
+    orderedQty: extractedQtyOf(line.orderedQty, MAX_ORDERED_QTY),
     dueDate: extractedDateOf(line.dueDate),
   }));
   // 아무 값도 없는 줄은 버린다 (LLM이 빈 줄을 만들어도 미확정 칸이 늘지 않게)
@@ -127,7 +126,7 @@ export class SalesOrderAction implements ActionDefinition<SalesOrderDraftPayload
         if (itemId !== null && !productIds.has(itemId)) throw new AppException('SO-001', `품목 ${n}의 규격을 찾을 수 없어요`);
         return {
           itemId,
-          orderedQty: qtyPatch(line.orderedQty, `품목 ${n}의 매수는 1 이상의 정수(${MAX_DRAFT_QTY.toLocaleString('ko-KR')}매까지)로 입력해 주세요`),
+          orderedQty: qtyPatch(line.orderedQty, `품목 ${n}의 매수는 1 이상의 정수(${MAX_ORDERED_QTY.toLocaleString('ko-KR')}매까지)로 입력해 주세요`, MAX_ORDERED_QTY),
           dueDate: datePatch(line.dueDate, `품목 ${n}의 납기는 YYYY-MM-DD 형식의 날짜로 입력해 주세요`),
         };
       });

@@ -192,6 +192,8 @@ describe('수주 등록 초안 (SALES_ORDER_CREATE)', () => {
     expect((await service.get(sales, id)).unresolvedFields).toEqual(['고객사', '품목']);
     const itemId = await itemIdOf(SLAB_SS275);
     expect(await codeOf(service.update(sales, id, { payload: { items: [{ itemId, orderedQty: 10.5, dueDate: '2026-11-30' }] } }))).toBe('COM-004');
+    // 수주 등록과 같은 한 줄 상한 (#496)
+    expect(await codeOf(service.update(sales, id, { payload: { items: [{ itemId, orderedQty: 10_000, dueDate: '2026-11-30' }] } }))).toBe('COM-004');
     expect(await codeOf(service.update(sales, id, { payload: { items: [{ itemId: await itemIdOf('ORE01'), orderedQty: 1, dueDate: '2026-11-30' }] } }))).toBe('SO-001');
     expect(await codeOf(service.update(sales, id, { payload: { itemId } }))).toBe('COM-004');
     const edited = await service.update(sales, id, { payload: { items: [{ itemId, orderedQty: 3, dueDate: null }] } });

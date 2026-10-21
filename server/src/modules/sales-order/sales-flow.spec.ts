@@ -191,6 +191,13 @@ describe('수주 등록 (REQ-SO-001~003, BP-SO-01)', () => {
     expect(await codeOf(salesOrders.create(sales, { customerId: customerA, items: [{ itemId: await nextSlabItemId(), orderedQty, dueDate: DUE }] }))).toBe('SO-002');
   });
 
+  it.each([[10_000], [1_000_000], [3_000_000_000]])('한 줄 상한(9,999매)을 넘는 수량 %p → SO-002, 수주·생산계획을 만들지 않는다 (#496)', async (orderedQty) => {
+    const before = await prisma.salesOrder.count();
+    const error = await salesOrders.create(sales, { customerId: customerA, items: [{ itemId: await nextSlabItemId(), orderedQty, dueDate: DUE }] }).then(() => null, (e: unknown) => e);
+    expect(error).toMatchObject({ code: 'SO-002', message: '수량은 품목 한 줄에 9,999까지 입력할 수 있어요' });
+    expect(await prisma.salesOrder.count()).toBe(before);
+  });
+
   it('원료 규격·없는 규격 → SO-001, 없는 고객사 → COM-003', async () => {
     const rawMaterial = await prisma.item.findFirstOrThrow({ where: { itemType: 'RAW_MATERIAL' } });
     expect(await codeOf(createSalesOrder(rawMaterial.id, 1))).toBe('SO-001');
