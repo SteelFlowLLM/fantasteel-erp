@@ -9,7 +9,7 @@ import { isLikelyHallucination, matchWakeWord, parseVoiceCommand, pickVoiceAppro
 import { playWakeChime, WAKE_CHIME_MS } from '@/lib/steelmanVoice';
 import { useAiChatStore } from '@/stores/useAiChatStore';
 import { useShellStore } from '@/stores/useShellStore';
-import { useSteelmanWakeStore } from '@/stores/useSteelmanWakeStore';
+import { useSteelmanWakeStore, voiceApprovalAllowed } from '@/stores/useSteelmanWakeStore';
 import { errorMessageOf, toast } from '@/stores/useToastStore';
 
 const store = () => useSteelmanWakeStore.getState();
@@ -47,7 +47,11 @@ function ask(question: string): void {
 }
 
 function startApproval(index: number | null): void {
-  if (!store().voiceApproval) {
+  if (!store().company.voiceApproval) {
+    store().notify('관리자가 말로 승인을 꺼 두었어요. 화면에서 눌러 실행해 주세요');
+    return;
+  }
+  if (!voiceApprovalAllowed(store())) {
     store().notify('말로 승인이 꺼져 있어요. 위 띠에서 "말로 승인 허용"을 켜거나 화면에서 눌러 실행해 주세요');
     return;
   }
@@ -74,7 +78,7 @@ export async function executeApproved(byVoice: boolean): Promise<void> {
   const approval = store().approval;
   store().setApproval(null);
   if (!approval) return;
-  if (byVoice && !store().voiceApproval) {
+  if (byVoice && !voiceApprovalAllowed(store())) {
     store().notify('말로 승인이 꺼져 있어 실행하지 않았어요');
     return;
   }
@@ -103,7 +107,7 @@ function startScreenControlConfirm(): void {
 
 export function turnOnScreenControl(byVoice: boolean): void {
   store().setScreenConfirm(null);
-  if (byVoice && !store().voiceApproval) {
+  if (byVoice && !voiceApprovalAllowed(store())) {
     store().notify('말로 승인이 꺼져 있어 화면 조작을 켜지 않았어요. [켜기]를 눌러 주세요');
     return;
   }
@@ -204,7 +208,8 @@ export async function transcribe(wav: Blob, stopped: () => boolean, screenContro
     if (result.text) handleText(result.text, screenControlAvailable());
   } catch (error) {
     if (stopped()) return;
-    if (errorCodeOf(error) === 'VOC-009') store().notify(errorMessageOf(error));
+    if (errorCodeOf(error) === 'VOC-011') store().setCompany({ wake: false, voiceApproval: false });
+    else if (errorCodeOf(error) === 'VOC-009') store().notify(errorMessageOf(error));
     else store().setProblem(errorMessageOf(error));
   }
 }

@@ -19,7 +19,7 @@ import { speakSteelmanReply } from '@/lib/steelmanVoice';
 import { executeApproved, setWakeAudioContext, transcribe, turnOnScreenControl, wakeMuted } from '@/lib/steelmanWakeActions';
 import { ClipUploadQueue, clipToWav, VoiceSegmenter } from '@/lib/voiceClip';
 import { useAiChatStore } from '@/stores/useAiChatStore';
-import { useSteelmanWakeStore } from '@/stores/useSteelmanWakeStore';
+import { useSteelmanWakeStore, voiceApprovalAllowed } from '@/stores/useSteelmanWakeStore';
 
 /** 안내를 띠에 보이는 시간 */
 const NOTICE_MS = 4_000;
@@ -35,7 +35,12 @@ export function SteelmanWake() {
   const me = useMe();
   const loadedFor = useSteelmanWakeStore((state) => state.employeeId);
   const enabled = useSteelmanWakeStore((state) => state.enabled);
+  const companyWake = useSteelmanWakeStore((state) => state.company.wake);
   const capabilities = useAiCapabilities();
+  const companyFromServer = capabilities.data?.steelmanWake;
+  useEffect(() => {
+    if (companyFromServer) store().setCompany({ wake: companyFromServer.available, voiceApproval: companyFromServer.voiceApproval });
+  }, [companyFromServer]);
   const screenControlAvailable = capabilities.data?.screenControl?.available === true;
   const screenControlRef = useRef(screenControlAvailable);
   screenControlRef.current = screenControlAvailable;
@@ -53,7 +58,7 @@ export function SteelmanWake() {
   }, []);
 
   // 이 사원의 설정을 읽기 전에는 앞 사원의 켜기 설정으로 마이크를 열지 않는다
-  const active = enabled && loadedFor === me.employeeId;
+  const active = enabled && companyWake && loadedFor === me.employeeId;
 
   // 켜 있고 탭이 보일 때만 마이크를 연다. 끄거나 숨기면 마이크 표시등까지 꺼지게 트랙을 닫는다
   useEffect(() => {
@@ -184,6 +189,7 @@ function SteelmanWakeBar() {
   const called = useSteelmanWakeStore((state) => state.called);
   const notice = useSteelmanWakeStore((state) => state.notice);
   const voiceApproval = useSteelmanWakeStore((state) => state.voiceApproval);
+  const companyVoiceApproval = useSteelmanWakeStore((state) => state.company.voiceApproval);
   const label = status === 'starting' ? '마이크를 여는 중…' : status === 'paused' ? '탭이 숨겨져 잠깐 쉬어요' : status === 'error' ? '듣지 못하고 있어요' : hearing ? '듣는 중 · 말소리를 잡았어요' : '듣는 중 · "철강맨, 재고 알려줘"처럼 불러 주세요';
   return (
     <div data-ai-skip="" role="status" aria-live="polite" className="flex flex-none flex-wrap items-center gap-x-3 gap-y-1 border-b border-steelman bg-steelman-soft px-4 py-1.5 text-sm text-steelman-ink">
@@ -200,10 +206,15 @@ function SteelmanWakeBar() {
       ) : null}
       {problem ? <span className="text-cap font-medium text-danger">{problem}</span> : null}
       {notice ? <span className="text-cap font-medium">{notice.text}</span> : null}
-      <label className="ml-auto inline-flex items-center gap-1 text-cap" title="켜면 '철강맨, 이거 실행해줘' → '실행'으로 업무·일정·구매요청 초안 카드를 실행해요. 이 브라우저에만 저장돼요">
-        <input type="checkbox" checked={voiceApproval} onChange={(event) => store().setVoiceApproval(event.target.checked)} />
-        말로 승인 허용
-      </label>
+      {/* 관리자가 말로 승인을 꺼 두면 칸을 보이지 않는다 (사원의 켜기 설정은 남겨 두어 회사가 다시 켜면 그대로) */}
+      {companyVoiceApproval ? (
+        <label className="ml-auto inline-flex items-center gap-1 text-cap" title="켜면 '철강맨, 이거 실행해줘' → '실행'으로 업무·일정·구매요청 초안 카드를 실행해요. 이 브라우저에 내 것만 저장돼요">
+          <input type="checkbox" checked={voiceApproval} onChange={(event) => store().setVoiceApproval(event.target.checked)} />
+          말로 승인 허용
+        </label>
+      ) : (
+        <span className="ml-auto" />
+      )}
       <Button size="sm" icon="x-circle" onClick={() => store().setEnabled(false)}>
         끄기
       </Button>
@@ -277,7 +288,7 @@ function useSecondsLeft(deadline: number | null): number {
 /** "화면 조작 켜" 확인 창. 말로는 '말로 승인 허용'이 켜졌을 때만 "실행"으로 켜고, 아니면 [켜기]를 눌러야 한다 */
 function ScreenControlConfirmDialog() {
   const screenConfirm = useSteelmanWakeStore((state) => state.screenConfirm);
-  const voiceApproval = useSteelmanWakeStore((state) => state.voiceApproval);
+  const voiceApproval = useSteelmanWakeStore(voiceApprovalAllowed);
   const left = useSecondsLeft(screenConfirm?.deadline ?? null);
   if (!screenConfirm) return null;
   return (
@@ -313,6 +324,9 @@ function ScreenControlConfirmDialog() {
 export function SteelmanWakeToggle() {
   const enabled = useSteelmanWakeStore((state) => state.enabled);
   const problem = useSteelmanWakeStore((state) => state.problem);
+  // 관리자가 회사 전체로 꺼 두면 스위치를 숨긴다 (AI 연결 화면, 이슈 #457)
+  const companyWake = useSteelmanWakeStore((state) => state.company.wake);
+  if (!companyWake) return null;
   return (
     <IconButton
       icon="mic"

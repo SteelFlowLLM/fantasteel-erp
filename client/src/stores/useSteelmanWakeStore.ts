@@ -15,6 +15,8 @@ interface SteelmanWakeState {
   employeeId: number | null;
   enabled: boolean;
   voiceApproval: boolean;
+  /** 회사 설정 (AI 연결 화면, 서버 capabilities). 읽기 전에는 둘 다 꺼진 것으로 본다: 관리자가 끈 회사에서 마이크를 잠깐이라도 열지 않게 */
+  company: { wake: boolean; voiceApproval: boolean };
   status: SteelmanWakeStatus;
   /** 지금 말소리를 잡는 중 */
   hearing: boolean;
@@ -33,6 +35,7 @@ interface SteelmanWakeState {
   load: (employeeId: number) => void;
   setEnabled: (on: boolean) => void;
   setVoiceApproval: (on: boolean) => void;
+  setCompany: (company: { wake: boolean; voiceApproval: boolean }) => void;
   setStatus: (status: SteelmanWakeStatus, problem?: string | null) => void;
   setHearing: (hearing: boolean) => void;
   setProblem: (problem: string | null) => void;
@@ -52,6 +55,7 @@ export const useSteelmanWakeStore = create<SteelmanWakeState>((set, get) => ({
   employeeId: null,
   enabled: false,
   voiceApproval: false,
+  company: { wake: false, voiceApproval: false },
   status: 'off',
   hearing: false,
   problem: null,
@@ -75,6 +79,12 @@ export const useSteelmanWakeStore = create<SteelmanWakeState>((set, get) => ({
     if (employeeId !== null) writeSteelmanWakePreference(employeeId, { wake: enabled, voiceApproval: on });
     set(on ? { voiceApproval: true } : { voiceApproval: false, approval: null });
   },
+  setCompany: (company) =>
+    set((state) => {
+      if (state.company.wake === company.wake && state.company.voiceApproval === company.voiceApproval) return {};
+      // 회사 설정이 꺼지면 기다리던 말로 승인·화면 조작 확인도 거둔다 (사원 각자의 켜기 설정은 그대로 둔다)
+      return { company, ...(company.voiceApproval ? {} : { approval: null, screenConfirm: null }), ...(company.wake ? {} : { called: null, status: 'off' as const, hearing: false }) };
+    }),
   setStatus: (status, problem) => set(problem === undefined ? { status } : { status, problem }),
   setHearing: (hearing) => set({ hearing }),
   setProblem: (problem) => set({ problem }),
@@ -87,3 +97,6 @@ export const useSteelmanWakeStore = create<SteelmanWakeState>((set, get) => ({
   takePanelRequest: (id) => set((state) => (state.panelRequest?.id === id ? { panelRequest: null } : {})),
   setVoiceQuestionId: (voiceQuestionId) => set({ voiceQuestionId }),
 }));
+
+/** 말로 승인을 쓸 수 있는가: 회사가 허용하고 이 사원도 켰을 때만 */
+export const voiceApprovalAllowed = (state: Pick<SteelmanWakeState, 'voiceApproval' | 'company'>): boolean => state.voiceApproval && state.company.voiceApproval;

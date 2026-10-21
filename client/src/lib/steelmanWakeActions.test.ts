@@ -3,7 +3,7 @@ import type { AiWorkCard } from '@fantasteel/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { executeApproved, handleText, transcribe } from '@/lib/steelmanWakeActions';
 import { useAiChatStore, type AiChatEntry } from '@/stores/useAiChatStore';
-import { useSteelmanWakeStore } from '@/stores/useSteelmanWakeStore';
+import { useSteelmanWakeStore, voiceApprovalAllowed } from '@/stores/useSteelmanWakeStore';
 
 const executeActionCard = vi.fn();
 const transcribeWakeClip = vi.fn();
@@ -23,7 +23,7 @@ beforeEach(() => {
   executeActionCard.mockReset().mockResolvedValue({ kind: 'TASK', registered: { type: 'task', id: 3 } });
   transcribeWakeClip.mockReset();
   useAiChatStore.setState({ entries: [answer], pendingId: null, live: null });
-  useSteelmanWakeStore.setState({ employeeId: 1, enabled: true, voiceApproval: true, approval: null, screenConfirm: null, panelRequest: null, called: null, notice: null, problem: null });
+  useSteelmanWakeStore.setState({ employeeId: 1, enabled: true, voiceApproval: true, company: { wake: true, voiceApproval: true }, approval: null, screenConfirm: null, panelRequest: null, called: null, notice: null, problem: null });
 });
 
 const pendApproval = () => wake().setApproval({ entryId: 'e1', messageId: 9, item: { card, status: 'ready' }, deadline: Date.now() + 10_000 });
@@ -116,5 +116,41 @@ describe('조각 받아쓰기', () => {
     transcribeWakeClip.mockResolvedValue({ text: null, error: '음성 서버에 연결할 수 없어요' });
     await transcribe(new Blob(), () => false, () => false);
     expect(wake().problem).toContain('음성 서버에 연결할 수 없어요');
+  });
+});
+
+describe('회사 설정 (AI 연결 화면)', () => {
+  it('말로 승인은 회사와 사원이 둘 다 켰을 때만', () => {
+    expect(voiceApprovalAllowed({ voiceApproval: true, company: { wake: true, voiceApproval: true } })).toBe(true);
+    expect(voiceApprovalAllowed({ voiceApproval: true, company: { wake: true, voiceApproval: false } })).toBe(false);
+    expect(voiceApprovalAllowed({ voiceApproval: false, company: { wake: true, voiceApproval: true } })).toBe(false);
+  });
+
+  it('회사가 말로 승인을 꺼 두면 카드 창을 띄우지 않고, 기다리던 창도 거두며, 말로는 실행하지 않는다', async () => {
+    useSteelmanWakeStore.setState({ company: { wake: true, voiceApproval: false } });
+    handleText('철강맨, 이거 실행해줘', false);
+    expect(wake().approval).toBeNull();
+    expect(wake().notice?.text).toContain('관리자가 말로 승인을 꺼 두었어요');
+
+    useSteelmanWakeStore.setState({ company: { wake: true, voiceApproval: true } });
+    pendApproval();
+    wake().setCompany({ wake: true, voiceApproval: false });
+    expect(wake().approval).toBeNull();
+    pendApproval();
+    await executeApproved(true);
+    expect(executeActionCard).not.toHaveBeenCalled();
+  });
+
+  it('회사가 말로 승인을 꺼도 사원 각자의 켜기 설정은 남는다', () => {
+    wake().setCompany({ wake: true, voiceApproval: false });
+    expect(wake().voiceApproval).toBe(true);
+    expect(wake().enabled).toBe(true);
+  });
+
+  it('서버가 관리자가 껐다고 하면(VOC-011) 회사 설정을 꺼서 마이크를 닫게 한다', async () => {
+    transcribeWakeClip.mockRejectedValue(Object.assign(new Error('관리자가 철강맨 부르기를 꺼 두었어요'), { code: 'VOC-011' }));
+    await transcribe(new Blob(), () => false, () => false);
+    expect(wake().company).toEqual({ wake: false, voiceApproval: false });
+    expect(wake().status).toBe('off');
   });
 });
