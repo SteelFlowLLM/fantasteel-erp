@@ -5,7 +5,7 @@ import { Prisma } from '../../generated/prisma/client';
 import { LlmClient, LlmJsonParseError, LlmRequestError, type LlmJsonReply } from '../llm/llm.client';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
 import { LLM_PROFILE } from '../llm/llm-profiles';
-import { joinSummaries, mergeChunkResults, restrictToChunk, splitTranscript, type TranscriptChunk } from './meeting-analysis.chunks';
+import { candidateLimit, joinSummaries, lineText, mergeChunkResults, restrictToChunk, splitTranscript, type TranscriptChunk } from './meeting-analysis.chunks';
 import {
   ANALYSIS_JSON_SCHEMA,
   ANALYSIS_SYSTEM_PROMPT,
@@ -14,7 +14,7 @@ import {
   buildSummaryMergeMessage,
   REVIEW_JSON_SCHEMA,
   REVIEW_SYSTEM_PROMPT,
-  segmentPromptText,
+  speakerLabelOf,
   SUMMARY_MERGE_JSON_SCHEMA,
   SUMMARY_MERGE_SYSTEM_PROMPT,
   type AnalysisPromptInput,
@@ -35,6 +35,30 @@ const BAD_SHAPE_REASON = 'AI 응답 형식이 올바르지 않아요';
  * 로컬 모델이 긴 전사를 읽고 쓰는 시간을 넉넉히 준다. 🟡 2026-10-21 실측: 2만 자 조각 하나가 LM Studio를 다른 작업과 나눠 쓰면 5분을 넘겨 10분으로 늘렸다
  */
 const ANALYSIS_TIMEOUT_MS = 10 * 60_000;
+/**
+ * 🟡 분석 한 건 전체의 시간 상한(분). 분석은 줄을 서서 하나씩 돌므로 20만 자 전사(호출 약 19번)가 다른 회의 분석을 몇 시간씩 막지 않게 한다.
+ * 넘으면 1차 분석 중이면 실패, 2차 검토 중이면 남은 조각 검토를 건너뛰고 그때까지 결과로 마친다. 환경 변수 MEETING_ANALYSIS_MAX_MINUTES(10~600)
+ */
+const DEFAULT_ANALYSIS_MAX_MINUTES = 120;
+/** 상한이 가까워도 호출 한 번에는 이만큼은 준다 */
+const MIN_CALL_TIMEOUT_MS = 60_000;
+
+export function analysisMaxMinutes(env: NodeJS.ProcessEnv = process.env): number {
+  const text = env.MEETING_ANALYSIS_MAX_MINUTES?.trim();
+  if (!text || !/^\d+$/.test(text)) return DEFAULT_ANALYSIS_MAX_MINUTES;
+  return Math.min(Math.max(Number(text), 10), 600);
+}
+
+/** 분석 한 건의 끝 시각 */
+interface Deadline {
+  at: number;
+  minutes: number;
+}
+
+const passed = (deadline: Deadline) => Date.now() >= deadline.at;
+/** 호출 한 번의 제한 시간: 평소 값과 남은 시간 중 짧은 쪽 */
+const callTimeout = (deadline: Deadline) => Math.max(MIN_CALL_TIMEOUT_MS, Math.min(ANALYSIS_TIMEOUT_MS, deadline.at - Date.now()));
+const timeLimitReason = (deadline: Deadline, what: string) => `AI 정리가 ${deadline.minutes}분을 넘어 ${what}`;
 const ANALYSIS_MAX_TOKENS = 8000;
 const REVIEW_ERROR_REASON = 'AI 2차 검토 중 오류가 났어요';
 const SUMMARY_MERGE_ERROR_REASON = '조각 요약을 합치지 못해 차례로 이어 붙였어요';
@@ -141,16 +165,16 @@ export class MeetingAnalysisRunner implements OnApplicationBootstrap, OnModuleDe
     }));
     const endpoint = { baseUrl: settings.baseUrl, apiKey: settings.apiKey };
     // 긴 전사는 조각으로 나눠 조각마다 1차 분석·2차 검토를 한다. 번호는 회의 전체 기준이라 근거가 원문 위치를 그대로 가리킨다
-    const chunks = splitTranscript(transcriptSegments.map((segment, index) => ({ number: index + 1, text: segmentPromptText(segment) })));
+    const chunks = splitTranscript(transcriptSegments.map((segment, index) => ({ number: index + 1, speaker: speakerLabelOf(segment) ?? undefined, text: segment.text })));
     const promptOf = (chunk: TranscriptChunk): AnalysisPromptInput => ({
       meetingDate,
       attendees,
-      segments: chunk.lines.map((line) => line.text),
+      segments: chunk.lines.map(lineText),
       numbers: chunk.lines.map((line) => line.number),
       part: chunk.total > 1 ? { index: chunk.index, total: chunk.total } : null,
     });
-    const options = { timeoutMs: ANALYSIS_TIMEOUT_MS, maxTokens: ANALYSIS_MAX_TOKENS, profile: LLM_PROFILE.MEETING_ANALYSIS };
     const started = Date.now();
+    const deadline: Deadline = { at: started + analysisMaxMinutes() * 60_000, minutes: analysisMaxMinutes() };
 
     const rawMaterials = await this.repository.findRawMaterials(this.prisma);
     const ctx: Omit<AnalysisContext, 'salesOrders'> = {
@@ -163,6 +187,8 @@ export class MeetingAnalysisRunner implements OnApplicationBootstrap, OnModuleDe
     const steps: MeetingTraceStep[] = [];
     const parts: ValidatedAnalysis[] = [];
     for (const chunk of chunks) {
+      // 1차 분석이 끝나지 않으면 빠지는 부분이 생기므로 남은 조각을 건너뛰지 않고 실패로 둔다
+      if (passed(deadline)) throw new LlmRequestError(timeLimitReason(deadline, `${chunkLabel(chunk)} 분석 전에 멈췄어요. 다시 정리해 주세요`));
       await this.progress(id, { phase: 'ANALYSIS', current: chunk.index, total: chunk.total });
       const chunkStarted = Date.now();
       let reply: LlmJsonReply;
@@ -175,7 +201,7 @@ export class MeetingAnalysisRunner implements OnApplicationBootstrap, OnModuleDe
             { role: 'user', content: buildAnalysisUserMessage(promptOf(chunk)) },
           ],
           ANALYSIS_JSON_SCHEMA,
-          options,
+          { timeoutMs: callTimeout(deadline), maxTokens: ANALYSIS_MAX_TOKENS, profile: LLM_PROFILE.MEETING_ANALYSIS },
         );
       } catch (error) {
         // 한 조각이라도 1차 분석을 못 하면 그 부분의 후보가 통째로 빠지므로 분석 전체를 실패로 둔다
@@ -195,14 +221,14 @@ export class MeetingAnalysisRunner implements OnApplicationBootstrap, OnModuleDe
       first = parts[0];
     } else {
       await this.progress(id, { phase: 'MERGE', current: 1, total: 1 });
-      const merged = mergeChunkResults(parts);
-      const summary = await this.mergeSummaries(endpoint, model, meetingDate, merged.summaries, merged.changes);
+      const merged = mergeChunkResults(parts, candidateLimit(chunks.length));
+      const summary = await this.mergeSummaries(endpoint, model, meetingDate, merged.summaries, merged.changes, deadline);
       steps.push(summary.step);
       first = { summary: summary.summary, decisions: merged.decisions, candidates: merged.candidates };
     }
 
     // 2차 검토는 덤이다: 실패해도 1차 결과를 그대로 낸다
-    const reviewed = await this.reviewChunks(id, endpoint, model, chunks, promptOf, first.candidates, ctx);
+    const reviewed = await this.reviewChunks(id, endpoint, model, chunks, promptOf, first.candidates, ctx, deadline);
     steps.push(...reviewed.steps);
     const candidates = await this.withContext(reviewed.candidates);
     return {
@@ -234,10 +260,12 @@ export class MeetingAnalysisRunner implements OnApplicationBootstrap, OnModuleDe
     meetingDate: string,
     summaries: string[],
     changes: MeetingTraceChange[],
+    deadline: Deadline,
   ): Promise<{ summary: string; step: MeetingTraceStep }> {
     const started = Date.now();
     const fallback = joinSummaries(summaries, SUMMARY_MAX);
     if (summaries.length <= 1) return { summary: fallback, step: traceStep('MERGE', model, 0, null, null, changes) };
+    if (passed(deadline)) return { summary: fallback, step: traceStep('MERGE', model, 0, null, timeLimitReason(deadline, '요약은 조각 요약을 이어 붙였어요'), changes) };
     try {
       const reply = await this.llmClient.chatJsonWithText(
         endpoint,
@@ -247,7 +275,7 @@ export class MeetingAnalysisRunner implements OnApplicationBootstrap, OnModuleDe
           { role: 'user', content: buildSummaryMergeMessage({ meetingDate, summaries }) },
         ],
         SUMMARY_MERGE_JSON_SCHEMA,
-        { timeoutMs: ANALYSIS_TIMEOUT_MS, maxTokens: SUMMARY_MERGE_MAX_TOKENS, profile: LLM_PROFILE.MEETING_ANALYSIS },
+        { timeoutMs: callTimeout(deadline), maxTokens: SUMMARY_MERGE_MAX_TOKENS, profile: LLM_PROFILE.MEETING_ANALYSIS },
       );
       const summary = isObject(reply.value) ? text(reply.value.summary, SUMMARY_MAX) : null;
       if (summary === null) return { summary: fallback, step: traceStep('MERGE', model, Date.now() - started, reply, SUMMARY_MERGE_ERROR_REASON, changes) };
@@ -272,6 +300,7 @@ export class MeetingAnalysisRunner implements OnApplicationBootstrap, OnModuleDe
     promptOf: (chunk: TranscriptChunk) => AnalysisPromptInput,
     first: MeetingCandidate[],
     ctx: Omit<AnalysisContext, 'salesOrders'>,
+    deadline: Deadline,
   ): Promise<{ candidates: MeetingCandidate[]; review: MeetingReviewResult; steps: MeetingTraceStep[] }> {
     let candidates = first;
     const steps: MeetingTraceStep[] = [];
@@ -280,9 +309,17 @@ export class MeetingAnalysisRunner implements OnApplicationBootstrap, OnModuleDe
     let firstError: string | null = null;
     let failed = 0;
     for (const chunk of chunks) {
+      // 2차 검토는 덤이라 시간이 다 되면 남은 조각을 건너뛰고 그때까지 결과로 마친다
+      if (passed(deadline)) {
+        const reason = timeLimitReason(deadline, '이 조각의 2차 검토를 건너뛰었어요');
+        steps.push(traceStep('REVIEW', model, 0, null, reason, [], chunkOf(chunk)));
+        failed += 1;
+        firstError ??= reason;
+        continue;
+      }
       await this.progress(id, { phase: 'REVIEW', current: chunk.index, total: chunk.total });
       const shown = chunk.total > 1 ? candidates.filter((c) => c.evidence.some((index) => chunk.numbers.has(index + 1))) : candidates;
-      const result = await this.review(endpoint, model, promptOf(chunk), candidates, shown, ctx, chunk);
+      const result = await this.review(endpoint, model, promptOf(chunk), candidates, shown, ctx, chunk, deadline);
       candidates = result.candidates;
       steps.push(result.step);
       if (result.review.ok) {
@@ -306,6 +343,7 @@ export class MeetingAnalysisRunner implements OnApplicationBootstrap, OnModuleDe
     shown: MeetingCandidate[],
     ctx: Omit<AnalysisContext, 'salesOrders'>,
     chunk: TranscriptChunk,
+    deadline: Deadline,
   ): Promise<{ candidates: MeetingCandidate[]; review: MeetingReviewResult; step: MeetingTraceStep }> {
     const started = Date.now();
     try {
@@ -317,11 +355,11 @@ export class MeetingAnalysisRunner implements OnApplicationBootstrap, OnModuleDe
           { role: 'user', content: buildReviewUserMessage({ ...promptInput, candidates: shown.map(reviewLine) }) },
         ],
         REVIEW_JSON_SCHEMA,
-        { timeoutMs: ANALYSIS_TIMEOUT_MS, maxTokens: ANALYSIS_MAX_TOKENS, profile: LLM_PROFILE.MEETING_REVIEW },
+        { timeoutMs: callTimeout(deadline), maxTokens: ANALYSIS_MAX_TOKENS, profile: LLM_PROFILE.MEETING_REVIEW },
       );
       const durationMs = Date.now() - started;
       const raw = chunk.total > 1 ? restrictToChunk(reply.value, chunk.numbers, ['missed']) : reply.value;
-      const merged = mergeReview(all, raw, { ...ctx, salesOrders: await this.salesOrdersIn(reviewItemsOf(raw)) });
+      const merged = mergeReview(all, raw, { ...ctx, salesOrders: await this.salesOrdersIn(reviewItemsOf(raw)) }, { shownKeys: new Set(shown.map((c) => c.key)), limit: candidateLimit(chunk.total) });
       const error = merged.review.ok ? null : REVIEW_BAD_SHAPE;
       return { candidates: merged.candidates, review: merged.review, step: traceStep('REVIEW', model, durationMs, reply, error, merged.changes, chunkOf(chunk)) };
     } catch (error) {

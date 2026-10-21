@@ -15,11 +15,16 @@ export const SINGLE_PASS_MAX_CHARS = 40_000;
 export const CHUNK_CHARS = 24_000;
 export const CHUNK_OVERLAP_CHARS = 2_000;
 
-/** 모델에 보여 줄 전사 한 줄. number는 전체 회의 기준 발언 번호(1부터). 너무 긴 발언은 같은 번호로 여러 줄이 된다 */
+/** 모델에 보여 줄 전사 한 줄. number는 전체 회의 기준 발언 번호(1부터). 너무 긴 발언은 같은 번호·같은 화자로 여러 줄이 된다 */
 export interface TranscriptLine {
   number: number;
+  /** "정다은"·"화자1"처럼 줄 앞에 붙일 화자 머리말. 화자 칸이 없는 전사면 없다 */
+  speaker?: string;
   text: string;
 }
+
+/** 프롬프트에 들어가는 글: "화자: 글" 또는 글 그대로 */
+export const lineText = (line: TranscriptLine): string => (line.speaker ? `${line.speaker}: ${line.text}` : line.text);
 
 export interface TranscriptChunk {
   /** 1부터 */
@@ -32,8 +37,8 @@ export interface TranscriptChunk {
   lastNumber: number;
 }
 
-/** 프롬프트에서 한 줄이 차지하는 길이: "[번호] 글" + 줄바꿈 */
-const lineLength = (line: TranscriptLine) => String(line.number).length + 3 + line.text.length + 1;
+/** 프롬프트에서 한 줄이 차지하는 길이: "[번호] 화자: 글" + 줄바꿈 */
+const lineLength = (line: TranscriptLine) => String(line.number).length + 3 + lineText(line).length + 1;
 
 /** 문장 끝(마침표·물음표·느낌표 뒤 공백)에서 나눈다. 그래도 긴 문장은 글자 수로 자른다 */
 export function splitLongText(text: string, max: number): string[] {
@@ -77,8 +82,10 @@ export function splitTranscript(
   if (total <= singlePassMax) {
     groups.push([...lines]);
   } else {
-    // 머리말([번호] )을 뺀 글 길이로 긴 발언을 나눈다
-    const units = lines.flatMap((line) => splitLongText(line.text, Math.max(1, size - 16)).map((text) => ({ number: line.number, text })));
+    // 머리말([번호] 화자: )을 뺀 글 길이로 긴 발언을 나누고, 나눈 줄마다 같은 화자 머리말을 붙인다 (누가 한 말인지 조각마다 보이게)
+    const units = lines.flatMap((line) =>
+      splitLongText(line.text, Math.max(1, size - 16 - (line.speaker ? line.speaker.length + 2 : 0))).map((text) => ({ ...line, text })),
+    );
     let current: TranscriptLine[] = [];
     let length = 0;
     for (const unit of units) {
@@ -127,30 +134,65 @@ export function restrictToChunk(raw: unknown, numbers: ReadonlySet<number>, list
 
 export const CHUNK_MERGE = {
   duplicate: '앞 조각 후보와 같은 일이라 근거를 합쳤어요',
-  overLimit: (count: number) => `조각을 합친 후보가 ${LIST_MAX}개를 넘어 뒤의 ${count}개는 넣지 않았어요`,
+  overLimit: (limit: number, count: number) => `조각을 합친 후보가 ${limit}개를 넘어 뒤의 ${count}개는 넣지 않았어요`,
 } as const;
 
-const intersects = (a: readonly number[], b: readonly number[]) => a.some((n) => b.includes(n));
-const conflicts = (a: number | null | undefined, b: number | null | undefined) => a != null && b != null && a !== b;
+/** 조각을 합칠 때 사람이 보게 붙이는 확인 사유 */
+export const CHUNK_ISSUE = {
+  changedLater: (title: string) => `앞부분의 "${title}" 후보와 담당자·날짜·수량이 달라요. 회의 중에 바뀐 결정인지 확인해 주세요`,
+  changedEarlier: (title: string) => `뒷부분의 "${title}" 후보와 담당자·날짜·수량이 달라요. 어느 쪽이 맞는지 확인해 주세요`,
+  maybeDuplicate: (title: string) => `앞부분의 "${title}" 후보와 같은 일일 수 있어요. 겹치면 하나를 제외해 주세요`,
+} as const;
 
 /**
- * 같은 일인지: 종류가 같고 제목이 같거나, 다른 조각에서 같은 발언을 근거로 댔으며(겹침 구간) 담당자·원료가 서로 다르지 않을 때.
- * 같은 발언에서 다른 사람의 일을 둘 뽑은 경우는 담당자가 달라 합치지 않는다
+ * 🟡 긴 전사의 합친 후보 상한: 조각이 많을수록 늘린다(조각마다 15개, 30~90개). 2차 검토가 더할 자리도 이 상한 안에서 센다.
+ * 나누지 않은 분석은 이 기능 전과 같은 LIST_MAX
  */
-function sameWork(a: MeetingCandidate, b: MeetingCandidate, differentChunk: boolean): boolean {
+export function candidateLimit(chunkCount: number): number {
+  return chunkCount <= 1 ? LIST_MAX : Math.min(LIST_MAX * 3, Math.max(LIST_MAX, 15 * chunkCount));
+}
+
+const intersects = (a: readonly number[], b: readonly number[]) => a.some((n) => b.includes(n));
+const differs = <T>(a: T | null | undefined, b: T | null | undefined) => a != null && b != null && a !== b;
+const whenOf = (c: MeetingCandidate) => c.dueDate ?? c.startAt ?? c.purchase?.desiredReceiptDate ?? null;
+
+/** 둘 다 값이 있는데 다른 칸이 있는지: 담당자·원료·날짜(마감·시작·희망 입고일)·수량 */
+function valuesConflict(a: MeetingCandidate, b: MeetingCandidate): boolean {
+  return differs(a.assigneeId, b.assigneeId) || differs(a.purchase?.itemId, b.purchase?.itemId) || differs(whenOf(a), whenOf(b)) || differs(a.purchase?.requestedTon, b.purchase?.requestedTon);
+}
+
+/**
+ * 같은 일로 볼 만한지: 종류가 같고 제목(공백 무시)이 같거나, 다른 조각에서 같은 발언을 근거로 댔을 때(겹침 구간).
+ * 값이 같은지는 따로 본다(valuesConflict): 회의 중에 "10톤 → 15톤"처럼 바뀐 결정을 하나로 뭉쳐 뒤의 값을 잃지 않게
+ */
+function sameSubject(a: MeetingCandidate, b: MeetingCandidate, differentChunk: boolean): boolean {
   if (a.kind !== b.kind) return false;
   if (squash(a.title) === squash(b.title)) return true;
-  if (!differentChunk || !intersects(a.evidence, b.evidence)) return false;
-  return !conflicts(a.assigneeId, b.assigneeId) && !conflicts(a.purchase?.itemId, b.purchase?.itemId);
+  return differentChunk && intersects(a.evidence, b.evidence);
 }
+
+/** 제목도 근거도 다르지만 종류·담당자·날짜(구매는 원료)가 같은 일. 회의 끝에 다시 정리한 말일 수 있어 합치지 않고 알린다 */
+function lookAlike(a: MeetingCandidate, b: MeetingCandidate): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.kind === 'PURCHASE') return a.purchase?.itemId != null && a.purchase.itemId === b.purchase?.itemId;
+  const when = whenOf(a);
+  return a.assigneeId !== null && a.assigneeId === b.assigneeId && when !== null && when.slice(0, 10) === whenOf(b)?.slice(0, 10);
+}
+
+const addIssue = (c: MeetingCandidate, issue: string): MeetingCandidate => (c.issues.includes(issue) ? c : { ...c, issues: [...c.issues, issue] });
 
 /**
  * 조각마다 검증한 1차 결과를 합친다. 요약은 부르는 쪽이 모델로 합친다(여기서는 조각 요약을 차례로 둔다).
  * - 결정사항: 글이 같으면 하나로 (근거는 합친다).
- * - 후보: 같은 일이면 앞 조각 후보에 근거만 더한다. 키는 c1…로 다시 붙이고 LIST_MAX개까지.
+ * - 후보: 같은 일이고 값도 어긋나지 않으면 앞 조각 후보에 근거만 더한다. 같은 일인데 담당자·날짜·수량이 다르면 둘 다 두고 양쪽에 확인 사유를 붙인다.
+ *   다른 조각의 비슷한 일(종류·담당자·날짜가 같음)은 합치지 않고 뒤 후보에 중복일 수 있다고 붙인다.
+ *   키는 c1…로 다시 붙이고 limit개까지(넘친 것은 실행 기록에).
  * 근거는 원문 위치(0부터) 그대로라 어느 조각에서 왔는지와 상관없이 원본 발언을 가리킨다.
  */
-export function mergeChunkResults(parts: readonly ValidatedAnalysis[]): { summaries: string[]; decisions: MeetingDecision[]; candidates: MeetingCandidate[]; changes: MeetingTraceChange[] } {
+export function mergeChunkResults(
+  parts: readonly ValidatedAnalysis[],
+  limit: number = candidateLimit(parts.length),
+): { summaries: string[]; decisions: MeetingDecision[]; candidates: MeetingCandidate[]; changes: MeetingTraceChange[] } {
   const decisions: MeetingDecision[] = [];
   for (const part of parts) {
     for (const decision of part.decisions) {
@@ -163,23 +205,33 @@ export function mergeChunkResults(parts: readonly ValidatedAnalysis[]): { summar
   const merged: { candidate: MeetingCandidate; chunk: number; absorbed: Set<number> }[] = [];
   const changes: MeetingTraceChange[] = [];
   parts.forEach((part, chunk) => {
-    for (const candidate of part.candidates) {
+    for (const incoming of part.candidates) {
+      let candidate = incoming;
       // 한 후보는 다른 조각마다 하나씩만 흡수한다 (같은 발언에서 나온 두 일을 하나로 뭉치지 않게)
-      const target = merged.find((m) => !m.absorbed.has(chunk) && sameWork(m.candidate, candidate, m.chunk !== chunk));
+      const subject = merged.filter((m) => !m.absorbed.has(chunk) && sameSubject(m.candidate, candidate, m.chunk !== chunk));
+      const target = subject.find((m) => !valuesConflict(m.candidate, candidate));
       if (target) {
         target.candidate = { ...target.candidate, evidence: [...new Set([...target.candidate.evidence, ...candidate.evidence])].sort((a, b) => a - b) };
         target.absorbed.add(chunk);
         changes.push({ action: 'DROPPED', title: candidate.title, reason: CHUNK_MERGE.duplicate });
         continue;
       }
+      for (const m of subject) {
+        m.candidate = addIssue(m.candidate, CHUNK_ISSUE.changedEarlier(candidate.title));
+        candidate = addIssue(candidate, CHUNK_ISSUE.changedLater(m.candidate.title));
+      }
+      if (subject.length === 0) {
+        const alike = merged.find((m) => m.chunk !== chunk && lookAlike(m.candidate, candidate));
+        if (alike) candidate = addIssue(candidate, CHUNK_ISSUE.maybeDuplicate(alike.candidate.title));
+      }
       merged.push({ candidate, chunk, absorbed: new Set([chunk]) });
     }
   });
-  if (merged.length > LIST_MAX) {
-    for (const extra of merged.slice(LIST_MAX)) changes.push({ action: 'DROPPED', title: extra.candidate.title, reason: CHUNK_MERGE.overLimit(merged.length - LIST_MAX) });
+  if (merged.length > limit) {
+    for (const extra of merged.slice(limit)) changes.push({ action: 'DROPPED', title: extra.candidate.title, reason: CHUNK_MERGE.overLimit(limit, merged.length - limit) });
   }
-  const candidates = merged.slice(0, LIST_MAX).map((m, i) => ({ ...m.candidate, key: `c${i + 1}` }));
-  return { summaries: parts.map((p) => p.summary).filter((s) => s !== ''), decisions: decisions.slice(0, LIST_MAX), candidates, changes };
+  const candidates = merged.slice(0, limit).map((m, i) => ({ ...m.candidate, key: `c${i + 1}` }));
+  return { summaries: parts.map((p) => p.summary).filter((s) => s !== ''), decisions: decisions.slice(0, limit), candidates, changes };
 }
 
 /** 요약 합치기에 실패했을 때: 조각 요약을 차례로 이어 상한까지 */

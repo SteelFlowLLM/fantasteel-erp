@@ -1,6 +1,6 @@
 // 긴 전사 조각 나누기·합치기 (DB 없음)
 import type { MeetingCandidate } from '@fantasteel/shared';
-import { CHUNK_MERGE, joinSummaries, mergeChunkResults, restrictToChunk, splitLongText, splitTranscript, type TranscriptLine } from './meeting-analysis.chunks';
+import { candidateLimit, CHUNK_ISSUE, CHUNK_MERGE, joinSummaries, lineText, mergeChunkResults, restrictToChunk, splitLongText, splitTranscript, type TranscriptLine } from './meeting-analysis.chunks';
 import { DROP, LIST_MAX, validateAnalysis, type ValidatedAnalysis } from './meeting-analysis.validator';
 
 const lines = (count: number, length: number): TranscriptLine[] => Array.from({ length: count }, (_, i) => ({ number: i + 1, text: `${'가'.repeat(length - 1)}.` }));
@@ -71,6 +71,19 @@ describe('splitTranscript', () => {
       const sharedLength = chunks[i].lines.filter((l) => prev.numbers.has(l.number)).reduce((sum, l) => sum + String(l.number).length + 4 + l.text.length, 0);
       expect(sharedLength).toBeLessThanOrEqual(1_000);
     }
+  });
+
+  it('긴 발언을 나눈 줄마다 같은 화자 머리말을 붙인다', () => {
+    const sentence = `${'나'.repeat(99)}.`;
+    const long: TranscriptLine = { number: 7, speaker: '정다은', text: Array.from({ length: 500 }, () => sentence).join(' ') };
+    const pieces = splitTranscript([long], { singlePassMax: 40_000, chunkChars: 20_000, overlapChars: 1_000 }).flatMap((c) => c.lines);
+    expect(pieces.length).toBeGreaterThanOrEqual(3);
+    for (const piece of pieces) {
+      expect(piece).toMatchObject({ number: 7, speaker: '정다은' });
+      expect(lineText(piece).startsWith('정다은: ')).toBe(true);
+      expect(String(piece.number).length + 4 + lineText(piece).length).toBeLessThanOrEqual(20_000);
+    }
+    expect(lineText({ number: 1, text: '화자 없음' })).toBe('화자 없음');
   });
 
   it('조각보다 긴 한 발언은 문장 경계에서 나눠 같은 번호로 둔다', () => {
@@ -172,7 +185,42 @@ describe('mergeChunkResults', () => {
     const merged = mergeChunkResults([part({ candidates: many('앞', 0) }), part({ candidates: many('뒤', 100) })]);
     expect(merged.candidates).toHaveLength(LIST_MAX);
     expect(merged.candidates.at(-1)?.key).toBe(`c${LIST_MAX}`);
-    expect(merged.changes.filter((c) => c.reason === CHUNK_MERGE.overLimit(10))).toHaveLength(10);
+    expect(merged.changes.filter((c) => c.reason === CHUNK_MERGE.overLimit(LIST_MAX, 10))).toHaveLength(10);
+  });
+
+  it('긴 전사는 조각 수에 맞춰 상한을 늘린다 (조각마다 15개, 30~90개)', () => {
+    expect([candidateLimit(1), candidateLimit(2), candidateLimit(3), candidateLimit(5), candidateLimit(9)]).toEqual([LIST_MAX, 30, 45, 75, 90]);
+    const many = (prefix: string, from: number) => Array.from({ length: 20 }, (_, i) => candidate({ key: `c${i + 1}`, title: `${prefix}${i}`, evidence: [from + i], assigneeId: i }));
+    const merged = mergeChunkResults([part({ candidates: many('가', 0) }), part({ candidates: many('나', 100) }), part({ candidates: many('다', 200) })]);
+    expect(merged.candidates).toHaveLength(45);
+    expect(merged.changes.filter((c) => c.reason === CHUNK_MERGE.overLimit(45, 15))).toHaveLength(15);
+  });
+
+  it('제목이 같아도 담당자·날짜·수량이 다르면 합치지 않고 둘 다 두며 양쪽에 확인 사유를 붙인다 (회의 중 바뀐 결정)', () => {
+    const purchase = (requestedTon: string) => ({ itemId: 4, requestedTon, desiredReceiptDate: '2026-10-31', requestReason: '구매', sourceText: '' });
+    const merged = mergeChunkResults([
+      part({ candidates: [candidate({ kind: 'PURCHASE', title: '실리코망가니즈 구매', evidence: [5], assigneeId: null, dueDate: null, purchase: purchase('10.000') })] }),
+      part({ candidates: [candidate({ kind: 'PURCHASE', title: '실리코망가니즈  구매', evidence: [400], assigneeId: null, dueDate: null, purchase: purchase('15.000') })] }),
+    ]);
+    expect(merged.candidates.map((c) => c.purchase?.requestedTon)).toEqual(['10.000', '15.000']);
+    expect(merged.candidates[0].issues).toEqual([CHUNK_ISSUE.changedEarlier('실리코망가니즈  구매')]);
+    expect(merged.candidates[1].issues).toEqual([CHUNK_ISSUE.changedLater('실리코망가니즈 구매')]);
+    expect(merged.changes).toEqual([]);
+
+    const moved = mergeChunkResults([part({ candidates: [candidate({ dueDate: '2026-10-20' })] }), part({ candidates: [candidate({ dueDate: '2026-10-27', evidence: [300] })] })]);
+    expect(moved.candidates.map((c) => c.dueDate)).toEqual(['2026-10-20', '2026-10-27']);
+  });
+
+  it('제목·근거가 달라도 다른 조각의 같은 담당자·같은 날짜 일(구매는 같은 원료)이면 합치지 않고 중복일 수 있다고 알린다', () => {
+    const merged = mergeChunkResults([
+      part({ candidates: [candidate({ title: '견적서 보내기', evidence: [10] })] }),
+      part({ candidates: [candidate({ title: '동해철강 견적 발송', evidence: [590] }), candidate({ title: '다른 사람 일', evidence: [591], assigneeId: 8 })] }),
+    ]);
+    expect(merged.candidates.map((c) => [c.title, c.issues])).toEqual([
+      ['견적서 보내기', []],
+      ['동해철강 견적 발송', [CHUNK_ISSUE.maybeDuplicate('견적서 보내기')]],
+      ['다른 사람 일', []],
+    ]);
   });
 });
 

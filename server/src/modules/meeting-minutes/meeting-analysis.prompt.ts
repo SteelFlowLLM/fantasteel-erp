@@ -30,14 +30,20 @@ export const ANALYSIS_SYSTEM_PROMPT = `당신은 철강 제조사 ERP의 회의�
 - 꼭 해야 할 일·일정·구매인데 담당자나 날짜(마감일·시각)가 분명하지 않으면 빼지 말고 그 칸만 null로 두고 항목은 포함합니다. 사람이 나중에 채웁니다.
 - 해당하지 않는 항목은 null 또는 빈 배열로 둡니다.`;
 
-/** 전사 구간 하나를 모델에 보여 줄 글로. 사원이 연결됐으면 "이름: 글", 이름표만 있으면 "화자1: 글", 화자가 없으면 글 그대로 */
-export function segmentPromptText(segment: TranscriptSegment): string {
-  if (segment.speakerName) return `${segment.speakerName}: ${segment.text}`;
+/** 구간의 화자 머리말: 사원이 연결됐으면 이름, 이름표만 있으면 "화자1", 화자가 없으면 null */
+export function speakerLabelOf(segment: TranscriptSegment): string | null {
+  if (segment.speakerName) return segment.speakerName;
   if (segment.speaker) {
     const number = /^SPEAKER_(\d+)$/.exec(segment.speaker)?.[1];
-    return `${number ? `화자${number}` : segment.speaker}: ${segment.text}`;
+    return number ? `화자${number}` : segment.speaker;
   }
-  return segment.text;
+  return null;
+}
+
+/** 전사 구간 하나를 모델에 보여 줄 글로. 사원이 연결됐으면 "이름: 글", 이름표만 있으면 "화자1: 글", 화자가 없으면 글 그대로 */
+export function segmentPromptText(segment: TranscriptSegment): string {
+  const speaker = speakerLabelOf(segment);
+  return speaker ? `${speaker}: ${segment.text}` : segment.text;
 }
 
 export interface AnalysisPromptInput {

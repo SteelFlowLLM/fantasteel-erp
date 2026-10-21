@@ -49,6 +49,9 @@ export function MeetingAskCard({ minutes, onJump }: { minutes: MeetingMinutesVie
   /** 저장한 대화 id. 아직 묻지 않았거나 지웠으면 null */
   const [threadId, setThreadId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  /** 지난 대화를 못 읽었으면 그 이유. 서버는 새 질문을 지난 대화에 이어 쌓으므로 읽기 전에는 묻지 못하게 한다 */
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadTry, setLoadTry] = useState(0);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const removeThread = useDeleteAiChatThread();
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -69,10 +72,11 @@ export function MeetingAskCard({ minutes, onJump }: { minutes: MeetingMinutesVie
   // 카드를 떠나면 서버에서 하던 일도 멈춘다
   useEffect(() => () => controllerRef.current?.abort(), []);
 
-  // 이 회의에 물었던 대화를 되살린다. 못 읽으면 빈 대화로 두고 새 질문은 그대로 저장된다
+  // 이 회의에 물었던 대화를 되살린다. 못 읽으면 안내와 다시 불러오기를 보인다
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setLoadError(null);
     aiAssistantApi.getMeetingThread(minutes.id).then(
       (thread) => {
         if (cancelled) return;
@@ -80,14 +84,16 @@ export function MeetingAskCard({ minutes, onJump }: { minutes: MeetingMinutesVie
         setThreadId(thread?.id ?? null);
         setLoading(false);
       },
-      () => {
-        if (!cancelled) setLoading(false);
+      (error: unknown) => {
+        if (cancelled) return;
+        setLoadError(errorMessageOf(error));
+        setLoading(false);
       },
     );
     return () => {
       cancelled = true;
     };
-  }, [minutes.id]);
+  }, [minutes.id, loadTry]);
 
   useEffect(() => {
     if (entries.length || live) bottomRef.current?.scrollIntoView({ block: 'nearest' });
@@ -130,7 +136,7 @@ export function MeetingAskCard({ minutes, onJump }: { minutes: MeetingMinutesVie
 
   const ask = (question: string, base: AiChatEntry[] = entries) => {
     const text = question.trim();
-    if (!text || pending || loading) return;
+    if (!text || pending || loading || loadError !== null) return;
     setEntries([...base, { id: newAiChatId(), role: 'user', content: text }]);
     setDraft('');
     void run(text);
@@ -168,6 +174,17 @@ export function MeetingAskCard({ minutes, onJump }: { minutes: MeetingMinutesVie
       <CardBody className="gap-3">
         {loading ? (
           <p className="text-cap text-ink-3">지난 질문을 불러오는 중…</p>
+        ) : loadError !== null ? (
+          <div role="alert" className="flex flex-col gap-2 rounded-md border border-danger bg-danger-bg px-3 py-2.5 text-sm">
+            <span className="inline-flex items-center gap-1.5 font-semibold text-danger">
+              <Icon name="alert" size="sm" />
+              지난 질문을 불러오지 못했어요
+            </span>
+            <p className="leading-normal text-ink-2">{loadError} 새 질문은 지난 대화에 이어 저장되므로, 다시 불러온 뒤에 물어봐 주세요.</p>
+            <Button size="sm" icon="refresh" className="self-start" onClick={() => setLoadTry((n) => n + 1)}>
+              다시 불러오기
+            </Button>
+          </div>
         ) : entries.length === 0 ? (
           <div className="flex flex-wrap gap-1.5">
             {MEETING_SUGGESTED_QUESTIONS.map((question) => (
@@ -249,7 +266,7 @@ export function MeetingAskCard({ minutes, onJump }: { minutes: MeetingMinutesVie
                 멈추기
               </Button>
             ) : (
-              <Button variant="ai" size="sm" icon="send" className="ml-auto" disabled={!draft.trim()} aria-label="보내기" onClick={() => ask(draft)} />
+              <Button variant="ai" size="sm" icon="send" className="ml-auto" disabled={!draft.trim() || loading || loadError !== null} aria-label="보내기" onClick={() => ask(draft)} />
             )}
           </div>
         </div>

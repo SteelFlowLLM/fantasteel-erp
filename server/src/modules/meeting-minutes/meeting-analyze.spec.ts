@@ -8,7 +8,7 @@ import { AppModule } from '../../app.module';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LlmClient, LlmRequestError } from '../llm/llm.client';
 import { LlmSettingsStore } from '../llm/llm-settings.store';
-import { ANALYSIS_INTERRUPTED_REASON, MeetingAnalysisRunner } from './meeting-analysis.runner';
+import { analysisMaxMinutes, ANALYSIS_INTERRUPTED_REASON, MeetingAnalysisRunner } from './meeting-analysis.runner';
 import { DROP } from './meeting-analysis.validator';
 import { JOB_STALE_MS } from './meeting-job.lease';
 
@@ -256,6 +256,61 @@ describe('POST /meeting-minutes/:id/analyze (API-260)', () => {
       { phase: 'REVIEW', current: 2, total: 3 },
       { phase: 'REVIEW', current: 3, total: 3 },
     ]);
+  });
+
+  it('분석 전체 시간 상한: 2차 검토 중에 넘으면 남은 조각 검토를 건너뛰고 마치고, 1차 분석 중에 넘으면 실패로 둔다', async () => {
+    const longRow = async () => {
+      const segments = Array.from({ length: 600 }, (_, i) => ({ start: null, end: null, text: `${i + 1}번째 발언. ${'가'.repeat(90)}` }));
+      return prisma.meetingMinutes.create({
+        data: { meetingMinutesTitle: '긴 회의', meetingDate: new Date('2026-10-15T00:00:00.000Z'), meetingMinutesStatus: 'TRANSCRIBED', transcript: segments.map((x) => x.text).join('\n'), transcriptSegments: segments, creatorId: purchaseId },
+      });
+    };
+    const realNow = Date.now.bind(Date);
+    let skew = 0;
+    const clock = jest.spyOn(Date, 'now').mockImplementation(() => realNow() + skew);
+    try {
+      llmClient.chatJson.mockImplementation(async (...args: unknown[]) => {
+        const name = (args[3] as { name: string }).name;
+        if (name === 'meeting_review') {
+          skew = (analysisMaxMinutes() + 1) * 60_000; // 첫 조각 검토 중에 시간이 다 된다
+          return { scan: [], missed: [], concerns: [] };
+        }
+        return name === 'meeting_summary_merge' ? { summary: '합친 요약' } : { summary: '부분', decisions: [], items: [] };
+      });
+      const reviewing = await longRow();
+      await call('POST', `/meeting-minutes/${reviewing.id}/analyze`, purchaseCookie);
+      await runner.drain();
+      const done = (await call<MeetingMinutesView>('GET', `/meeting-minutes/${reviewing.id}`, purchaseCookie)).body.data;
+      expect(done.meetingMinutesStatus).toBe('REVIEW');
+      expect(done.analysisResult?.review).toEqual({ ok: true, missedCount: 0, concernCount: 0, failedChunks: 2 });
+      const skipped = (done.analysisResult?.trace?.steps ?? []).filter((x) => x.stage === 'REVIEW' && !x.ok);
+      expect(skipped.map((x) => x.chunk?.index)).toEqual([2, 3]);
+      expect(skipped[0].error).toBe(`AI 정리가 ${analysisMaxMinutes()}분을 넘어 이 조각의 2차 검토를 건너뛰었어요`);
+
+      skew = 0;
+      llmClient.chatJson.mockReset();
+      llmClient.chatJson.mockImplementation(async () => {
+        skew = (analysisMaxMinutes() + 1) * 60_000; // 첫 조각 1차 분석 중에 시간이 다 된다
+        return { summary: '부분', decisions: [], items: [] };
+      });
+      const analyzing = await longRow();
+      await call('POST', `/meeting-minutes/${analyzing.id}/analyze`, purchaseCookie);
+      await runner.drain();
+      const failed = await prisma.meetingMinutes.findUniqueOrThrow({ where: { id: analyzing.id } });
+      expect(failed.meetingMinutesStatus).toBe('FAILED');
+      expect(failed.failureReason).toMatch(/^AI 정리가 \d+분을 넘어 3개 조각 중 2번째\(발언 \d+~\d+\) 분석 전에 멈췄어요/);
+      expect(llmClient.chatJson).toHaveBeenCalledTimes(1);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('분석 시간 상한은 환경 변수로 바꾸고 10~600분 밖·숫자 아님은 막는다', () => {
+    expect(analysisMaxMinutes({})).toBe(120);
+    expect(analysisMaxMinutes({ MEETING_ANALYSIS_MAX_MINUTES: '90' })).toBe(90);
+    expect(analysisMaxMinutes({ MEETING_ANALYSIS_MAX_MINUTES: '3' })).toBe(10);
+    expect(analysisMaxMinutes({ MEETING_ANALYSIS_MAX_MINUTES: '9999' })).toBe(600);
+    expect(analysisMaxMinutes({ MEETING_ANALYSIS_MAX_MINUTES: '1시간' })).toBe(120);
   });
 
   it('긴 전사의 한 조각이라도 1차 분석에 실패하면 몇 번째 조각인지 담아 FAILED로 둔다', async () => {

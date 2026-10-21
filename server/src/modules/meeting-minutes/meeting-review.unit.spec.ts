@@ -119,6 +119,20 @@ describe('mergeReview', () => {
     expect(r.candidates[29].key).toBe('c30');
   });
 
+  it('긴 전사의 조각 검토: 보여 주지 않은 후보 키에 대한 지적은 버리고, 상한을 넘겨받으면 그만큼 더 넣는다', () => {
+    const r = mergeReview(firstPass(), { missed: [], concerns: [{ key: 'c1', reason: '날짜가 틀려요' }, { key: 'c2', reason: '담당자가 틀려요' }] }, ctx, { shownKeys: new Set(['c2']) });
+    expect(r.review).toEqual({ ok: true, missedCount: 0, concernCount: 1 });
+    expect(r.candidates[0].issues).toEqual([]);
+    expect(r.changes).toContainEqual({ action: 'DROPPED', title: '날짜가 틀려요', reason: REVIEW_DROP.concernKey('c1') });
+
+    const many = Array.from({ length: 30 }, (_, i) => missedTask({ title: `빠진 일 ${i}` }));
+    const wide = mergeReview(firstPass(), { missed: many, concerns: [] }, ctx, { limit: 45 });
+    expect(wide.candidates).toHaveLength(32);
+    const tight = mergeReview(firstPass(), { missed: many, concerns: [] }, ctx, { limit: 10 });
+    expect(tight.candidates).toHaveLength(10);
+    expect(tight.changes).toContainEqual({ action: 'DROPPED', title: '빠진 일 8', reason: REVIEW_DROP.noRoom(10) });
+  });
+
   it.each([[null], ['text'], [[]], [{}], [{ missed: 'x', concerns: 3 }], [42]])('읽을 수 없는 답(%j)이면 1차 결과를 그대로 두고 review를 실패로 남긴다', (junk) => {
     const first = firstPass();
     const r = mergeReview(first, junk, ctx);
