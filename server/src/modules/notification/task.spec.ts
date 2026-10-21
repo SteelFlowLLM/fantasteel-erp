@@ -58,7 +58,8 @@ describe('POST /tasks (API-240)', () => {
     expect(status).toBe(201);
     expect(body.data).toMatchObject({ taskTitle: '원료 입고 일정 확인', taskDescription: null, assigneeId: purchaseId, assigneeName: '정다은', dueDate: '2026-10-20', taskStatus: 'OPEN' });
     const sent = await prisma.notification.findMany({ where: { recipientId: purchaseId, notificationType: 'TASK_ASSIGNED' } });
-    expect(sent.map((n) => [n.notificationContent, n.linkPath])).toEqual([['업무 지정 · 원료 입고 일정 확인', '/tasks']]);
+    // 알림을 누르면 그 업무를 가리킨다 (화면이 ?task=를 받는다)
+    expect(sent.map((n) => [n.notificationContent, n.linkPath])).toEqual([['업무 지정 · 원료 입고 일정 확인', `/tasks?task=${body.data.id}`]]);
     // 등록자는 로그인 사원 (ERD task.creator_id, 2026-10-08)
     expect((await prisma.task.findUniqueOrThrow({ where: { id: body.data.id } })).creatorId).toBe(headId);
   });
@@ -175,7 +176,7 @@ describe('PATCH /tasks/:id (API-274)', () => {
     expect(edited.status).toBe(200);
     expect(edited.body.data).toMatchObject({ taskTitle: '고친 업무', dueDate: '2026-10-25', linkPath: null, assigneeId: sales.id, creatorId: headId });
     const sent = await prisma.notification.findMany({ where: { recipientId: sales.id, notificationType: 'TASK_ASSIGNED', notificationContent: '업무 지정 · 고친 업무' } });
-    expect(sent).toHaveLength(1);
+    expect(sent.map((n) => n.linkPath)).toEqual([`/tasks?task=${created.id}`]);
   });
 
   it('담당자도 고칠 수 있고, 등록자·담당자가 아니면 COM-002, 완료된 업무는 COM-001', async () => {

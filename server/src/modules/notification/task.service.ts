@@ -11,6 +11,9 @@ const DEFAULT_PAGE_SIZE = 20;
 
 const dateOnly = (d: Date) => d.toISOString().slice(0, 10);
 
+/** 업무 지정 알림을 누르면 업무·알림 화면이 그 업무를 가리키도록 업무 id를 붙인다 (화면이 ?task=를 받는다) */
+const taskLinkPath = (taskId: number) => `/tasks?task=${taskId}`;
+
 function parseDueDate(value: string): Date {
   const date = new Date(`${value}T00:00:00.000Z`);
   if (Number.isNaN(date.getTime()) || dateOnly(date) !== value) throw new AppException('COM-004', `마감일 ${value}는 없는 날짜예요`);
@@ -117,7 +120,7 @@ export class TaskService {
       await this.notifications.notifyEmployees(tx, [input.assigneeId], {
         notificationType: NOTIFICATION_TYPE.TASK_ASSIGNED,
         notificationContent: `업무 지정 · ${input.taskTitle}`,
-        linkPath: '/tasks',
+        linkPath: taskLinkPath(task.id),
       });
     }
     return task.id;
@@ -144,7 +147,7 @@ export class TaskService {
       });
       if (count === 0) throw new AppException('COM-001', '완료된 업무는 고칠 수 없어요');
       if (dto.assigneeId !== undefined && dto.assigneeId !== task.assigneeId && dto.assigneeId !== user.employeeId) {
-        await this.notifications.notifyEmployees(tx, [dto.assigneeId], { notificationType: NOTIFICATION_TYPE.TASK_ASSIGNED, notificationContent: `업무 지정 · ${taskTitle ?? task.taskTitle}`, linkPath: '/tasks' });
+        await this.notifications.notifyEmployees(tx, [dto.assigneeId], { notificationType: NOTIFICATION_TYPE.TASK_ASSIGNED, notificationContent: `업무 지정 · ${taskTitle ?? task.taskTitle}`, linkPath: taskLinkPath(id) });
       }
     });
     this.notionWorkspace.kick();

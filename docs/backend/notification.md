@@ -40,11 +40,11 @@ Prisma 관계 이름: `Employee.tasksAsAssignee`, `Employee.tasksAsCreator`, `Em
 ## 4. 업무 규칙
 
 **업무**(REQ-NTF-001)
-- 등록: 제목·설명·담당자(`assigneeId`, 재직 중인 사원인지 조회, 없으면 COM-003)·마감일(date). 상태 OPEN, 등록자(`creator_id`)는 로그인 사원. 담당자가 등록한 사람이 아니면 같은 tx에서 담당자에게 `TASK_ASSIGNED` 알림(`link_path` `/tasks`).
+- 등록: 제목·설명·담당자(`assigneeId`, 재직 중인 사원인지 조회, 없으면 COM-003)·마감일(date). 상태 OPEN, 등록자(`creator_id`)는 로그인 사원. 담당자가 등록한 사람이 아니면 같은 tx에서 담당자에게 `TASK_ASSIGNED` 알림(`link_path` `/tasks?task=<업무 id>`, 이슈 #519: 알림을 누르면 화면이 그 업무를 가리킨다).
 - 메시지에서 등록(메신저 16번, 문서에 없는 추가 기능): `messageId`를 주면 `task.message_id`에 남긴다. 메시지 없음 COM-003, 등록하는 사람이 그 방 멤버가 아님 COM-002, 삭제·시스템 메시지 COM-004. 응답 `messageId`·`linkPath`(`/messenger?room=&message=`, 없으면 null).
 - 연결 화면(`linkPath`): `/`로 시작하는 화면 경로(공백 없음, `//` 금지, 300자)만 받는다(화면 `isScreenPath`와 같은 규칙). 응답 `linkPath`는 저장한 경로, 없고 메시지에서 등록했으면 메신저 경로.
 - 목록 범위(`scope`): mine = 내가 담당, created = 내가 등록, all = 담당하거나 등록. 없으면 mine. 응답에 등록자(`creatorId`·`creatorName`)를 준다.
-- 수정(API-274): 등록자·담당자만(아니면 COM-002), OPEN에서만(완료면 COM-001, 조건부 UPDATE). 보내지 않은 칸은 그대로, 설명·연결 화면은 null이면 비운다. 담당자는 재직 중인 사원만(COM-003). 담당자가 바뀌면 같은 tx에서 새 담당자에게 `TASK_ASSIGNED` 알림(고친 사람 본인이면 보내지 않음).
+- 수정(API-274): 등록자·담당자만(아니면 COM-002), OPEN에서만(완료면 COM-001, 조건부 UPDATE). 보내지 않은 칸은 그대로, 설명·연결 화면은 null이면 비운다. 담당자는 재직 중인 사원만(COM-003). 담당자가 바뀌면 같은 tx에서 새 담당자에게 `TASK_ASSIGNED` 알림(고친 사람 본인이면 보내지 않음, `link_path`는 등록 때와 같다).
 - 완료: 담당자 본인만, OPEN에서만 DONE([06] TASK_STATUS, [04] 10장). 다른 사람이면 COM-002, 이미 완료면 COM-001.
 - 작업(공정 작업)과 다르다: 공정 작업은 상태값이 없고 실적의 시작·완료 시각으로 판단한다([04] 10장 "작업").
 
