@@ -101,13 +101,15 @@ afterAll(async () => {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 let day = 10;
+// 같은 DB를 쓰는 다른 시험이 고로에 작업 중 제선을 남기면 같은 고로 동시 시작 막기(COM-001)에 걸리므로 이 파일만 쓰는 고로를 쓴다
+const RACE_BLAST_FURNACE = 'BF10';
 
 /** 코일 2개 수주 → 제선·제강·연주·검사 → 슬래브 2매 열연 배정까지. 수주·계획 id */
 async function rollablePlan() {
   day += 1;
   const order = await salesOrders.create(sales, { customerId, items: [{ itemId: coilItemId, orderedQty: 2, dueDate: '2026-12-31' }] });
   const planId = (await prisma.productionPlan.findUniqueOrThrow({ where: { productionPlanNo: order.items[0].productionPlanNo ?? '' } })).id;
-  await results.register(producer, { processType: 'IRONMAKING', productionPlanId: planId, blastFurnaceCode: 'BF7', startedAt: at(String(day), '00:00'), completedAt: at(String(day), '04:00'), hotMetalTon: '277.778' });
+  await results.register(producer, { processType: 'IRONMAKING', productionPlanId: planId, blastFurnaceCode: RACE_BLAST_FURNACE, startedAt: at(String(day), '00:00'), completedAt: at(String(day), '04:00'), hotMetalTon: '277.778' });
   const steel = await results.register(producer, { processType: 'STEELMAKING', productionPlanId: planId, converterCode: 'BOF7', startedAt: at(String(day), '05:00'), completedAt: at(String(day), '06:00'), inputHotMetalTon: '277.778' });
   const heatId = steel.outputs[0].lotId;
   const cast = await results.register(producer, { processType: 'CONTINUOUS_CASTING', productionPlanId: planId, heatLotId: heatId, startedAt: at(String(day), '07:00'), completedAt: at(String(day), '09:00'), slabQty: 4 });
@@ -188,7 +190,7 @@ describe('수주 취소 ↔ 열연 완료 (#478)', () => {
   it('동시에 일어나도 한쪽이 끝난 뒤 다른 쪽이 최신 상태를 보고, 열연 배정 매수를 두 번 빼거나 진행 계획을 취소로 덮지 않는다', async () => {
     const order = await salesOrders.create(sales, { customerId, items: [{ itemId: coilItemId, orderedQty: 2, dueDate: '2026-12-31' }] });
     const planId = (await prisma.productionPlan.findUniqueOrThrow({ where: { productionPlanNo: order.items[0].productionPlanNo ?? '' } })).id;
-    await results.register(producer, { processType: 'IRONMAKING', productionPlanId: planId, blastFurnaceCode: 'BF7', startedAt: at('02', '00:00'), completedAt: at('02', '04:00'), hotMetalTon: '277.778' });
+    await results.register(producer, { processType: 'IRONMAKING', productionPlanId: planId, blastFurnaceCode: RACE_BLAST_FURNACE, startedAt: at('02', '00:00'), completedAt: at('02', '04:00'), hotMetalTon: '277.778' });
     const steel = await results.register(producer, { processType: 'STEELMAKING', productionPlanId: planId, converterCode: 'BOF7', startedAt: at('02', '05:00'), completedAt: at('02', '06:00'), inputHotMetalTon: '277.778' });
     const heatId = steel.outputs[0].lotId;
     const cast = await results.register(producer, { processType: 'CONTINUOUS_CASTING', productionPlanId: planId, heatLotId: heatId, startedAt: at('02', '07:00'), completedAt: at('02', '09:00'), slabQty: 4 });
