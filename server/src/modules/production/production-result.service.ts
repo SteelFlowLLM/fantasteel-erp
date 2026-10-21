@@ -238,6 +238,8 @@ export class ProductionResultService {
     if (ironmaking && !input.blastFurnaceCode) throw new AppException('COM-004', '제선 실적은 고로 코드가 필요해요');
     if (processType === PROCESS_TYPE.STEELMAKING && !input.converterCode) throw new AppException('COM-004', '제강 실적은 전로 코드가 필요해요');
     const ctx = input.productionPlanId === undefined ? null : await this.lockOpenPlan(tx, input.productionPlanId, processType);
+    // 계획 잠금 다음(잠금 순서: 계획 → 고로). 같은 고로의 동시 시작이 둘 다 '작업 중 없음'을 보고 두 건을 만들지 않게 한다
+    if (ironmaking) await this.repository.lockBlastFurnace(tx, input.blastFurnaceCode ?? '');
 
     const open = ironmaking
       ? await this.repository.findOpenResults(tx, { productionPlanId: null, processType, blastFurnaceCode: input.blastFurnaceCode })
@@ -293,6 +295,8 @@ export class ProductionResultService {
     const startEvent = await this.repository.findResultEvents(tx, [resultId]);
     const planId = result.productionPlanId ?? this.planIdOfStart(startEvent);
     const ctx = planId === null ? null : await this.lockOpenPlan(tx, planId, processType);
+    // 계획 잠금을 기다리는 사이 같은 실적의 다른 완료 요청(더블클릭·재시도)이 끝났을 수 있다. 투입을 또 차감하기 전에 다시 본다
+    if (ctx && (await this.repository.findResult(tx, resultId))?.completedAt) throw new AppException('COM-001', '이미 완료한 작업 실적이에요');
     const window = { startedAt: result.startedAt, completedAt: input.completedAt };
 
     let done: { inputLotIds: number[]; outputLotIds: number[]; after: Record<string, unknown> };
@@ -315,7 +319,10 @@ export class ProductionResultService {
         done = await this.completeHotRolling(tx, this.required(ctx), resultId, window, input);
     }
 
-    await this.repository.completeResult(tx, resultId, { completedAt: input.completedAt, simulatedLossRate: input.simulatedLossRate ?? null });
+    // 계획 잠금이 없는 제선은 위 확인만으로는 동시 완료를 못 막는다. 먼저 완료한 쪽이 있으면 차감·LOT을 모두 되돌린다
+    if ((await this.repository.completeResult(tx, resultId, { completedAt: input.completedAt, simulatedLossRate: input.simulatedLossRate ?? null })) === 0) {
+      throw new AppException('COM-001', '이미 완료한 작업 실적이에요');
+    }
     await this.businessEventRecorder.record(tx, {
       type: BUSINESS_EVENT_TYPE.PRODUCTION_RESULT_REGISTERED,
       actor,

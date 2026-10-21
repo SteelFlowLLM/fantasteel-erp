@@ -1,6 +1,6 @@
 import { isIP } from 'node:net';
 import { createBrotliDecompress, createGunzip, createInflate } from 'node:zlib';
-import type { Readable } from 'node:stream';
+import { pipeline, type Readable } from 'node:stream';
 import { Agent, buildConnector, request } from 'undici';
 import { assertFetchableUrl, BLOCKED_LOOKUP_CODE, BlockedUrlError, DEFAULT_FETCH_POLICY, guardedLookup, type FetchPolicy, type LookupFunction } from './ssrf-guard';
 
@@ -167,7 +167,8 @@ async function readCapped(body: Readable, encoding: string | undefined, maxBytes
   body.on('error', () => undefined);
   const decoder = decompressorFor(encoding);
   decoder?.on('error', () => undefined);
-  const source: Readable = decoder ? body.pipe(decoder) : body;
+  // pipe()는 본문 오류를 압축 풀기로 넘기지 않아, 받는 중에 끊기거나 시간이 지나면 for await가 끝나지 않고 읽기 자리(Semaphore)를 영원히 잡는다
+  const source: Readable = decoder ? pipeline(body, decoder, () => undefined) : body;
   const chunks: Buffer[] = [];
   let size = 0;
   let truncated = false;

@@ -160,8 +160,11 @@ describe('ReconciliationService (REQ-INV-010, BP-INV-02 P2)', () => {
     expect(await reservedOf(stuckItemId)).toBe(0);
     expect(await prisma.reservation.count({ where: { itemId: stuckItemId, reservationStatus: RESERVATION_STATUS.ACTIVE } })).toBe(1);
 
-    const notice = await prisma.notification.findFirstOrThrow({ where: { recipientId: admin.employeeId, notificationType: NOTIFICATION_TYPE.TASK_ASSIGNED }, orderBy: { id: 'desc' } });
-    expect(notice.notificationContent).toContain(`SL-TREC${tag}-FIX 5→3매`);
+    // 같은 DB(fs_sales)의 다른 테스트가 만든 불일치 규격도 함께 보정되어, 이 규격이 문구의 앞 3개 밖("외 N개")일 수 있다.
+    // 문구 형식은 위 alertContent 단위 테스트가 보고, 여기서는 보정 결과 그대로 알렸는지 본다
+    const content = alertContent(result.rows);
+    expect(content).toContain('예약 매수');
+    const notice = await prisma.notification.findFirstOrThrow({ where: { recipientId: admin.employeeId, notificationType: NOTIFICATION_TYPE.TASK_ASSIGNED, notificationContent: content ?? '' }, orderBy: { id: 'desc' } });
     expect(notice.linkPath).toBe('/inventories');
   });
 

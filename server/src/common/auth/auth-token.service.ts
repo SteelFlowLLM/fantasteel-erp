@@ -11,12 +11,19 @@ export const ACCESS_TOKEN_COOKIE = 'access_token';
  */
 export const ACCESS_TOKEN_COOKIE_OPTIONS: CookieOptions = { httpOnly: true, secure: process.env.COOKIE_SECURE !== 'false', sameSite: 'lax', path: '/' };
 
-/** 요청 헤더의 Cookie 문자열에서 값 하나를 꺼낸다 */
+/** 요청 헤더의 Cookie 문자열에서 값 하나를 꺼낸다. 인코딩이 깨진 값(`%` 등)은 없는 것으로 본다 */
 export function readCookie(cookieHeader: string | undefined, name: string): string | undefined {
   if (!cookieHeader) return undefined;
   for (const part of cookieHeader.split(';')) {
     const index = part.indexOf('=');
-    if (index > 0 && part.slice(0, index).trim() === name) return decodeURIComponent(part.slice(index + 1).trim());
+    if (index > 0 && part.slice(0, index).trim() === name) {
+      // 누구나 보낼 수 있는 헤더라 decodeURIComponent의 URIError가 401 대신 500(HTTP)·프로세스 종료(소켓 연결)가 되지 않게 한다
+      try {
+        return decodeURIComponent(part.slice(index + 1).trim());
+      } catch {
+        return undefined;
+      }
+    }
   }
   return undefined;
 }
