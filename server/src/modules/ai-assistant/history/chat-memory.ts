@@ -96,13 +96,13 @@ function toolDefinition(kind: HistorySearchSource['kind']): LlmToolDefinition {
     ? {
         name: CHAT_HISTORY_SEARCH_TOOL,
         description:
-          '사용자와 철강맨AI가 전에 나눈 대화(저장한 대화 전부)에서 낱말로 찾는다. 위 대화에 없는 지난 이야기("지난번에 물어본 …", "전에 말한 …")를 물을 때만 쓴다. ERP 데이터는 이 도구가 아니라 조회 도구로 확인한다.',
+          '사용자와 철강맨AI가 전에 나눈 대화(저장한 대화 전부)에서 낱말로 찾는다. 위 대화에 없는 지난 이야기("아까 물어본 …", "지난번에 물어본 …", "전에 말한 …")를 물을 때만 쓰고, 그런 질문이면 업무 데이터 질문이어도 다른 도구보다 먼저 쓴다. 지금의 ERP 값은 찾은 뒤 조회 도구로 확인한다.',
         parameters: { type: 'object', properties: { query: { type: 'string', description: '찾을 핵심 낱말 1~3개 (예: "SS275 납기")' } }, required: ['query'] },
       }
     : {
         name: ROOM_MESSAGE_SEARCH_TOOL,
         description:
-          '이 사내 채팅방의 지난 메시지에서 낱말로 찾는다. 위 대화에 없는 지난 이야기("아까 말한 …", "지난주에 정한 …")를 물을 때만 쓴다. ERP 데이터는 이 도구가 아니라 조회 도구로 확인한다.',
+          '이 사내 채팅방의 지난 메시지에서 낱말로 찾는다. 위 대화에 없는 지난 이야기("아까 말한 …", "지난주에 정한 …")를 물을 때만 쓰고, 그런 질문이면 업무 데이터 질문이어도 다른 도구보다 먼저 쓴다. 지금의 ERP 값은 찾은 뒤 조회 도구로 확인한다.',
         parameters: { type: 'object', properties: { query: { type: 'string', description: '찾을 핵심 낱말 1~3개 (예: "출하 일정")' } }, required: ['query'] },
       };
 }

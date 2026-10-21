@@ -177,6 +177,8 @@ describe('프롬프트 (REQ-AST-007·009)', () => {
     expect(system('chat')).toContain('[지난 대화 규칙]');
     expect(system('chat')).toContain('search_chat_history');
     expect(system('chat')).not.toContain('search_room_messages');
+    // "아까"만 쓴 질문도 조회 도구보다 먼저 찾게 한다 (#519)
+    expect(system('chat')).toMatch(/"아까 물어본 …".*다른 도구보다 먼저 search_chat_history/);
     expect(system('room')).toContain('[지난 대화 규칙]');
     expect(system('room')).toContain('search_room_messages');
     expect(system('room')).not.toContain('search_chat_history');
