@@ -43,6 +43,20 @@ API 1개 = 행 1개입니다. 행을 열면 상세 명세(요청 → 응답 → 
 - 실시간 답(`POST /ai-assistant/messages/stream`)은 응답을 시작한 뒤 실패하면 `{ "type": "error", "message", "code" }` 이벤트로 끝낸다. `code`는 위 표의 AST-002~005일 때만 있다.
 - 심층 조사의 계획 말로 고치기(API `POST /ai-research/runs/:id/plan/suggest`)도 같은 코드를 쓴다. 답은 왔는데 계획으로 읽지 못하면 `RES-008`이다. 심층 조사·회의록 분석처럼 백그라운드로 도는 일의 실패 이유는 코드가 아니라 저장된 문구다.
 
+## 구매 반대 거래: 발주 취소·잔량 마감·입고 취소 (API-284~286)
+
+확정한 발주·입고는 고치거나 지우지 않고 아래 세 API로 되돌린다(업무 프로세스 정의서 BP-PUR-02, 2026-10-22 이슈 #500, 문서에 없는 기능). 셋 다 본문 `{ "reason": "..." }`(필수, 500자)이고 사유는 작업 로그에 남는다.
+
+| API | 경로 | 권한 | 언제 되나 | 결과 | 거부 |
+| --- | --- | --- | --- | --- | --- |
+| API-284 발주 취소 | `POST /purchase-orders/:id/cancel` | PURCHASE_ORDER_CONFIRM (USE) | 입고 누계 0 (CONFIRMED) | 발주 CANCELLED, 연결 구매요청 ORDER_CANCELLED. 발주 상세를 돌려준다 | 입고가 있으면 PUR-004, 이미 취소·마감이면 COM-001 |
+| API-285 발주 잔량 마감 | `POST /purchase-orders/:id/close` | PURCHASE_ORDER_CONFIRM (USE) | 일부 입고 (PARTIALLY_RECEIVED) | 발주 CLOSED, 남은 양은 MRP 입고예정에서 빠진다. 발주 상세를 돌려준다 | 입고가 없거나 전량 입고면 PUR-005 |
+| API-286 입고 취소 | `POST /goods-receipts/:id/cancel` | GOODS_RECEIPT_CONFIRM (USE) | 그 입고의 원료 LOT을 쓰지 않음 (투입·배정 없음, 잔량 = 처음 양) | 음수 입고 1행(`reversedGoodsReceiptId` = 원래 입고)과 원료 LOT RECEIPT_CANCELLED·잔량 0, 발주 상태는 입고 누계로 되돌림. 취소 행을 돌려준다 | LOT을 썼으면 PUR-006, 취소·마감된 발주면 PUR-007, 이미 취소면 COM-001 |
+
+- 상태는 조건부 UPDATE로 바꾼다. 입고 확정과 겹치면 한쪽만 반영되고, 진 쪽은 COM-001(취소·마감) 또는 PUR-007(입고 확정)이다.
+- 취소·마감된 발주에는 입고하지 않는다(입고 확정 PUR-007).
+- 응답: 발주(`PurchaseOrderView`)에 `totalClosedTon`·품목 `closedTon`(닫은 양, 취소·마감한 발주는 미입고량 0)과 `statusChange`(사유·사원·시각), 입고(`GoodsReceiptView`)에 `reversedGoodsReceiptId`·`reversedGoodsReceiptNo`(취소 행)·`reversalGoodsReceiptNo`(취소된 원래 입고)·`cancelReason`.
+
 ## 메신저 실시간 이벤트 (WebSocket)
 
 REQ-MSG-002. socket.io namespace `/messenger`. 연결할 때 로그인 쿠키(`access_token`)로 사원을 확인하고, 실패하면 서버가 연결을 끊는다. 보내기·읽음 등 저장은 HTTP API로 하고, 서버는 저장(커밋)이 끝난 뒤 아래 이벤트를 보낸다. 소켓은 사원 채널(`employee:{id}`)에 들어간다. 자세한 규칙은 `docs/backend/messenger.md` (2026-10-07~08 추가, 문서에 없는 기능 포함)

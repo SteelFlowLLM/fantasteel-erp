@@ -55,11 +55,14 @@ POST,구매요청 등록,/api/v1/purchase-requisitions,구매,P1,초안,12.2절 
 POST,구매요청 승인,/api/v1/purchase-requisitions/:id/approve,구매,P1,초안,12.2절 API. 승인 전에는 발주 불가. 부서장 자기 요청·부재 시 승인 경로는 TBD(자동 승인 금지). 작업 로그 PURCHASE_REQUISITION_APPROVED
 POST,구매요청 반려,/api/v1/purchase-requisitions/:id/reject,구매,P1,초안,12.2절 API. 요청자는 수정 후 재요청(resubmit) 가능. 작업 로그 PURCHASE_REQUISITION_REJECTED
 POST,구매요청 수정·재요청,/api/v1/purchase-requisitions/:id/resubmit,구매,P1,초안,12.2절 API. 반려(REJECTED) 상태에서만 가능. 재요청은 작업 로그 이벤트 종류(BUSINESS_EVENT_TYPE)에 없어 추가 여부 확정 필요
-GET,발주 목록 조회,/api/v1/purchase-orders,구매,P1,초안,12.2절에 없는 제안 API. 상태: CONFIRMED 발주 확정 / PARTIALLY_RECEIVED 부분 입고 / RECEIVED 입고 완료 (공통 코드 정의서)
+GET,발주 목록 조회,/api/v1/purchase-orders,구매,P1,초안,12.2절에 없는 제안 API. 상태: CONFIRMED 발주 확정 / PARTIALLY_RECEIVED 부분 입고 / RECEIVED 입고 완료 / CANCELLED 발주 취소 / CLOSED 잔량 마감 (공통 코드 정의서). 취소·마감한 발주는 미입고량 0, 남은 양은 닫은 양(closedTon)
 GET,발주 상세 조회,/api/v1/purchase-orders/:id,구매,P1,초안,12.2절에 없는 제안 API. 요청-발주 배분량을 보존해 표시
 POST,발주 등록,/api/v1/purchase-orders,구매,P1,초안,"12.2절 API. 승인 전 발주(PUR-002), 승인량 초과, 잘못된 공급업체, 중복 발주를 차단. 기본 공급업체·납기 확인. 구매요청 품목이 모두 발주되면 구매요청 ORDERED. 공급업체 메일 발송은 범위 밖. 발주 묶음 주기는 TBD. 작업 로그 PURCHASE_ORDER_CREATED"
 GET,입고 목록 조회,/api/v1/goods-receipts,구매,P1,초안,12.2절에 없는 제안 API. 입고는 상태값 없음(입고 확정 시 생성)
-POST,입고 확정,/api/v1/goods-receipts,구매,P1,초안,"12.2절 API. 야드는 품목 기본 야드 자동 지정. 원료 LOT 번호 RM-원료코드-YYMMDD-NNN. 입고량 0 이하·미입고량 초과(PUR-003)·반복 확정 차단. 확정 후 수정 차단(반대 거래 방식 필요, 취소 범위 TBD). 원료 LOT과 발주 입고 누계는 같은 트랜잭션. 작업 로그 GOODS_RECEIPT_CONFIRMED"
+POST,입고 확정,/api/v1/goods-receipts,구매,P1,초안,"12.2절 API. 야드는 품목 기본 야드 자동 지정. 원료 LOT 번호 RM-원료코드-YYMMDD-NNN. 입고량 0 이하·미입고량 초과(PUR-003)·반복 확정 차단. 확정 후 수정 차단, 취소는 입고 취소(API-286, 반대 거래)로 한다. 취소·마감된 발주면 PUR-007. 원료 LOT과 발주 입고 누계는 같은 트랜잭션. 작업 로그 GOODS_RECEIPT_CONFIRMED"
+POST,발주 취소,/api/v1/purchase-orders/:id/cancel,구매,P1,초안,"문서 밖 기능(2026-10-22, 이슈 #500, BP-PUR-02 반대 거래). 입고 누계가 0인 발주(CONFIRMED)만. 사유 필수(500자, 작업 로그 사유). 발주 CANCELLED, 연결 구매요청 ORDER_CANCELLED(같은 계획·원료로 새 요청 가능, 같은 요청은 다시 발주하지 않음). 입고가 있으면 PUR-004, 이미 취소·마감이면 COM-001. 조건부 UPDATE라 입고 확정과 겹쳐도 한쪽만 반영. 작업 로그 PURCHASE_ORDER_CANCELLED"
+POST,발주 잔량 마감,/api/v1/purchase-orders/:id/close,구매,P1,초안,"문서 밖 기능(2026-10-22, 이슈 #500, BP-PUR-02 반대 거래). 일부 입고된 발주(PARTIALLY_RECEIVED)만. 사유 필수(500자). 발주 CLOSED, 남은 양은 MRP 입고예정에서 빠지고 더는 입고하지 않음(PUR-007). 연결 구매요청은 ORDERED 그대로지만 같은 계획·원료의 새 요청을 막지 않음. 입고가 없거나 전량 입고면 PUR-005. 작업 로그 PURCHASE_ORDER_CLOSED"
+POST,입고 취소,/api/v1/goods-receipts/:id/cancel,구매,P1,초안,"문서 밖 기능(2026-10-22, 이슈 #500, BP-PUR-02 반대 거래). 그 입고로 만든 원료 LOT을 쓰지 않았을 때만(투입·배정 없음, 잔량 = 처음 양, 아니면 PUR-006). 사유 필수(500자). 원래 입고는 두고 같은 발주 품목에 음수 입고 1행(reversed_goods_receipt_id = 원래 입고)을 남기고 원료 LOT은 잔량 0·RECEIPT_CANCELLED. 발주 상태는 입고 누계로 되돌림. 취소·마감된 발주면 PUR-007, 이미 취소했으면 COM-001, 취소 행은 COM-004. 작업 로그 GOODS_RECEIPT_CANCELLED"
 POST,로그인,/api/v1/auth/login,인증·조직,P1,초안,"12.2 명시. 비활성 계정·인증 실패 차단 (BP-AUTH-01), bcrypt (컨벤션 6장)"
 POST,로그아웃,/api/v1/auth/logout,인증·조직,P1,초안,도출: 컨벤션 5장 규칙. BP-AUTH-01 '로그아웃 시 세션 종료'
 GET,내 정보·권한 조회,/api/v1/auth/me,인증·조직,P1,초안,도출: BP-AUTH-01 '역할·대상 범위 조회'
