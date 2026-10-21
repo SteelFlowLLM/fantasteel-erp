@@ -209,3 +209,9 @@ RETURNING id;
 | 보정 주기 | 24시간(Factory Agent와 같음). [04] 16장 "스케줄 주기는 설정값" | [02] REQ-INV-010 "주기적으로" |
 | API 경로 | API 목록에 없어 `inventories/reconciliation`(GET 점검·POST 보정)으로 둔다 | [CSV] |
 | `on_hand`·`rolling` 불일치 | REQ-INV-010은 예약 매수만 정해서 보지 않는다. 다른 불변식은 `npm run check-invariants -w @fantasteel/server`가 본다 | [02], [ERD] Project Note |
+
+## 10. 잠금 순서와 열연 배정 매수 (2026-10-21, #478)
+
+- 거래 전체의 잠금 순서: 수주 품목 → 생산계획 → 재고 행(item_id 오름차순) → 작업 로그 채번(EV- 앞부분). 작업 로그 채번 잠금은 트랜잭션 끝까지 잡히므로, 한 거래가 바꿀 재고 행은 첫 작업 로그 전에 `lockInventoriesFirst`로 모두 잠근다. 수주 등록·수주 취소·출고 확정·열연 실적(시작·완료를 한 번에 등록할 때)·품질 검사 등록·수정이 이렇게 한다. 전에는 수주 등록(작업 로그 → 재고)과 출고·취소(재고 → 작업 로그)가 서로 기다려 교착(40P01 → COM-999)이 날 수 있었다.
+- `rolling_allocated_qty`는 조건부로 줄인다(0 아래로 내려가면 줄이지 않고 서버 오류로 거래 전체를 되돌린다). ERD에 음수 CHECK가 없어서다. 스키마는 바꾸지 않았다.
+- 배정 확정 초안(Message → ERP)을 위한 `recommendedShipmentLotIds`(다른 초안의 LOT 제외)·`assertShipmentAllocatable`(잠그지 않는 확인)은 message-action.md 11.7.

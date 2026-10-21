@@ -513,7 +513,12 @@ export class PurchasingService {
   }
 
   /** MRP를 다시 계산해도 같은 계획의 구매요청을 중복 생성하지 않는다 (API-143 비고) */
+  /**
+   * 같은 계획·원료로 진행 중인 구매요청이 없어야 한다. 확인 전에 계획 행을 잠가, MRP '요청' 더블클릭·두 사람 동시 요청이
+   * 둘 다 '없음'을 보고 두 건을 만들지 않게 한다 (#478). 잠금 순서는 계획 → 작업 로그(채번)
+   */
   private async assertNoOpenRequisitionForPlan(tx: Tx, productionPlanId: number, itemId: number): Promise<void> {
+    await this.repository.lockProductionPlan(tx, productionPlanId);
     const open = await this.repository.findOpenRequisitionForPlan(tx, productionPlanId, itemId);
     if (open) throw new AppException('COM-004', `같은 생산계획·원료로 진행 중인 구매요청 ${open.purchaseRequisitionNo}이 있어요`);
   }

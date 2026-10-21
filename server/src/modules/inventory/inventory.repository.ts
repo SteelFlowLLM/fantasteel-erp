@@ -150,8 +150,10 @@ export class InventoryRepository {
   }
 
   /** 열연 배정 해제: rolling만 줄인다 (가용이 늘어나는 방향이라 조건이 필요 없다) */
-  decrementRollingAllocatedQty(tx: Tx, itemId: number, qty: number) {
-    return tx.inventory.update({ where: { itemId }, data: { rollingAllocatedQty: { decrement: qty } } });
+  /** 열연 배정 매수를 줄인다. 0 아래로 내려가지 않게 조건부로 바꾸고, 바꿨으면 true (ERD에 음수 CHECK가 없다) */
+  async decrementRollingAllocatedQty(tx: Tx, itemId: number, qty: number): Promise<boolean> {
+    const { count } = await tx.inventory.updateMany({ where: { itemId, rollingAllocatedQty: { gte: qty } }, data: { rollingAllocatedQty: { decrement: qty } } });
+    return count === 1;
   }
 
   /** 제품 규격(슬래브·코일)과 재고 행 (재고 행이 없으면 0매) */

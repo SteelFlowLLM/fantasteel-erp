@@ -334,7 +334,7 @@ export class InventoryService {
         if (allocation.allocationPurpose === ALLOCATION_PURPOSE.HOT_ROLLING) rollingReleased += 1;
         if (allocation.shipmentRequestItem) refreshRequestIds.add(allocation.shipmentRequestItem.shipmentRequestId);
       }
-      if (rollingReleased > 0) await this.repository.decrementRollingAllocatedQty(tx, itemId, rollingReleased);
+      if (rollingReleased > 0) await this.decrementRolling(tx, itemId, rollingReleased);
 
       // 2. 가용을 넘는 예약을 먼저 줄이고 on_hand를 맞춘다 (CHECK: on_hand − reserved − rolling ≥ 0)
       const onHandQty = await this.repository.countEligibleAvailableLots(tx, itemId);
@@ -424,7 +424,9 @@ export class InventoryService {
     return this.prisma.$transaction(async (tx) => {
       const requestItem = await this.openShipmentRequestItem(tx, dto.shipmentRequestItemId);
       const unallocatedQty = requestItem.requestQty - (await this.repository.countConfirmedShipmentAllocations(tx, requestItem.id));
-      const [lots, yardNames] = await Promise.all([this.repository.findAllocatableLots(tx, requestItem.salesOrderItem.itemId), this.yardNames(tx)]);
+      // 트랜잭션 안에서도 불리므로 한 연결에 쿼리를 겹쳐 보내지 않고 차례로 읽는다 (pg 다음 버전에서 오류, #478)
+      const lots = await this.repository.findAllocatableLots(tx, requestItem.salesOrderItem.itemId);
+      const yardNames = await this.yardNames(tx);
       if (unallocatedQty > 0 && lots.length === 0) throw new AppException('INV-001', '배정할 수 있는 합격 LOT이 없어요');
       const candidates: AllocationCandidate[] = lots.map((lot, index) => ({
         lotId: lot.id,
@@ -457,7 +459,8 @@ export class InventoryService {
   async listShipmentCandidates(user: AuthUser, shipmentRequestId: number): Promise<ShipmentAllocationCandidates[]> {
     this.assertPurposePermission(user, ALLOCATION_PURPOSE.SHIPMENT, 'VIEW');
     const tx = this.prisma;
-    const [items, yardNames] = await Promise.all([this.repository.findShipmentRequestItemsOfRequest(tx, shipmentRequestId), this.yardNames(tx)]);
+    const items = await this.repository.findShipmentRequestItemsOfRequest(tx, shipmentRequestId);
+    const yardNames = await this.yardNames(tx);
     const lotsByItem = new Map<number, Awaited<ReturnType<InventoryRepository['findAllocatableLots']>>>();
     const taken = new Set<number>();
     const result: ShipmentAllocationCandidates[] = [];
@@ -665,7 +668,7 @@ export class InventoryService {
     for (const [itemId, rows] of [...byItem.entries()].sort(([a], [b]) => a - b)) {
       await this.repository.lockInventory(tx, itemId);
       for (const allocation of rows) await this.releaseRow(tx, allocation, input.actor, input.reason, input.salesOrderId);
-      await this.repository.decrementRollingAllocatedQty(tx, itemId, rows.length);
+      await this.decrementRolling(tx, itemId, rows.length);
     }
     return confirmed.map((a) => a.lotId);
   }
@@ -713,7 +716,7 @@ export class InventoryService {
     if (input.newLotId === allocation.lotId) throw new AppException('COM-004', '지금 배정된 LOT과 같은 LOT이에요');
 
     const released = await this.repository.updateAllocationStatus(tx, allocation.id, ALLOCATION_STATUS.RELEASED);
-    await this.repository.decrementRollingAllocatedQty(tx, input.slabItemId, 1);
+    await this.decrementRolling(tx, input.slabItemId, 1);
     if (input.newLotId === undefined) {
       await this.businessEventRecorder.record(tx, {
         type: BUSINESS_EVENT_TYPE.ALLOCATION_RELEASED,
@@ -754,7 +757,7 @@ export class InventoryService {
     if (!(await this.repository.consumeConfirmedAllocations(tx, input.allocationIds))) {
       throw new Error(`소진할 열연 배정 일부가 CONFIRMED가 아닙니다 (배정 ${input.allocationIds.join(',')})`);
     }
-    await this.repository.decrementRollingAllocatedQty(tx, input.slabItemId, input.allocationIds.length);
+    await this.decrementRolling(tx, input.slabItemId, input.allocationIds.length);
     await this.repository.setOnHandQty(tx, input.slabItemId, await this.repository.countEligibleAvailableLots(tx, input.slabItemId));
   }
 
@@ -764,7 +767,44 @@ export class InventoryService {
     return rows.map(toAllocationView);
   }
 
+  /**
+   * 이 트랜잭션에서 바꿀 규격 재고 행을 규격 id 오름차순으로 미리 잠근다 (교착 방지, 13.2 "고정 순서").
+   * 작업 로그 채번(EV- 앞부분 잠금)은 트랜잭션이 끝날 때까지 잡히므로, 재고 행은 첫 작업 로그보다 먼저 모두 잠가야
+   * "작업 로그 → 재고" 순서 거래와 "재고 → 작업 로그" 순서 거래가 서로 기다리지 않는다 (#478). 같은 행을 뒤에 또 잠가도 된다
+   */
+  async lockInventoriesFirst(tx: Tx, itemIds: readonly number[]): Promise<void> {
+    for (const itemId of [...new Set(itemIds)].sort((a, b) => a - b)) {
+      await this.repository.ensureInventory(tx, itemId);
+      await this.repository.lockInventory(tx, itemId);
+    }
+  }
+
+  /** 검사 판정이 바뀔 LOT들이 건드릴 재고 행을 먼저 잠근다 (품질 검사가 작업 로그를 남기기 전에 부른다) */
+  async lockInventoriesOfLots(tx: Tx, lotIds: readonly number[]): Promise<void> {
+    const productLotIds = await this.repository.findAffectedProductLotIds(tx, [...lotIds]);
+    if (productLotIds.length === 0) return;
+    const lots = await this.repository.findProductLots(tx, productLotIds);
+    await this.lockInventoriesFirst(tx, lots.flatMap((l) => (l.itemId === null ? [] : [l.itemId])));
+  }
+
+  /** 이 계획들의 확정 열연 배정 슬래브 규격 (수주 취소가 재고 행을 미리 잠글 때) */
+  async hotRollingItemIdsOfPlans(tx: Tx, productionPlanIds: readonly number[]): Promise<number[]> {
+    const itemIds: number[] = [];
+    for (const productionPlanId of productionPlanIds) {
+      const rows = await this.repository.findAllocations(tx, { allocationPurpose: ALLOCATION_PURPOSE.HOT_ROLLING, productionPlanId, allocationStatus: [ALLOCATION_STATUS.CONFIRMED] });
+      itemIds.push(...rows.flatMap((a) => (a.lot.itemId === null ? [] : [a.lot.itemId])));
+    }
+    return [...new Set(itemIds)];
+  }
+
   // ── 내부 ──────────────────────────────────────────────
+
+  /** rolling_allocated_qty가 확정 열연 배정 합계보다 작으면 같은 배정을 두 번 뺀 것이다. 서버 오류로 남기고 거래 전체를 되돌린다 */
+  private async decrementRolling(tx: Tx, itemId: number, qty: number): Promise<void> {
+    if (!(await this.repository.decrementRollingAllocatedQty(tx, itemId, qty))) {
+      throw new Error(`inventory.rolling_allocated_qty가 해제할 열연 배정 ${qty}매보다 작습니다 (item ${itemId})`);
+    }
+  }
 
   private async releaseRow(tx: Tx, allocation: AllocationRow, actor: Actor, reason: string, salesOrderId = salesOrderIdOf(allocation)) {
     const released = await this.repository.updateAllocationStatus(tx, allocation.id, ALLOCATION_STATUS.RELEASED);

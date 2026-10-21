@@ -214,6 +214,8 @@ export class QualityService {
       );
 
       const codeOf = new Map(applicableItems.map((item) => [item.id, item.inspectionItemCode]));
+      // 판정 뒤 재고를 바꾸므로 재고 행을 작업 로그보다 먼저 잠근다 (재고 → 작업 로그 순서, 교착 방지 #478)
+      await this.inventory.lockInventoriesOfLots(tx, [lot.id]);
       await this.businessEventRecorder.record(tx, {
         type: BUSINESS_EVENT_TYPE.INSPECTION_REGISTERED,
         actor: user,
@@ -296,6 +298,8 @@ export class QualityService {
       await this.repository.deleteQualityInspectionValues(tx, inspection.id, clearedItemIds);
 
       const codeOf = new Map(applicableItems.map((item) => [item.id, item.inspectionItemCode]));
+      // 판정이 바뀌면 재고를 바꾸므로 재고 행을 작업 로그보다 먼저 잠근다 (#478)
+      await this.inventory.lockInventoriesOfLots(tx, [lot.id]);
       await this.businessEventRecorder.record(tx, {
         // 수정 전용 이벤트가 없어 등록 이벤트에 변경 전·후를 남긴다 (REQ-QC-003, 2026-10-04 결정)
         type: BUSINESS_EVENT_TYPE.INSPECTION_REGISTERED,

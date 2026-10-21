@@ -9,11 +9,12 @@ import { QualityService } from './quality.service';
 
 const recorder = new BusinessEventRecorder(new NumberingService(new NumberingRepository()));
 // 이 파일은 검사 판정만 본다. 판정 뒤 재고 반영(inventory.onLotsEligibilityChanged)은 sales-order/sales-flow.spec.ts에서 확인한다
-const inventory = { onLotsEligibilityChanged: async () => [] } as unknown as InventoryService;
+const inventory = { lockInventoriesOfLots: async () => {}, onLotsEligibilityChanged: async () => [] } as unknown as InventoryService;
 /** 재고 반영 결과를 정해 두고 불린 횟수를 세는 inventory 대역 (응답 stockSync 확인용) */
 function syncingInventory(results: EligibilitySyncResult[]) {
   const calls: number[][] = [];
   const stub = {
+    lockInventoriesOfLots: async () => {},
     onLotsEligibilityChanged: async (_tx: unknown, lotIds: readonly number[]) => {
       calls.push([...lotIds]);
       return results;
