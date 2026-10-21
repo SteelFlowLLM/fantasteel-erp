@@ -61,6 +61,12 @@ function route(req: IncomingMessage, res: ServerResponse) {
     return pump();
   }
   if (path === '/slow') return; // 응답하지 않는다
+  if (path === '/gzip-stall') {
+    // 압축 본문 앞부분만 보내고 멈춘다
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-encoding': 'gzip' });
+    res.write(gzipSync(ARTICLE).subarray(0, 64));
+    return;
+  }
   return send(404, 'text/plain', '');
 }
 
@@ -169,6 +175,10 @@ describe('시험 전용 규칙으로 읽기', () => {
 
   it('시간 안에 답이 없으면 끊는다', async () => {
     expect(await failureOf(fetcher({ timeoutMs: 200 }).fetch(`${base}/slow`))).toMatch(/초 안에 페이지를 읽지 못했어요/);
+  });
+
+  it('압축 본문을 받다가 멈춰도 시간이 지나면 끊는다 (영원히 기다리지 않음)', async () => {
+    expect(await failureOf(fetcher({ timeoutMs: 200 }).fetch(`${base}/gzip-stall`))).toMatch(/초 안에 페이지를 읽지 못했어요/);
   });
 });
 
