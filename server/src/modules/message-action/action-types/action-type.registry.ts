@@ -3,14 +3,20 @@
 import { Injectable } from '@nestjs/common';
 import { AppException } from '../../../common/errors/app.exception';
 import type { ActionDefinition } from './action-definition';
+import { AllocationAction } from './allocation.action';
 import { PurchaseRequisitionAction } from './purchase-requisition.action';
+import { ReproductionPlanAction } from './reproduction-plan.action';
+import { SalesOrderAction } from './sales-order.action';
+import { ShipmentRequestAction } from './shipment-request.action';
 
 @Injectable()
 export class ActionTypeRegistry {
   private readonly definitions: ReadonlyMap<string, ActionDefinition>;
 
-  constructor(purchaseRequisition: PurchaseRequisitionAction) {
-    this.definitions = new Map<string, ActionDefinition>([[purchaseRequisition.actionType, purchaseRequisition]]);
+  constructor(purchaseRequisition: PurchaseRequisitionAction, salesOrder: SalesOrderAction, shipmentRequest: ShipmentRequestAction, allocation: AllocationAction, reproductionPlan: ReproductionPlanAction) {
+    // 생산계획 생성은 메시지에서 만들지 않는다 (일반 계획은 수주 등록 때 자동 생성, BP-ACT-02)
+    const definitions: ActionDefinition[] = [purchaseRequisition, salesOrder, shipmentRequest, allocation, reproductionPlan];
+    this.definitions = new Map(definitions.map((d) => [d.actionType, d]));
   }
 
   /** 등록된 유형의 정의. 없으면 COM-004 (아직 메시지에서 만들 수 없는 유형) */

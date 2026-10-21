@@ -1,4 +1,4 @@
-// 초안 화면 표시용 순수 함수 (상태 배지 색·흐름 단계·실행 결과 읽기·입력 폼·업무 유형 등록부). 업무 규칙은 서버가 확인한다.
+// 초안 화면 표시용 순수 함수 (상태 배지 색·흐름 단계·실행 결과 읽기·구매요청 입력 폼·업무 유형 등록부). 업무 규칙은 서버가 확인한다.
 import {
   ACTION_TYPE_GRADE,
   ACTION_TYPE_LABEL,
@@ -11,6 +11,8 @@ import {
 } from '@/codes';
 import type { BadgeTone } from '@/components/Badge';
 import type { StepItem } from '@/components/Steps';
+import { ACTION_TYPE_GUIDE, MESSAGE_ACTION_TYPES } from '@/features/actionDrafts/lib/typedDrafts';
+import { withEulReul } from '@/lib/josa';
 import { PURCHASE_REQUISITION_STATUS_TONE } from '@/lib/statusTone';
 
 /** 초안 상태 배지 색 (옛 화면: 생성 ai · 확인 대기 wait · 확정 run · ERP 반영 ok · 반려 danger) */
@@ -69,11 +71,11 @@ export function getExecutionFailure(executionResult: unknown): DraftExecutionFai
   };
 }
 
-/** 확정·실행이 막혔을 때 배너 제목 (ACT-001 · PUR-001 · 그 밖) */
-export function getConfirmFailureTitle(code: string | null): string {
+/** 확정·실행이 막혔을 때 배너 제목 (ACT-001 · PUR-001 · 그 밖). typeLabel이 있으면 확장 유형(예: 수주 등록)의 실행 실패 */
+export function getConfirmFailureTitle(code: string | null, typeLabel?: string): string {
   if (code === 'ACT-001') return '아직 확정할 수 없어요';
   if (code === 'PUR-001') return '승인권자가 없어 구매요청을 만들지 못했어요';
-  return '확정했지만 구매요청을 만들지 못했어요';
+  return typeLabel ? `확정했지만 ${withEulReul(typeLabel)} 실행하지 못했어요` : '확정했지만 구매요청을 만들지 못했어요';
 }
 
 // ── 입력 폼 ──────────────────────────────────────────
@@ -140,36 +142,32 @@ export function countByDraftStatus(list: readonly { draftStatus: DraftStatus }[]
   return counts;
 }
 
-/** 업무 유형 등록부 표시 (REQ-ACT-004 · ACT-005 P2 준비 중) */
+/** 업무 유형 등록부 표시 (REQ-ACT-004·005) */
 export interface ActionTypeCatalogEntry {
   actionType: ActionType;
   label: string;
   grade: 'P1' | 'P2';
-  /** 실행 핸들러가 있는 유형 (P1 구매요청 생성만) */
+  /** 메시지에서 만들 수 있는 유형 (생산계획 생성은 수주 등록 때 자동이라 메시지에서 만들지 않는다, BP-ACT-02) */
   active: boolean;
-  /** 추출 스키마 (TRM-095 · REQ-ACT-001). 준비 중 유형은 빈 목록 */
+  /** 추출 스키마 (TRM-095 · 업무 프로세스 12.3). 메시지에서 만들지 않는 유형은 빈 목록 */
   schemaFieldLabels: string[];
-  /** 추출 스키마 밖의 선택 입력 (요청 근거) */
+  /** 추출 스키마 밖의 선택 입력 (구매요청 요청 근거) */
   optionalInputLabels: string[];
 }
 
-/** 실행할 수 있는 유형의 칸. 서버 message-action의 실행 핸들러가 구매요청 생성만 있어 나머지는 준비 중이다 */
-const ACTIVE_ACTION_TYPE_FIELDS: Partial<Record<ActionType, Pick<ActionTypeCatalogEntry, 'schemaFieldLabels' | 'optionalInputLabels'>>> = {
-  PURCHASE_REQUISITION_CREATE: {
-    // 요청자는 입력 칸이 아니라 메시지 작성자다 (BP-ACT-01)
-    schemaFieldLabels: [DRAFT_FIELD_LABEL.itemId, DRAFT_FIELD_LABEL.requestedTon, DRAFT_FIELD_LABEL.desiredReceiptDate, '요청자'],
-    optionalInputLabels: [DRAFT_FIELD_LABEL.requestReason],
-  },
+/** 추출 스키마 밖의 선택 입력 */
+const OPTIONAL_INPUT_LABELS: Partial<Record<ActionType, string[]>> = {
+  PURCHASE_REQUISITION_CREATE: [DRAFT_FIELD_LABEL.requestReason],
 };
 
 export const ACTION_TYPE_CATALOG: readonly ActionTypeCatalogEntry[] = (Object.keys(ACTION_TYPE_LABEL) as ActionType[]).map((actionType) => {
-  const fields = ACTIVE_ACTION_TYPE_FIELDS[actionType];
+  const guide = MESSAGE_ACTION_TYPES.includes(actionType) ? ACTION_TYPE_GUIDE[actionType] : undefined;
   return {
     actionType,
     label: ACTION_TYPE_LABEL[actionType],
     grade: ACTION_TYPE_GRADE[actionType],
-    active: fields !== undefined,
-    schemaFieldLabels: fields?.schemaFieldLabels ?? [],
-    optionalInputLabels: fields?.optionalInputLabels ?? [],
+    active: guide !== undefined,
+    schemaFieldLabels: guide?.schemaFieldLabels ?? [],
+    optionalInputLabels: OPTIONAL_INPUT_LABELS[actionType] ?? [],
   };
 });

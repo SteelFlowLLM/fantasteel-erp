@@ -16,6 +16,7 @@ import {
 } from '@fantasteel/shared';
 import { AuthUserService } from '../../common/auth/auth-user.service';
 import { hasPermission } from '../../common/auth/auth.guard';
+import { runAsAiAssisted } from '../../common/business-event/ai-assisted.context';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
 import { Prisma } from '../../generated/prisma/client';
@@ -32,6 +33,16 @@ import { MessageActionRepository, type DraftRow } from './message-action.reposit
 const EDITABLE_STATUSES: readonly string[] = [DRAFT_STATUS.AI_GENERATED, DRAFT_STATUS.WAITING_APPROVAL];
 
 const toJson = (payload: object) => payload as Prisma.InputJsonValue;
+
+/** 실행 트랜잭션 제한 시간: 수주 등록은 품목마다 예약·계획·작업 로그가 돌아 기본 5초를 넘을 수 있다 (sales-order와 같은 값) */
+const EXECUTE_TX = { maxWait: 5_000, timeout: 30_000 };
+
+const openResult = (open: { id: number; requesterId: number | null; requester: { employeeName: string } | null }): ActionDraftCreateResult => ({
+  id: open.id,
+  created: false,
+  requesterId: open.requesterId,
+  requesterName: open.requester?.employeeName ?? null,
+});
 
 /** 초안 값의 원료·규격 품목 id (화면에 품목 이름을 붙일 때) */
 const itemIdOf = (payload: object): number | null => ('itemId' in payload && typeof payload.itemId === 'number' ? payload.itemId : null);
@@ -61,14 +72,14 @@ export class MessageActionService {
   async create(user: AuthUser, messageId: number, actionType: ActionType = ACTION_TYPE.PURCHASE_REQUISITION_CREATE): Promise<ActionDraftCreateResult> {
     const definition = this.registry.get(actionType);
     const checked = await this.creatable(this.prisma, user, messageId, definition);
-    if (checked.open) return { id: checked.open.id, created: false };
+    if (checked.open) return openResult(checked.open);
     const content = checked.message.content?.trim();
     const extracted = content ? await this.extractor.extract(() => definition.extractionGuide(this.prisma), content, checked.message.createdAt) : null;
 
     // 그 사이 같은 메시지·유형 초안이 생겨 부분 unique에 걸리면 다시 확인해 그 초안을 돌려준다
     return retryOnNumberConflict(() => this.prisma.$transaction(async (tx) => {
       const { message, requester, open } = await this.creatable(tx, user, messageId, definition);
-      if (open) return { id: open.id, created: false };
+      if (open) return openResult(open);
 
       const payload = extracted ? await definition.fromExtraction(tx, extracted, message.content) : definition.empty(message.content);
       const draft = await this.repository.createDraft(tx, { actionType: definition.actionType, payload: toJson(payload), messageId: message.id, requesterId: requester.employeeId });
@@ -83,7 +94,7 @@ export class MessageActionService {
       });
       // AI가 채운 값도 확정 주체가 확인해야 하므로 생성(AI_GENERATED) 직후 확인 대기로 넘긴다 (업무 프로세스 10장 흐름)
       await this.repository.updateDraft(tx, draft.id, { draftStatus: DRAFT_STATUS.WAITING_APPROVAL });
-      return { id: draft.id, created: true };
+      return { id: draft.id, created: true, requesterId: requester.employeeId, requesterName: requester.employeeName };
     }));
   }
 
@@ -196,8 +207,9 @@ export class MessageActionService {
       const payload = definition.parse(draft.payload);
       const unresolved = await definition.unresolvedFields(tx, payload);
       if (unresolved.length > 0) throw new AppException('ACT-001', `채워야 할 칸: ${unresolved.join(', ')}`);
-      // 실행이 늘 실패하면(예: 구매요청 승인권자 없음) APPROVED에 갇히므로 확정 전에 막는다
+      // 실행이 늘 실패하면(예: 구매요청 승인권자 없음, 출하 가능 매수 초과) APPROVED에 갇히므로 확정 전에 막는다
       await definition.assertCanExecute(tx, user);
+      await definition.assertPayloadExecutable?.(tx, payload);
       await this.changeDraft(tx, draft, { draftStatus: DRAFT_STATUS.APPROVED, confirmedAt: new Date() });
       await this.businessEventRecorder.record(tx, {
         type: BUSINESS_EVENT_TYPE.DRAFT_CONFIRMED,
@@ -221,10 +233,13 @@ export class MessageActionService {
    */
   async execute(user: AuthUser, id: number): Promise<ActionDraftExecutionResult> {
     const { draft, definition } = await this.requesterDraft(this.prisma, user, id, null, [DRAFT_STATUS.APPROVED]);
+    const aiAssisted = isAiAssisted(definition.parse(draft.payload));
     let failure: AppException | null = null;
+    // AI가 채운 초안이면 핸들러 안에서 이어 남는 작업 로그(자동 예약·생산계획 등)도 AI 경유로 남긴다 (REQ-AST-010)
+    const run = <T>(work: () => Promise<T>) => (aiAssisted ? runAsAiAssisted(work) : work());
     try {
       await retryOnNumberConflict(() =>
-        this.prisma.$transaction(async (tx) => {
+        run(() => this.prisma.$transaction(async (tx) => {
           const result = await definition.execute(tx, draft, user);
           await this.changeDraft(tx, draft, { draftStatus: DRAFT_STATUS.EXECUTED, executionErrorCode: null, executionAttemptCount: { increment: 1 } });
           await this.businessEventRecorder.record(tx, {
@@ -236,9 +251,9 @@ export class MessageActionService {
             after: { draftStatus: DRAFT_STATUS.EXECUTED, resultTable: result.table, resultId: result.id, resultNo: result.no },
             actionDraftId: draft.id,
             messageId: draft.messageId,
-            isAiAssisted: isAiAssisted(definition.parse(draft.payload)),
+            isAiAssisted: aiAssisted,
           });
-        }),
+        }, EXECUTE_TX)),
       );
     } catch (e) {
       // 같은 초안을 동시에 실행한 경합(COM-001)은 실행 실패가 아니다
@@ -323,7 +338,13 @@ export class MessageActionService {
     const payloads = rows.map((r, index) => definitions[index].parse(r.payload));
     const itemIds = [...new Set(payloads.map(itemIdOf).filter((itemId): itemId is number => itemId !== null))];
     const items = new Map((itemIds.length > 0 ? await this.repository.findItems(tx, itemIds) : []).map((i) => [i.id, i]));
-    const unresolved = await Promise.all(payloads.map((payload, index) => definitions[index].unresolvedFields(tx, payload)));
+    // 트랜잭션 안에서 부를 수도 있어 한 연결에 쿼리를 겹쳐 보내지 않고 차례로 읽는다 (pg 다음 버전에서 오류)
+    const unresolved: string[][] = [];
+    const labels: Record<string, string>[] = [];
+    for (const [index, payload] of payloads.entries()) {
+      unresolved.push(await definitions[index].unresolvedFields(tx, payload));
+      labels.push(await definitions[index].payloadLabels(tx, payload));
+    }
     return rows.map((r, index) => {
       const payload = payloads[index];
       const itemId = itemIdOf(payload);
@@ -354,6 +375,7 @@ export class MessageActionService {
           : null,
         meetingMinutes: r.meetingMinutes ? { id: r.meetingMinutes.id, title: r.meetingMinutes.meetingMinutesTitle } : null,
         unresolvedFields: unresolved[index],
+        payloadLabels: labels[index],
         result: definitions[index].resultOf(r),
         executionErrorCode: r.executionErrorCode,
         executionAttemptCount: r.executionAttemptCount,

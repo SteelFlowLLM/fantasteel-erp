@@ -16,7 +16,7 @@ const ROUTE_TITLES: ReadonlyArray<readonly [RegExp, RouteTitle]> = [
   [/^\/mrp/, { title: 'MRP', area: '구매' }],
   [/^\/purchase-requisitions\/[^/]+/, { title: '구매요청 상세', area: '구매' }],
   [/^\/purchase-requisitions/, { title: '구매요청', area: '구매' }],
-  [/^\/action-drafts/, { title: '구매요청 초안', area: 'Message → ERP' }],
+  [/^\/action-drafts/, { title: '업무 초안', area: 'Message → ERP' }],
   [/^\/purchase-orders/, { title: '발주', area: '구매' }],
   [/^\/goods-receipts/, { title: '입고', area: '구매' }],
   [/^\/approvals/, { title: '승인함', area: '부서장' }],
