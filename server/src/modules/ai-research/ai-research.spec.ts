@@ -46,7 +46,9 @@ let chartError: string | null = null;
 /** 보고서 답 차례 (비면 reportText). 길이 한도로 끊긴 답·이어 쓰기를 흉내 낸다 */
 let reportReplies: { text: string; truncated: boolean }[] = [];
 /** 보고서 요청이 차례로 실패할 것 (이슈 #521: 시간 초과 다시 시도). 비면 reportError·reportReplies */
-let reportFailures: { message: string; kind?: LlmFailureKind }[] = [];
+let reportFailures: { message: string; kind?: LlmFailureKind; status?: number }[] = [];
+/** 점검 요청이 차례로 실패할 것 (이슈 #521: 점검 다시 시도·점검 없이 보고서) */
+let auditFailures: { message: string; kind?: LlmFailureKind; status?: number }[] = [];
 const reportCalls: { messages: ChatMessage[]; maxTokens: number | undefined; timeoutMs: number }[] = [];
 /** LM Studio가 알려 주는 문맥 길이 (null이면 모름) */
 let contextLength: number | null = null;
@@ -103,6 +105,8 @@ const llmClient = {
       return wrap(chartValue);
     }
     if (format.name === 'research_audit') auditCalls += 1;
+    const auditFailure = format.name === 'research_audit' ? auditFailures.shift() : undefined;
+    if (auditFailure) throw new LlmRequestError(auditFailure.message, auditFailure.status, auditFailure.kind);
     if (format.name === 'research_audit') return wrap({ thesis: '전기로가 배출이 적다', outline: ['배출 비교'], supportedClaims: [{ claim: '전기로 배출이 적다', sourceIds: [1, 99] }], contradictions: [], missingDimensions: [] });
     turnPrompts.push(messages.map((m) => m.content).join('\n'));
     const next = turns.shift() ?? { action: 'finish', query: '', sourceId: 0, researchState: state('끝') };
@@ -121,7 +125,7 @@ const llmClient = {
     if (!options.signal) throw new Error('signal 없음');
     reportCalls.push({ messages, maxTokens: options.maxTokens, timeoutMs: options.timeoutMs });
     const failure = reportFailures.shift();
-    if (failure) throw new LlmRequestError(failure.message, undefined, failure.kind);
+    if (failure) throw new LlmRequestError(failure.message, failure.status, failure.kind);
     if (reportError) throw new LlmRequestError(reportError);
     const next = reportReplies.shift();
     return { text: next?.text ?? reportText, thinking: null, truncated: next?.truncated ?? false };
@@ -259,6 +263,7 @@ beforeEach(async () => {
   llmClient.chatText.mockClear();
   reportReplies = [];
   reportFailures = [];
+  auditFailures = [];
   reportCalls.length = 0;
   contextLength = null;
   runner.config = { ...runner.config, now: Date.now, renewMs: 30_000 };
@@ -492,20 +497,22 @@ async function queued(question: string): Promise<AiResearchRunView> {
 }
 
 describe('심층 조사 — 실패해도 모은 것을 버리지 않는다 · 취소 · 이어서 하기', () => {
-  it('반복 중 LLM 연결이 끊기면 모은 출처로 대신 정리해 COMPLETED (맨 위 알림, 점검·보고서 LLM은 부르지 않음)', async () => {
+  it('반복 중 LLM 응답이 끊기면 반복을 멈추고 모은 출처로 점검·보고서를 쓴다 (건너뛰지 않음, 맨 위 알림, 이슈 #521)', async () => {
     const run = await queued('LLM 끊김');
     turns = [{ action: 'search', query: '끊기기 전 검색', sourceId: 0, researchState: state('하나 찾음', ['더']) }, { error: '180초 안에 응답이 없어요' }];
+    reportText = '# 끊긴 뒤 보고서\n하나 찾은 것으로 썼어요 [1].';
     await runner.processNext();
     const done = await getRun(run.id);
     expect(done.status).toBe('COMPLETED');
     expect(done.sources).toHaveLength(2);
     expect(done.incompleteReason).toContain('AI 응답을 받지 못해 조사를 멈췄어요(180초 안에 응답이 없어요)');
     expect(done.report?.startsWith('> **이 보고서는 완전하지 않아요.**')).toBe(true);
-    expect(done.report).toContain('하나 찾음');
+    expect(done.report).toContain('하나 찾은 것으로 썼어요 [1].');
     expect(done.report).toContain('## 출처');
-    expect(auditCalls).toBe(0);
-    expect(llmClient.chatText).not.toHaveBeenCalled();
-    expect(done.events.at(-1)).toMatchObject({ type: 'report.ready', payload: { incomplete: true } });
+    expect(auditCalls).toBe(1);
+    expect(llmClient.chatText).toHaveBeenCalledTimes(1);
+    expect(done.reportFallback).toBeNull();
+    expect(done.events.find((e) => e.type === 'report.ready')?.payload).toMatchObject({ incomplete: true });
   });
 
   it('30분 상한을 넘으면 모은 것으로 점검·보고서를 쓴다', async () => {
@@ -570,7 +577,7 @@ describe('심층 조사 — 실패해도 모은 것을 버리지 않는다 · �
     expect(done.report).toContain('- 전기로 배출이 적다 [1]');
     // 시간 초과가 아닌 실패는 다시 하지 않고 대체본으로 보인다 (이슈 #521)
     expect(reportCalls).toHaveLength(1);
-    expect(done.reportFallback).toEqual({ reason: 'ERROR', previous: false });
+    expect(done.reportFallback).toEqual({ reason: 'ERROR', previous: false, attempts: 1 });
     expect(done.events.find((e) => e.type === 'report.ready')?.payload).toMatchObject({ fallback: 'ERROR', incomplete: true });
   });
 
@@ -589,31 +596,95 @@ describe('심층 조사 — 실패해도 모은 것을 버리지 않는다 · �
     const types = done.events.map((e) => e.type);
     expect(types.indexOf('report.retry')).toBeGreaterThan(types.indexOf('audit.ready'));
     expect(types.indexOf('report.retry')).toBeLessThan(types.indexOf('report.ready'));
-    expect(done.events.find((e) => e.type === 'report.retry')?.payload).toEqual({ timeoutMinutes: 10 });
+    expect(done.events.find((e) => e.type === 'report.retry')?.payload).toEqual({ phase: 'report', reason: 'TIMEOUT', attempt: 1, waitSeconds: 30 });
     expect(done.events.find((e) => e.type === 'report.ready')?.payload).not.toHaveProperty('fallback');
   });
 
-  it('다시 해도 시간 초과면 조사 메모로 대체본을 쓰고 화면에 대체본(보고서 생성 시간 초과)으로 알린다. 시간 제한은 환경 변수로 바꾼다', async () => {
+  it('세 번(30초·60초 쉬고 두 번 더) 모두 시간 초과면 조사 메모로 대체본을 쓰고 까닭·시도 횟수를 알린다. 시간 제한은 환경 변수로 바꾼다', async () => {
     process.env.AI_RESEARCH_REPORT_TIMEOUT_MINUTES = '15';
+    const waits: number[] = [];
+    runner.config = { ...runner.config, sleep: async (ms) => void waits.push(ms) };
     try {
-      const run = await queued('보고서 시간 초과 두 번');
-      turns = [{ action: 'search', query: '두 번 초과 전 검색', sourceId: 0, researchState: state('메모') }];
-      reportFailures = [
-        { message: '900초 안에 응답이 없어요', kind: 'TIMEOUT' },
-        { message: '900초 안에 응답이 없어요', kind: 'TIMEOUT' },
-      ];
+      const run = await queued('보고서 시간 초과 세 번');
+      turns = [{ action: 'search', query: '세 번 초과 전 검색', sourceId: 0, researchState: state('메모') }];
+      reportFailures = Array.from({ length: 3 }, () => ({ message: '900초 안에 응답이 없어요', kind: 'TIMEOUT' as const }));
       await runner.processNext();
       const done = await getRun(run.id);
       expect(done.status).toBe('COMPLETED');
-      expect(reportCalls.map((c) => c.timeoutMs)).toEqual([15 * 60_000, 15 * 60_000]);
-      expect(done.reportFallback).toEqual({ reason: 'TIMEOUT', previous: false });
-      expect(done.incompleteReason).toContain('AI가 보고서를 15분 안에 쓰지 못해(한 번 더 부탁해도) 조사 메모로 대신 정리했어요');
+      expect(reportCalls.map((c) => c.timeoutMs)).toEqual([15 * 60_000, 15 * 60_000, 15 * 60_000]);
+      expect(waits).toEqual([30_000, 60_000]);
+      expect(done.reportFallback).toEqual({ reason: 'TIMEOUT', previous: false, attempts: 3 });
+      expect(done.incompleteReason).toContain('AI가 보고서를 15분 안에 쓰지 못해(3번 시도) 조사 메모로 대신 정리했어요');
       expect(done.report).toContain('**이 보고서는 완전하지 않아요.**');
-      expect(done.events.filter((e) => e.type === 'report.retry')).toHaveLength(1);
+      expect(done.events.filter((e) => e.type === 'report.retry').map((e) => e.payload)).toEqual([
+        { phase: 'report', reason: 'TIMEOUT', attempt: 1, waitSeconds: 30 },
+        { phase: 'report', reason: 'TIMEOUT', attempt: 2, waitSeconds: 60 },
+      ]);
       expect(done.events.find((e) => e.type === 'report.ready')?.payload).toMatchObject({ fallback: 'TIMEOUT', incomplete: true });
+      // 대체본이면 차트는 부르지 않는다
+      expect(done.events.some((e) => e.type === 'charts.ready')).toBe(false);
     } finally {
       delete process.env.AI_RESEARCH_REPORT_TIMEOUT_MINUTES;
+      runner.config = { ...runner.config, sleep: async () => undefined };
     }
+  });
+
+  it('모델 없음·연결 실패 같은 잠깐 실패는 다시 해 보고, 잘못된 요청(4xx)은 다시 하지 않는다. 대체본에는 그 까닭이 남는다', async () => {
+    const recovered = await queued('모델 없음 뒤 회복');
+    turns = [{ action: 'search', query: '모델 없음 전 검색', sourceId: 0, researchState: state('메모') }];
+    reportFailures = [{ message: 'Unsloth Studio에 불러온 모델이 없어요', kind: 'NO_MODEL' }, { message: '연결할 수 없어요', kind: 'CONNECT' }];
+    reportText = '# 세 번째에 쓴 보고서\n괜찮아요 [1].';
+    await runner.processNext();
+    const ok = await getRun(recovered.id);
+    expect(ok.reportFallback).toBeNull();
+    expect(ok.report).toContain('괜찮아요 [1].');
+    expect(ok.events.filter((e) => e.type === 'report.retry').map((e) => (e.payload as { reason: string }).reason)).toEqual(['NO_MODEL', 'CONNECT']);
+
+    reportCalls.length = 0;
+    const down = await queued('모델 계속 없음');
+    turns = [{ action: 'search', query: '모델 계속 없음 검색', sourceId: 0, researchState: state('메모') }];
+    reportFailures = Array.from({ length: 3 }, () => ({ message: 'Unsloth Studio에 불러온 모델이 없어요', kind: 'NO_MODEL' as const }));
+    await runner.processNext();
+    const fell = await getRun(down.id);
+    expect(fell.reportFallback).toEqual({ reason: 'NO_MODEL', previous: false, attempts: 3 });
+    expect(fell.incompleteReason).toContain('AI가 보고서를 쓰지 못해 조사 메모로 대신 정리했어요(AI 모델을 찾지 못함 · 3번 시도: Unsloth Studio에 불러온 모델이 없어요)');
+
+    reportCalls.length = 0;
+    const bad = await queued('잘못된 요청');
+    turns = [{ action: 'search', query: '잘못된 요청 검색', sourceId: 0, researchState: state('메모') }];
+    reportFailures = [{ message: 'LLM 서버 오류 (HTTP 400): 잘못된 요청', status: 400 }];
+    await runner.processNext();
+    const rejected = await getRun(bad.id);
+    expect(reportCalls).toHaveLength(1);
+    expect(rejected.reportFallback).toEqual({ reason: 'ERROR', previous: false, attempts: 1 });
+    expect(rejected.events.some((e) => e.type === 'report.retry')).toBe(false);
+  });
+
+  it('점검이 잠깐 실패하면 다시 하고, 끝내 실패해도 보고서는 점검 없이 쓴다 (점검 실패 까닭을 남긴다)', async () => {
+    const retried = await queued('점검 다시');
+    turns = [{ action: 'search', query: '점검 다시 검색', sourceId: 0, researchState: state('메모') }];
+    auditFailures = [{ message: '180초 안에 응답이 없어요', kind: 'TIMEOUT' }];
+    reportText = '# 보고서\n점검 뒤 보고서 [1].';
+    await runner.processNext();
+    const ok = await getRun(retried.id);
+    expect(ok.audit?.thesis).toBe('전기로가 배출이 적다');
+    expect(ok.auditFailure).toBeNull();
+    expect(ok.events.filter((e) => e.type === 'report.retry').map((e) => e.payload)).toEqual([{ phase: 'audit', reason: 'TIMEOUT', attempt: 1, waitSeconds: 30 }]);
+
+    auditCalls = 0;
+    const failed = await queued('점검 끝내 실패');
+    turns = [{ action: 'search', query: '점검 실패 검색', sourceId: 0, researchState: state('점검 없는 메모') }];
+    auditFailures = Array.from({ length: 3 }, () => ({ message: '180초 안에 응답이 없어요', kind: 'TIMEOUT' as const }));
+    reportText = '# 점검 없이 쓴 보고서\n그래도 썼어요 [1].';
+    await runner.processNext();
+    const done = await getRun(failed.id);
+    expect(auditCalls).toBe(3);
+    expect(done.status).toBe('COMPLETED');
+    expect(done.auditFailure).toBe('TIMEOUT');
+    expect(done.reportFallback).toBeNull();
+    expect(done.report).toContain('그래도 썼어요 [1].');
+    expect(done.incompleteReason).toContain('AI가 근거 점검을 하지 못해(180초 안에 응답이 없어요) 점검 없이 보고서를 쓰게 했어요.');
+    expect(done.events.find((e) => e.type === 'audit.ready')?.payload).toMatchObject({ ok: false, failure: 'TIMEOUT' });
   });
 
   it('취소하면 하던 LLM 요청을 바로 끊는다 (이 서버: interrupt)', async () => {
@@ -1300,7 +1371,7 @@ describe('심층 조사 — 보고서를 말로 고치기 (판, 이슈 #418)', (
     const after = await getRun(done.id);
     expect(after.status).toBe('COMPLETED');
     expect(after.incompleteReason).toContain('AI가 보고서를 쓰지 못해 앞 판 내용을 그대로 두었어요');
-    expect(after.reportFallback).toEqual({ reason: 'ERROR', previous: true });
+    expect(after.reportFallback).toEqual({ reason: 'ERROR', previous: true, attempts: 1 });
     expect(after.report).toContain('첫 보고서 [1]');
     expect(after.versions).toHaveLength(2);
   });

@@ -19,7 +19,7 @@ import {
   type PageResult,
 } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
-import type { AiResearchRun, Prisma } from '../../generated/prisma/client';
+import type { AiResearchReportVersion, AiResearchRun, Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { MCP_REQUEST_TIMEOUT_MS } from '../integration/mcp/mcp.client';
 import { NotionPageService } from '../integration/notion/notion-page.service';
@@ -271,10 +271,7 @@ export class AiResearchService {
    */
   async reportPdf(user: AuthUser, id: number, version?: number): Promise<{ fileName: string; content: Buffer }> {
     const run = await this.owned(this.prisma, user, id);
-    const versions = await this.repository.listVersions(this.prisma, id);
-    const latest = versions.at(-1)?.version ?? null;
-    const picked = version === undefined || version === latest ? null : await this.repository.findVersion(this.prisma, id, version);
-    if (version !== undefined && version !== latest && !picked) throw new AppException('RES-001', '보고서 판을 찾을 수 없어요');
+    const { picked, latest } = await this.pickVersion(id, version);
     const report = picked ? picked.report : run.report;
     if (!report) throw new AppException('RES-002', '보고서가 있는 조사만 PDF로 내려받을 수 있어요');
     const view = toRunView(run, [], 0);
@@ -325,10 +322,7 @@ export class AiResearchService {
   async exportToNotion(user: AuthUser, id: number, version?: number): Promise<AiResearchNotionExportResult> {
     const run = await this.owned(this.prisma, user, id);
     if (run.status !== AI_RESEARCH_STATUS.COMPLETED || !run.report) throw new AppException('RES-002', '완료한 조사만 Notion으로 내보낼 수 있어요');
-    const versions = await this.repository.listVersions(this.prisma, id);
-    const latest = versions.at(-1)?.version ?? null;
-    const picked = version === undefined || version === latest ? null : await this.repository.findVersion(this.prisma, id, version);
-    if (version !== undefined && version !== latest && !picked) throw new AppException('RES-001', '보고서 판을 찾을 수 없어요');
+    const { picked, latest } = await this.pickVersion(id, version);
     await this.notion.assertReady();
 
     const claim: { at: Date | null } = { at: null };
@@ -404,6 +398,15 @@ export class AiResearchService {
     if (run.scheduleId === null) return run;
     const schedule = await this.repository.findScheduleById(tx, run.scheduleId);
     return schedule && schedule.runId !== run.id ? this.owned(tx, user, schedule.runId) : run;
+  }
+
+  /** 내보낼 판: version이 없거나 마지막 판이면 picked = null(지금 보고서). 없는 판은 RES-001. latest는 마지막 판 번호(판이 없으면 null) */
+  private async pickVersion(id: number, version: number | undefined): Promise<{ picked: AiResearchReportVersion | null; latest: number | null }> {
+    const latest = (await this.repository.lastVersion(this.prisma, id)) || null;
+    if (version === undefined || version === latest) return { picked: null, latest };
+    const picked = await this.repository.findVersion(this.prisma, id, version);
+    if (!picked) throw new AppException('RES-001', '보고서 판을 찾을 수 없어요');
+    return { picked, latest };
   }
 
   /** 사원별 잠금 안에서 진행 중 조사 수를 센다. 상한이면 RES-006 (트랜잭션 안에서 부른다) */

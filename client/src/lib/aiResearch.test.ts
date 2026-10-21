@@ -90,17 +90,19 @@ describe('타임라인', () => {
     expect(timelineLineOf({ seq: 1, type: 'plan.ready', createdAt: at, payload }).title).toBe('계획을 세웠어요 · 2단계');
     expect(timelineLineOf({ seq: 1, type: 'plan.ready', createdAt: at, payload: { ...payload, copiedFrom: 7, scheduled: true } }).title).toBe('반복 차례라 조사 #7의 계획으로 시작했어요 · 2단계');
   });
-  it('보고서 시간 초과 다시 시도와 대체본 보고서는 경고 톤으로 까닭을 보인다 (이슈 #521)', () => {
-    const retry = timelineLineOf({ seq: 6, type: 'report.retry', createdAt: at, payload: { timeoutMinutes: 10 } });
-    expect(retry).toMatchObject({ tone: 'wait', title: '보고서가 10분 안에 오지 않아 한 번 더 부탁했어요' });
-    const ready = { chars: 1200, truncated: false, citedCount: 0, incomplete: true };
-    expect(timelineLineOf({ seq: 7, type: 'report.ready', createdAt: at, payload: { ...ready, fallback: 'TIMEOUT' } })).toMatchObject({ tone: 'wait', title: '대체본을 남겼어요 · 보고서 생성 시간 초과' });
-    expect(timelineLineOf({ seq: 7, type: 'report.ready', createdAt: at, payload: ready })).toMatchObject({ tone: 'ok', title: '보고서를 썼어요' });
+  it('점검·보고서 다시 부탁과 점검 실패는 경고 톤으로 까닭을 보인다 (이슈 #521)', () => {
+    const retry = timelineLineOf({ seq: 6, type: 'report.retry', createdAt: at, payload: { phase: 'report', reason: 'NO_MODEL', attempt: 2, waitSeconds: 60 } });
+    expect(retry).toMatchObject({ tone: 'wait', title: '보고서 AI가 답하지 못해(AI 모델을 찾지 못함) 60초 뒤 다시 부탁해요 · 2번째' });
+    expect(timelineLineOf({ seq: 6, type: 'report.retry', createdAt: at, payload: { phase: 'audit', reason: 'TIMEOUT', attempt: 1, waitSeconds: 30 } }).title).toBe('근거 점검 AI가 답하지 못해(시간 초과) 30초 뒤 다시 부탁해요 · 1번째');
+    const audit = { claimCount: 0, contradictionCount: 0, missingCount: 0, ok: false };
+    expect(timelineLineOf({ seq: 7, type: 'audit.ready', createdAt: at, payload: { ...audit, failure: 'CONNECT' } }).title).toBe('점검 AI가 끝내 답하지 못해 점검 없이 보고서를 써요 · AI 서버 연결 실패');
+    expect(timelineLineOf({ seq: 7, type: 'audit.ready', createdAt: at, payload: audit }).title).toBe('점검을 읽지 못해 조사 메모로 대신했어요');
   });
-  it('대체본 표시: 조사 메모로 대신 쓴 것과 앞 판을 그대로 둔 것을 나눈다', () => {
-    expect(reportFallbackLabel({ reason: 'TIMEOUT', previous: false })).toBe('대체본(보고서 생성 시간 초과)');
-    expect(reportFallbackLabel({ reason: 'ERROR', previous: true })).toBe('앞 판 그대로(보고서 생성 실패)');
-    expect(reportFallbackLabel({ reason: 'LLM_DOWN', previous: false })).toBe('대체본(AI 응답 끊김)');
+  it('대체본 표시: 까닭·시도 횟수, 조사 메모로 대신 쓴 것과 앞 판을 그대로 둔 것을 나눈다', () => {
+    expect(reportFallbackLabel({ reason: 'TIMEOUT', previous: false, attempts: 3 })).toBe('대체본(보고서 생성 시간 초과 · 3번 시도)');
+    expect(reportFallbackLabel({ reason: 'ERROR', previous: true, attempts: 1 })).toBe('앞 판 그대로(보고서 생성 실패)');
+    expect(reportFallbackLabel({ reason: 'NO_MODEL', previous: false, attempts: 3 })).toBe('대체본(AI 모델을 찾지 못함 · 3번 시도)');
+    expect(reportFallbackLabel({ reason: 'CONNECT', previous: false, attempts: 2 })).toBe('대체본(AI 서버 연결 실패 · 2번 시도)');
     expect(reportFallbackLabel(null)).toBeNull();
   });
   it('조사 메모는 요약과 모자란 것 개수를 보인다', () => {

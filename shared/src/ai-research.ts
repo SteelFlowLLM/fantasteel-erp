@@ -148,7 +148,8 @@ export interface AiResearchEventPayloads {
   'source.added': { sourceId: number; title: string; url: string };
   'page.read': { sourceId: number; title: string; chars: number; error: string | null };
   'state.updated': { summary: string; gapCount: number; unsupportedCount: number };
-  'audit.ready': { claimCount: number; contradictionCount: number; missingCount: number; ok: boolean };
+  /** failure: 점검 LLM이 다시 시도해도 실패해 점검 없이 보고서로 넘어간 까닭 (이슈 #521) */
+  'audit.ready': { claimCount: number; contradictionCount: number; missingCount: number; ok: boolean; failure?: AiResearchReportFallbackReason };
   /** fallback: 보고서 LLM 대신 쓴 대체본이면 그 까닭 (이슈 #521) */
   'report.ready': { chars: number; truncated: boolean; citedCount: number; incomplete?: boolean; fallback?: AiResearchReportFallbackReason };
   failed: { reason: string };
@@ -160,33 +161,45 @@ export interface AiResearchEventPayloads {
   'revision.requested': { version: number; instruction: string; search: boolean; addedSteps: number };
   /** 고친 보고서를 version판으로 남겼다 */
   'revision.ready': { version: number; chars: number };
-  /** 보고서 LLM이 timeoutMinutes분 안에 답하지 않아 한 번 더 부탁했다 (이슈 #521) */
-  'report.retry': { timeoutMinutes: number };
+  /** 점검·보고서 LLM이 잠깐 실패해(reason) waitSeconds초 쉬었다 다시 부탁한다. attempt는 다시 하는 차례(1부터) (이슈 #521) */
+  'report.retry': { phase: 'audit' | 'report'; reason: AiResearchLlmRetryReason; attempt: number; waitSeconds: number };
 }
 
+/** 다시 해 볼 만한 LLM 실패: 시간 초과 · 연결 실패 · 모델 없음(서버가 바빠 모델 목록을 못 읽음) · LLM 서버 5xx·429 */
+export type AiResearchLlmRetryReason = 'TIMEOUT' | 'CONNECT' | 'NO_MODEL' | 'SERVER';
+
+export const AI_RESEARCH_LLM_RETRY_LABEL: Record<AiResearchLlmRetryReason, string> = {
+  TIMEOUT: '시간 초과',
+  CONNECT: 'AI 서버 연결 실패',
+  NO_MODEL: 'AI 모델을 찾지 못함',
+  SERVER: 'AI 서버 오류',
+};
+
 /**
- * 보고서 LLM이 쓴 보고서 대신 남긴 대체본의 까닭 (이슈 #521). TIMEOUT 시간 초과(한 번 더 해도) · ERROR 그 밖의 LLM 실패 ·
- * EMPTY 빈 답 · LLM_DOWN 앞 단계(조사·점검)에서 AI 응답이 끊겨 보고서 LLM을 부르지 않음
+ * 보고서 LLM이 쓴 보고서 대신 남긴 대체본의 까닭 (이슈 #521). 잠깐 실패(TIMEOUT·NO_MODEL·CONNECT)는 쉬었다 다시 해 본 뒤의 까닭이다.
+ * TIMEOUT 시간 초과 · NO_MODEL 모델 없음(서버가 바빠 모델 목록을 못 읽음 포함) · CONNECT 연결 실패 · ERROR 그 밖의 LLM 실패(잘못된 요청 등, 다시 하지 않음) · EMPTY 빈 답
  */
-export type AiResearchReportFallbackReason = 'TIMEOUT' | 'ERROR' | 'EMPTY' | 'LLM_DOWN';
+export type AiResearchReportFallbackReason = 'TIMEOUT' | 'NO_MODEL' | 'CONNECT' | 'ERROR' | 'EMPTY';
 
 export const AI_RESEARCH_REPORT_FALLBACK_LABEL: Record<AiResearchReportFallbackReason, string> = {
   TIMEOUT: '보고서 생성 시간 초과',
+  NO_MODEL: 'AI 모델을 찾지 못함',
+  CONNECT: 'AI 서버 연결 실패',
   ERROR: '보고서 생성 실패',
   EMPTY: 'AI가 빈 보고서를 냄',
-  LLM_DOWN: 'AI 응답 끊김',
 };
 
-/** 대체본. previous면 조사 메모가 아니라 앞 판 보고서를 그대로 둔 것 (보고서 고치기) */
+/** 대체본. previous면 조사 메모가 아니라 앞 판 보고서를 그대로 둔 것 (보고서 고치기). attempts는 보고서 LLM을 부른 횟수 */
 export interface AiResearchReportFallback {
   reason: AiResearchReportFallbackReason;
   previous: boolean;
+  attempts: number;
 }
 
-/** 대체본 표시 (이슈 #521): 조사 메모로 대신 쓴 것은 '대체본(까닭)', 고치기에서 앞 판을 그대로 둔 것은 '앞 판 그대로(까닭)' */
+/** 대체본 표시 (이슈 #521): '대체본(보고서 생성 시간 초과 · 3번 시도)', 고치기에서 앞 판을 그대로 두었으면 '앞 판 그대로(…)' */
 export function aiResearchFallbackText(fallback: AiResearchReportFallback | null | undefined): string | null {
   if (!fallback) return null;
-  const why = AI_RESEARCH_REPORT_FALLBACK_LABEL[fallback.reason];
+  const why = `${AI_RESEARCH_REPORT_FALLBACK_LABEL[fallback.reason]}${fallback.attempts > 1 ? ` · ${fallback.attempts}번 시도` : ''}`;
   return fallback.previous ? `앞 판 그대로(${why})` : `대체본(${why})`;
 }
 
@@ -353,8 +366,10 @@ export interface AiResearchRunView extends AiResearchRunSummaryView {
   reportTruncated: boolean;
   /** 조사를 다 마치지 못하고(30분 상한·LLM 실패) 그때까지 모은 출처로 보고서를 쓴 이유. 다 마쳤으면 null (보고서 맨 위에도 알림이 있다) */
   incompleteReason?: string | null;
-  /** 지금 보고서가 보고서 LLM이 쓴 것이 아니라 대체본이면 그 까닭 (이슈 #521). 아니면 null */
+  /** 지금 보고서가 보고서 LLM이 쓴 것이 아니라 대체본이면 그 까닭(시간 초과·모델 없음·연결 실패…)과 시도 횟수 (이슈 #521). 아니면 null */
   reportFallback: AiResearchReportFallback | null;
+  /** 근거 점검 LLM이 다시 시도해도 실패해 점검 없이 보고서를 쓴 까닭 (이슈 #521). 아니면 null */
+  auditFailure: AiResearchReportFallbackReason | null;
   /**
    * 이 조사의 반복 (이슈 #521). 반복을 건 조사면 그 반복, 반복이 만든 조사면 만든 반복(runId가 원래 조사).
    * 끈 반복도 보인다(enabled false). 반복이 없으면 null

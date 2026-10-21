@@ -2,6 +2,7 @@
 // 출처 제목·요약·보고서는 웹에서 온 글이다. 여기서는 글 조각으로만 나누고 HTML로 바꾸지 않는다.
 import {
   AI_RESEARCH_LIMITS,
+  AI_RESEARCH_LLM_RETRY_LABEL,
   AI_RESEARCH_REPORT_FALLBACK_LABEL,
   AI_RESEARCH_SCHEDULE_TIME_PATTERN,
   aiResearchFallbackText,
@@ -127,17 +128,18 @@ export function timelineLineOf(event: AiResearchEventView): TimelineLine {
     }
     case 'audit.ready': {
       const p = event.payload;
+      if (!p.ok && p.failure) return { ...base, tone: 'wait', title: `점검 AI가 끝내 답하지 못해 점검 없이 보고서를 써요 · ${AI_RESEARCH_REPORT_FALLBACK_LABEL[p.failure]}` };
       if (!p.ok) return { ...base, tone: 'wait', title: '점검을 읽지 못해 조사 메모로 대신했어요' };
       return { ...base, tone: 'ai', title: '보고서 쓰기 전 점검을 마쳤어요', detail: `뒷받침된 주장 ${p.claimCount}개 · 엇갈리는 내용 ${p.contradictionCount}개 · 빠진 관점 ${p.missingCount}개` };
     }
     case 'report.ready': {
       const p = event.payload;
-      // 보고서 LLM이 쓰지 못해 조사 메모로 대신 쓴 보고서는 다 쓴 것처럼 보이지 않게 한다 (이슈 #521)
-      if (p.fallback) return { ...base, tone: 'wait', title: `대체본을 남겼어요 · ${AI_RESEARCH_REPORT_FALLBACK_LABEL[p.fallback]}`, detail: `${p.chars.toLocaleString('ko-KR')}자` };
       return { ...base, tone: 'ok', title: '보고서를 썼어요', detail: `${p.chars.toLocaleString('ko-KR')}자 · 인용한 출처 ${p.citedCount}개${p.truncated ? ' · 길이 한도에 걸려 끝까지 쓰지 못했어요' : ''}` };
     }
-    case 'report.retry':
-      return { ...base, tone: 'wait', title: `보고서가 ${event.payload.timeoutMinutes}분 안에 오지 않아 한 번 더 부탁했어요` };
+    case 'report.retry': {
+      const p = event.payload;
+      return { ...base, tone: 'wait', title: `${p.phase === 'audit' ? '근거 점검' : '보고서'} AI가 답하지 못해(${AI_RESEARCH_LLM_RETRY_LABEL[p.reason]}) ${p.waitSeconds}초 뒤 다시 부탁해요 · ${p.attempt}번째` };
+    }
     case 'failed':
       return { ...base, tone: 'danger', title: '조사에 실패했어요', detail: cut(event.payload.reason, 300) };
     case 'cancelled':

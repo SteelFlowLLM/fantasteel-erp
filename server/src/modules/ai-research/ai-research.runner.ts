@@ -1,13 +1,23 @@
 import { Injectable, Logger, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
-import { AI_RESEARCH_LIMITS, AI_RESEARCH_STATUS, type AiResearchChart, type AiResearchPlan, type AiResearchReportFallback, type AiResearchReportFallbackReason, type AiResearchStatus } from '@fantasteel/shared';
+import {
+  AI_RESEARCH_LIMITS,
+  AI_RESEARCH_REPORT_FALLBACK_LABEL,
+  AI_RESEARCH_STATUS,
+  type AiResearchChart,
+  type AiResearchLlmRetryReason,
+  type AiResearchPlan,
+  type AiResearchReportFallback,
+  type AiResearchReportFallbackReason,
+  type AiResearchStatus,
+} from '@fantasteel/shared';
 import type { Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
 import { AssistantWebToolbox, type WebToolSession } from '../ai-assistant/web/assistant-web-toolbox';
 import { cutText, stripInvisible, urlKey } from '../ai-assistant/web/web-text';
-import { LlmClient, LlmRequestError, type ChatMessage, type LlmJsonSchema } from '../llm/llm.client';
+import { LlmAbortedError, LlmClient, LlmJsonParseError, LlmRequestError, type ChatMessage, type LlmJsonSchema } from '../llm/llm.client';
 import { LLM_PROFILE } from '../llm/llm-profiles';
 import { llmEndpointOf, LlmSettingsStore } from '../llm/llm-settings.store';
 import { checkCharts } from './ai-research.charts';
@@ -93,6 +103,8 @@ export interface ResearchRunnerConfig {
   jsonTimeoutMs: number;
   /** 보고서 LLM 한 번의 시간 제한. 없으면 부를 때마다 AI_RESEARCH_REPORT_TIMEOUT_MINUTES(기본 10분)를 읽는다 (이슈 #521) */
   reportTimeoutMs?: number;
+  /** 점검·보고서 LLM이 잠깐 실패했을 때 다시 하기 전에 쉬는 시간들. 길이가 다시 하는 횟수다 (이슈 #521) */
+  llmRetryWaitsMs: number[];
   now: () => number;
   sleep: (ms: number, signal: AbortSignal) => Promise<void>;
 }
@@ -105,6 +117,8 @@ export const DEFAULT_RUNNER_CONFIG: ResearchRunnerConfig = {
   rateLimitWaitMs: 20_000,
   rateLimitRetries: 3,
   jsonTimeoutMs: 3 * 60_000,
+  // 🟡 가정값: 로컬 LLM 서버가 다른 일로 바쁠 때(모델 목록을 못 읽음·시간 초과) 잠깐 쉬면 풀리는 일이 많았다(통합 시험 2026-10-22)
+  llmRetryWaitsMs: [30_000, 60_000],
   now: Date.now,
   sleep: abortableSleep,
 };
@@ -385,7 +399,6 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     }
 
     const notes: string[] = [];
-    let llmDown = false;
     let exhausted = false;
     let searchDown = false;
     // 보고서 고치기(이슈 #418): 앞 보고서를 부탁대로 고쳐 쓴다. 더 검색하지 않으면 반복을 건너뛰고 모은 것으로 다시 쓴다
@@ -398,10 +411,9 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
       } catch (error) {
         if (error instanceof LeaseLostError || ctx.abort.signal.aborted) throw error;
         if (error instanceof WallClockExceeded) notes.push(INCOMPLETE_TIMEOUT);
-        else if (error instanceof LlmRequestError) {
-          notes.push(`AI 응답을 받지 못해 조사를 멈췄어요(${cutText(error.message, 160)}).`);
-          llmDown = true;
-        } else throw error;
+        // 반복 중 LLM이 끊겨도 점검·보고서는 건너뛰지 않는다: 서버가 잠깐 바빴을 수 있어 그 단계에서 쉬었다 다시 해 본다 (이슈 #521)
+        else if (error instanceof LlmRequestError) notes.push(`AI 응답을 받지 못해 조사를 멈췄어요(${cutText(error.message, 160)}).`);
+        else throw error;
       }
     const { state, sources, stepsUsed } = work;
     if (searchDown) {
@@ -418,21 +430,21 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     await this.assertMine(ctx);
     const saved = storedAudit(run.audit);
     let audit: StoredAudit;
+    let auditFailure: AiResearchReportFallbackReason | null = null;
     if (saved && state.auditedAt === stepsUsed) audit = saved;
     else {
-      if (llmDown) audit = fallbackAudit(state);
-      else
-        try {
-          audit = await this.audit(ctx, endpoint, run.question, plan, state, sources);
-        } catch (error) {
-          if (!(error instanceof LlmRequestError) || ctx.abort.signal.aborted) throw error;
-          notes.push(`AI가 근거 점검을 하지 못했어요(${cutText(error.message, 160)}).`);
-          llmDown = true;
-          audit = fallbackAudit(state);
-        }
+      try {
+        audit = await this.withLlmRetry(ctx, 'audit', { retries: 0, calls: 0 }, () => this.audit(ctx, endpoint, run.question, plan, state, sources));
+      } catch (error) {
+        if (!(error instanceof LlmRequestError) || ctx.abort.signal.aborted) throw error;
+        // 점검이 실패해도 보고서는 쓴다 (전에는 여기서 보고서를 건너뛰어 조사 메모로 끝났다, 이슈 #521)
+        auditFailure = fallbackReasonFor(error);
+        notes.push(`AI가 근거 점검을 하지 못해(${cutText(error.message, 160)}) 점검 없이 보고서를 쓰게 했어요.`);
+        audit = fallbackAudit(state);
+      }
       state.auditedAt = stepsUsed;
-      await this.save(ctx, AI_RESEARCH_STATUS.RUNNING, { audit: json(audit), researchState: json(state) }, [
-        { type: 'audit.ready', payload: { claimCount: audit.supportedClaims.length, contradictionCount: audit.contradictions.length, missingCount: audit.missingDimensions.length, ok: audit.ok } },
+      await this.save(ctx, AI_RESEARCH_STATUS.RUNNING, { audit: json({ ...audit, auditFailure }), researchState: json(state) }, [
+        { type: 'audit.ready', payload: { claimCount: audit.supportedClaims.length, contradictionCount: audit.contradictions.length, missingCount: audit.missingDimensions.length, ok: audit.ok, ...(auditFailure ? { failure: auditFailure } : {}) } },
       ]);
     }
 
@@ -443,80 +455,70 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
     let fallback: AiResearchReportFallbackReason | null = null;
     const timeoutMs = this.config.reportTimeoutMs ?? reportTimeoutMs();
     const timeoutMinutes = Math.round(timeoutMs / 60_000);
-    if (!llmDown)
-      try {
-        const messages = buildReportMessages({
-          question: run.question,
-          plan,
-          state,
-          sources,
-          audit,
-          limits: ctx.limits,
-          today: ctx.today,
-          revision: revision && previousReport ? { instruction: revision.instruction, previousReport } : null,
-        });
-        const maxTokens = ctx.model.reportMaxTokens;
-        const askOnce = (msgs: ChatMessage[]) => this.llmClient.chatText(endpoint, endpoint.model, msgs, { timeoutMs, maxTokens, profile: LLM_PROFILE.RESEARCH_REPORT, signal: ctx.abort.signal });
-        let retried = false;
-        // 로컬 LLM은 긴 보고서를 시간 안에 다 쓰지 못할 때가 있어(#493 실측) 시간 초과는 보고서 단계에서 한 번만 같은 요청으로 다시 한다
-        const ask = async (msgs: ChatMessage[]) => {
-          try {
-            return await askOnce(msgs);
-          } catch (error) {
-            if (retried || !(error instanceof LlmRequestError) || error.kind !== 'TIMEOUT' || ctx.abort.signal.aborted) throw error;
-            retried = true;
-            this.logger.warn(`조사 ${ctx.id} 보고서가 ${timeoutMinutes}분 안에 오지 않아 한 번 더 부탁해요`);
-            await this.save(ctx, AI_RESEARCH_STATUS.RUNNING, { updatedAt: new Date(this.config.now()) }, [{ type: 'report.retry', payload: { timeoutMinutes } }]);
-            return askOnce(msgs);
-          }
-        };
-        let reply = await ask(messages);
-        // 생각만 하다 예산을 다 쓴 답은 한 번만 더 생각 없이 부탁한다
-        if (reply.text.trim().length < NEAR_EMPTY_CHARS) {
-          await this.assertMine(ctx);
-          reply = await ask(withNoThinkHint(messages));
-        }
-        body = reply.text.trim();
-        truncated = reply.truncated;
-        // 길이 한도에 걸렸으면 한 번만 끊긴 곳부터 이어 쓰게 하고 붙인다. 이어 쓰기가 실패하면 끊긴 보고서를 쓴다(맨 위 알림)
-        if (truncated && body.length >= NEAR_EMPTY_CHARS) {
-          await this.assertMine(ctx);
-          try {
-            const more = await ask(continuationMessages(messages, body));
-            const merged = mergeContinuation(body, more.text);
-            if (merged.length > body.length) {
-              body = merged;
-              truncated = more.truncated;
-            }
-          } catch (error) {
-            if (!(error instanceof LlmRequestError) || ctx.abort.signal.aborted) throw error;
-            this.logger.warn(`조사 ${ctx.id} 보고서 이어 쓰기 실패: ${cutText(error.message, 160)}`);
-          }
-        }
-        if (body.length < NEAR_EMPTY_CHARS) body = '';
-        if (!body) {
-          fallback = 'EMPTY';
-          notes.push(`AI가 빈 보고서를 내 ${replacement}.`);
-        }
-      } catch (error) {
-        if (!(error instanceof LlmRequestError) || ctx.abort.signal.aborted) throw error;
-        fallback = error.kind === 'TIMEOUT' ? 'TIMEOUT' : 'ERROR';
-        notes.push(fallback === 'TIMEOUT' ? `AI가 보고서를 ${timeoutMinutes}분 안에 쓰지 못해(한 번 더 부탁해도) ${replacement}.` : `AI가 보고서를 쓰지 못해 ${replacement}(${cutText(error.message, 160)}).`);
+    // 보고서 단계(빈 답 다시 묻기·이어 쓰기 포함) 전체에서 다시 하기를 함께 센다
+    const reportTries = { retries: 0, calls: 0 };
+    try {
+      const messages = buildReportMessages({
+        question: run.question,
+        plan,
+        state,
+        sources,
+        audit,
+        limits: ctx.limits,
+        today: ctx.today,
+        revision: revision && previousReport ? { instruction: revision.instruction, previousReport } : null,
+      });
+      const maxTokens = ctx.model.reportMaxTokens;
+      const ask = (msgs: ChatMessage[]) =>
+        this.withLlmRetry(ctx, 'report', reportTries, () => this.llmClient.chatText(endpoint, endpoint.model, msgs, { timeoutMs, maxTokens, profile: LLM_PROFILE.RESEARCH_REPORT, signal: ctx.abort.signal }));
+      let reply = await ask(messages);
+      // 생각만 하다 예산을 다 쓴 답은 한 번만 더 생각 없이 부탁한다
+      if (reply.text.trim().length < NEAR_EMPTY_CHARS) {
+        await this.assertMine(ctx);
+        reply = await ask(withNoThinkHint(messages));
       }
-    else {
-      fallback = 'LLM_DOWN';
-      notes.push(`보고서는 ${replacement}.`);
+      body = reply.text.trim();
+      truncated = reply.truncated;
+      // 길이 한도에 걸렸으면 한 번만 끊긴 곳부터 이어 쓰게 하고 붙인다. 이어 쓰기가 실패하면 끊긴 보고서를 쓴다(맨 위 알림)
+      if (truncated && body.length >= NEAR_EMPTY_CHARS) {
+        await this.assertMine(ctx);
+        try {
+          const more = await ask(continuationMessages(messages, body));
+          const merged = mergeContinuation(body, more.text);
+          if (merged.length > body.length) {
+            body = merged;
+            truncated = more.truncated;
+          }
+        } catch (error) {
+          if (!(error instanceof LlmRequestError) || ctx.abort.signal.aborted) throw error;
+          this.logger.warn(`조사 ${ctx.id} 보고서 이어 쓰기 실패: ${cutText(error.message, 160)}`);
+        }
+      }
+      if (body.length < NEAR_EMPTY_CHARS) body = '';
+      if (!body) {
+        fallback = 'EMPTY';
+        notes.push(`AI가 빈 보고서를 내 ${replacement}.`);
+      }
+    } catch (error) {
+      if (!(error instanceof LlmRequestError) || ctx.abort.signal.aborted) throw error;
+      fallback = fallbackReasonFor(error);
+      const tried = reportTries.calls > 1 ? ` · ${reportTries.calls}번 시도` : '';
+      notes.push(
+        fallback === 'TIMEOUT'
+          ? `AI가 보고서를 ${timeoutMinutes}분 안에 쓰지 못해(${reportTries.calls}번 시도) ${replacement}.`
+          : `AI가 보고서를 쓰지 못해 ${replacement}(${fallback === 'ERROR' ? '' : `${AI_RESEARCH_REPORT_FALLBACK_LABEL[fallback]}${tried}: `}${cutText(error.message, 160)}).`,
+      );
     }
     if (!body) {
       // 조사 메모·앞 판은 끊긴 글이 아니므로 '길이 한도' 알림을 겹쳐 달지 않는다
       truncated = false;
       body = previousReport ?? fallbackReportBody(run.question, audit, state);
     } else fallback = null;
-    const reportFallback: AiResearchReportFallback | null = fallback ? { reason: fallback, previous: previousReport !== null } : null;
+    const reportFallback: AiResearchReportFallback | null = fallback ? { reason: fallback, previous: previousReport !== null, attempts: Math.max(1, reportTries.calls) } : null;
     const incompleteReason = notes.length ? notes.join(' ') : null;
     const { report, citedIds } = finalizeReport(body, sources, truncated, incompleteReason);
-    // 차트는 덤이다: LLM이 끊겼으면 부르지 않고, 실패하면 차트 없이 끝낸다
-    const charted = llmDown ? null : await this.charts(ctx, endpoint, run.question, plan, state, sources);
+    // 차트는 덤이다: 보고서를 대체본으로 썼으면(LLM이 바쁘거나 끊김) 부르지 않고, 실패하면 차트 없이 끝낸다
+    const charted = fallback ? null : await this.charts(ctx, endpoint, run.question, plan, state, sources);
     const charts = charted?.charts ?? [];
     // 고치기를 마쳤으니 부탁을 메모에서 지운다 (판으로 남는다)
     const finished: StoredState = { ...state };
@@ -527,7 +529,7 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
       {
         status: AI_RESEARCH_STATUS.COMPLETED,
         report,
-        audit: json({ ...audit, reportTruncated: truncated, incompleteReason, reportFallback }),
+        audit: json({ ...audit, reportTruncated: truncated, incompleteReason, reportFallback, auditFailure: auditFailure ?? audit.auditFailure ?? null }),
         charts: json(charts),
         researchState: json(finished),
         finishedAt: new Date(this.config.now()),
@@ -568,6 +570,29 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
       if (error instanceof LeaseLostError || ctx.abort.signal.aborted) throw error;
       this.logger.warn(`조사 ${ctx.id} 차트 제안 실패: ${error instanceof Error ? error.name : 'unknown'}`);
       return null;
+    }
+  }
+
+  /**
+   * 점검·보고서 LLM 한 번 (이슈 #521): 잠깐 실패(시간 초과·연결 실패·모델 없음·LLM 서버 5xx·429)면 config.llmRetryWaitsMs만큼 쉬었다 다시 한다.
+   * tries는 그 단계 전체에서 함께 센다(보고서는 빈 답 다시 묻기·이어 쓰기까지). 다시 할 때마다 report.retry를 남긴다. 잘못된 요청 같은 실패는 바로 던진다.
+   */
+  private async withLlmRetry<T>(ctx: RunContext, phase: 'audit' | 'report', tries: { retries: number; calls: number }, call: () => Promise<T>): Promise<T> {
+    for (;;) {
+      try {
+        tries.calls += 1;
+        return await call();
+      } catch (error) {
+        if (ctx.abort.signal.aborted) throw error;
+        const reason = retryReasonOf(error);
+        const wait = this.config.llmRetryWaitsMs[tries.retries];
+        if (!reason || wait === undefined) throw error;
+        tries.retries += 1;
+        this.logger.warn(`조사 ${ctx.id} ${phase === 'audit' ? '점검' : '보고서'} LLM 실패(${reason}) → ${Math.round(wait / 1000)}초 뒤 다시 (${tries.retries}번째)`);
+        await this.save(ctx, AI_RESEARCH_STATUS.RUNNING, { updatedAt: new Date(this.config.now()) }, [{ type: 'report.retry', payload: { phase, reason, attempt: tries.retries, waitSeconds: Math.round(wait / 1000) } }]);
+        await this.config.sleep(wait, ctx.abort.signal);
+        await this.assertMine(ctx);
+      }
     }
   }
 
@@ -749,6 +774,21 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
 /** 단계 기록은 이만큼까지 남긴다 (단계 상한 30보다 넉넉히) */
 const NOTES_KEPT = 60;
 const NEAR_EMPTY_CHARS = 5;
+
+/**
+ * 다시 해 볼 만한 LLM 실패면 그 까닭 (이슈 #521): 시간 초과·연결 실패·모델 없음(Unsloth가 바빠 모델 목록을 못 읽은 때 포함)·LLM 서버 5xx·429.
+ * 멈춤(취소)·읽지 못한 답·잘못된 요청(4xx)은 다시 해도 같아 null
+ */
+export function retryReasonOf(error: unknown): AiResearchLlmRetryReason | null {
+  if (!(error instanceof LlmRequestError) || error instanceof LlmAbortedError || error instanceof LlmJsonParseError) return null;
+  if (error.kind === 'TIMEOUT' || error.kind === 'CONNECT' || error.kind === 'NO_MODEL') return error.kind;
+  return error.status !== undefined && (error.status >= 500 || error.status === 429) ? 'SERVER' : null;
+}
+
+/** 대체본·점검 실패의 까닭 (화면에 보인다) */
+export function fallbackReasonFor(error: LlmRequestError): AiResearchReportFallbackReason {
+  return error.kind === 'TIMEOUT' || error.kind === 'CONNECT' || error.kind === 'NO_MODEL' ? error.kind : 'ERROR';
+}
 
 /** 끊긴 보고서를 이어 쓰게 하는 메시지: 앞 요청 + 끊긴 답 + 이어 쓰기 부탁 */
 export function continuationMessages(messages: ChatMessage[], partial: string): ChatMessage[] {
