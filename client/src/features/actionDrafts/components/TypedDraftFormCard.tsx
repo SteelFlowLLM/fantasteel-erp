@@ -138,7 +138,7 @@ export function TypedDraftFormCard({ draft, actionType, failure, onConfirmFailur
     <Card petKey="card:actionDrafts.typedForm" className={cn(status === 'EXECUTED' && 'border-[#b9dec8]', status === 'REJECTED' && 'opacity-90')}>
       <header className="flex flex-none flex-wrap items-center gap-2 border-b border-line px-4 py-2.5">
         <h2 className="text-base font-semibold">{editable ? '값을 확인하고 확정해 주세요' : '초안 내용'}</h2>
-        <AiFillHint aiFilledFields={draft.payload.aiFilledFields ?? []} editable={editable} />
+        <AiFillHint aiFilledFields={draft.payload.aiFilledFields ?? []} aiExtraction={draft.payload.aiExtraction} editable={editable} />
         <Badge tone={DRAFT_STATUS_TONE[status]} className="ml-auto">
           {DRAFT_STATUS_LABEL[status]}
         </Badge>

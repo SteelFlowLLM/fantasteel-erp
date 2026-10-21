@@ -1,5 +1,6 @@
 // 확장 유형(REQ-ACT-005) 추출값 검증·미확정 칸·저장값 읽기를 DB 없이 확인한다.
 import { AppException } from '../../../common/errors/app.exception';
+import { extractTimeoutMs } from '../draft-extractor';
 import { allocationPayloadOf, allocationUnresolvedFields } from './allocation.action';
 import { datePatch, extractedQtyOf, idPatch, linesPatch, matchOne, qtyPatch } from './draft-values';
 import { reproductionPlanPayloadOf, reproductionPlanUnresolvedFields } from './reproduction-plan.action';
@@ -86,6 +87,7 @@ describe('수주 등록 초안 (SALES_ORDER_CREATE)', () => {
       items: [{ itemId: 11, orderedQty: null, dueDate: '2026-11-01' }],
       sourceText: null,
       aiFilledFields: ['customerId'],
+      aiExtraction: null,
     });
   });
 });
@@ -136,7 +138,9 @@ describe('재생산 계획 초안 (REPRODUCTION_PLAN_CREATE)', () => {
     expect(reproductionPlanUnresolvedFields({ salesOrderItemStatus: 'PARTIALLY_SHIPPED' })).toEqual([]);
     expect(reproductionPlanUnresolvedFields({ salesOrderItemStatus: 'CANCELLED' })).toEqual(['수주 품목']);
     expect(reproductionPlanUnresolvedFields(undefined)).toEqual(['수주 품목']);
-    expect(reproductionPlanPayloadOf({ salesOrderItemId: 4, aiFilledFields: ['salesOrderItemId'] })).toEqual({ salesOrderItemId: 4, sourceText: null, aiFilledFields: ['salesOrderItemId'] });
+    expect(reproductionPlanPayloadOf({ salesOrderItemId: 4, aiFilledFields: ['salesOrderItemId'] })).toEqual({ salesOrderItemId: 4, sourceText: null, aiFilledFields: ['salesOrderItemId'], aiExtraction: null });
+    expect(reproductionPlanPayloadOf({ salesOrderItemId: 4, aiExtraction: 'TIMEOUT' }).aiExtraction).toBe('TIMEOUT');
+    expect(reproductionPlanPayloadOf({ salesOrderItemId: 4, aiExtraction: 'SOMETHING' }).aiExtraction).toBeNull();
   });
 });
 
@@ -152,5 +156,16 @@ describe('수정 요청 칸 검증', () => {
     expect(linesPatch(null)).toEqual([]);
     expect(codeOf(() => linesPatch([1, 2]))).toBe('COM-004');
     expect(codeOf(() => linesPatch(Array.from({ length: 21 }, () => ({}))))).toBe('COM-004');
+  });
+});
+
+describe('AI 추출 제한 시간 (이슈 #472)', () => {
+  it('기본 90초, MESSAGE_EXTRACT_TIMEOUT_SECONDS로 1~600초 사이에서 바꾼다', () => {
+    expect(extractTimeoutMs(undefined)).toBe(90_000);
+    expect(extractTimeoutMs('45')).toBe(45_000);
+    expect(extractTimeoutMs('')).toBe(90_000);
+    expect(extractTimeoutMs('0')).toBe(90_000);
+    expect(extractTimeoutMs('9999')).toBe(90_000);
+    expect(extractTimeoutMs('abc')).toBe(90_000);
   });
 });

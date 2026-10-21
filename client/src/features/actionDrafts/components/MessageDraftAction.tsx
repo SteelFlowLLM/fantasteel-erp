@@ -15,6 +15,7 @@ import { useAction } from '@/hooks/useAction';
 import { useRoomActionDrafts } from '@/hooks/useActionDrafts';
 import { useMe } from '@/hooks/useMe';
 import { canUse } from '@/lib/permissions';
+import { toast } from '@/stores/useToastStore';
 
 function MessageDraftAction({ actionType, icon, message, room, closeMenu }: MessageActionProps & { actionType: ActionType; icon: IconName }) {
   const router = useRouter();
@@ -51,9 +52,14 @@ function MessageDraftAction({ actionType, icon, message, room, closeMenu }: Mess
     <MessageActionItem
       icon={icon}
       disabled={drafts.isPending || create.isPending}
-      onClick={() => create.mutate({ messageId: message.id, actionType: actionType === ACTION_TYPE.PURCHASE_REQUISITION_CREATE ? undefined : actionType })}
+      aria-busy={create.isPending || undefined}
+      onClick={() => {
+        // 모델에 따라 몇십 초 걸린다. 메뉴를 닫아도 다 만들면 초안 화면으로 간다
+        toast.info('AI가 메시지를 읽는 중이에요. 다 읽으면 초안을 열어요');
+        create.mutate({ messageId: message.id, actionType: actionType === ACTION_TYPE.PURCHASE_REQUISITION_CREATE ? undefined : actionType });
+      }}
     >
-      {create.isPending ? 'AI가 초안을 만드는 중…' : (guide?.menuLabel ?? `${typeLabel} 초안 만들기`)}
+      {create.isPending ? 'AI가 메시지를 읽는 중…' : (guide?.menuLabel ?? `${typeLabel} 초안 만들기`)}
     </MessageActionItem>
   );
 }

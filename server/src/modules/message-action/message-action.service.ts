@@ -74,14 +74,17 @@ export class MessageActionService {
     const checked = await this.creatable(this.prisma, user, messageId, definition);
     if (checked.open) return openResult(checked.open);
     const content = checked.message.content?.trim();
-    const extracted = content ? await this.extractor.extract(() => definition.extractionGuide(this.prisma), content, checked.message.createdAt) : null;
+    const extraction = content ? await this.extractor.extract(() => definition.extractionGuide(this.prisma), content, checked.message.createdAt) : null;
 
     // 그 사이 같은 메시지·유형 초안이 생겨 부분 unique에 걸리면 다시 확인해 그 초안을 돌려준다
     return retryOnNumberConflict(() => this.prisma.$transaction(async (tx) => {
       const { message, requester, open } = await this.creatable(tx, user, messageId, definition);
       if (open) return openResult(open);
 
-      const payload = extracted ? await definition.fromExtraction(tx, extracted, message.content) : definition.empty(message.content);
+      const filled = extraction?.values ? await definition.fromExtraction(tx, extraction.values, message.content) : definition.empty(message.content);
+      // 빈 초안이면 왜 비었는지 화면에 보이려고 AI 추출 결과를 남긴다 (이슈 #472). 글이 없는 메시지는 추출하지 않는다
+      const aiExtraction = extraction ? (extraction.status ?? (isAiAssisted(filled) ? 'FILLED' : 'NOTHING_FOUND')) : null;
+      const payload = { ...filled, aiExtraction };
       const draft = await this.repository.createDraft(tx, { actionType: definition.actionType, payload: toJson(payload), messageId: message.id, requesterId: requester.employeeId });
       await this.businessEventRecorder.record(tx, {
         type: BUSINESS_EVENT_TYPE.DRAFT_CREATED,

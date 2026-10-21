@@ -153,7 +153,7 @@ export function DraftFormCard({ draft, payload, failure, onConfirmFailure }: Dra
     <Card petKey="card:purchaseRequisitions.draftForm" className={cn(status === 'EXECUTED' && 'border-[#b9dec8]', status === 'REJECTED' && 'opacity-90')}>
       <header className="flex flex-none flex-wrap items-center gap-2 border-b border-line px-4 py-2.5">
         <h2 className="text-base font-semibold">{editable ? '값을 입력하고 확정해 주세요' : '초안 내용'}</h2>
-        <AiFillHint aiFilledFields={payload.aiFilledFields ?? []} editable={editable} />
+        <AiFillHint aiFilledFields={payload.aiFilledFields ?? []} aiExtraction={payload.aiExtraction} editable={editable} />
         <Badge tone={DRAFT_STATUS_TONE[status]} className="ml-auto">
           {DRAFT_STATUS_LABEL[status]}
         </Badge>

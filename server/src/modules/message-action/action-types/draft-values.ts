@@ -1,4 +1,5 @@
 // 유형 정의가 같이 쓰는 값 읽기·검증: 저장된 payload(jsonb), LLM이 준 값, 수정 요청. 업무 규칙(어떤 칸이 필수인지 등)은 각 유형 정의에 둔다.
+import type { AiExtractionStatus } from '@fantasteel/shared';
 import { AppException } from '../../../common/errors/app.exception';
 import { isValidDate } from '../../purchasing/purchasing.service';
 
@@ -18,11 +19,17 @@ export const idsOf = (v: unknown): number[] => (Array.isArray(v) ? [...new Set(v
 /** 저장된 품목 줄 목록 (객체만, 상한까지) */
 export const linesOf = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? v.filter(isRecord).slice(0, MAX_DRAFT_LINES) : []);
 
-/** 모든 확장 유형 payload에 있는 원본 글·AI가 채운 칸 */
-export function draftBaseOf(raw: Record<string, unknown>): { sourceText: string | null; aiFilledFields: string[] } {
+const AI_EXTRACTION_STATUSES: readonly AiExtractionStatus[] = ['FILLED', 'NOTHING_FOUND', 'NO_MODEL', 'TIMEOUT', 'NOT_JSON', 'FAILED'];
+
+/** 저장된 AI 추출 결과 (없거나 모르는 값이면 null) */
+export const aiExtractionOf = (v: unknown): AiExtractionStatus | null => (AI_EXTRACTION_STATUSES.includes(v as AiExtractionStatus) ? (v as AiExtractionStatus) : null);
+
+/** 모든 확장 유형 payload에 있는 원본 글·AI가 채운 칸·AI 추출 결과 */
+export function draftBaseOf(raw: Record<string, unknown>): { sourceText: string | null; aiFilledFields: string[]; aiExtraction: AiExtractionStatus | null } {
   return {
     sourceText: textOrNull(raw.sourceText),
     aiFilledFields: Array.isArray(raw.aiFilledFields) ? raw.aiFilledFields.filter((f): f is string => typeof f === 'string') : [],
+    aiExtraction: aiExtractionOf(raw.aiExtraction),
   };
 }
 
