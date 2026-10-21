@@ -10,6 +10,7 @@ import {
   type ShipmentRequestStatus,
   type ShipmentRequestSummary,
 } from '@fantasteel/shared';
+import { seoulDateOnly } from '../../common/time/seoul-date';
 import type { SnapshotHeatInput, SnapshotInspectionInput, SnapshotLotInput } from './mill-sheet-snapshot';
 import type {
   MillSheetDetailRow,
@@ -110,8 +111,9 @@ const toInspectionInput = (row: SnapshotInspectionRow | null): SnapshotInspectio
 const toHeatInput = (row: SnapshotHeatRow): SnapshotHeatInput => ({
   id: row.id,
   lotNo: row.lotNo,
-  // 히트 LOT에는 생산완료일 컬럼이 없어 제강 실적 완료 시각을 쓴다
-  producedDate: row.productionResult?.completedAt ?? null,
+  // 히트 LOT에는 생산완료일 컬럼이 없어 제강 실적 완료 시각을 쓴다. 시각이라 서울 날짜로 바꿔 둔다
+  // (UTC로 자르면 한국 0~9시에 끝난 히트가 전날로 찍혀 같은 밀시트의 슬래브·코일 생산완료일과 어긋난다)
+  producedDate: row.productionResult?.completedAt ? seoulDateOnly(row.productionResult.completedAt) : null,
   converterCode: row.productionResult?.converterCode ?? null,
   steelGradeCode: row.steelGrade?.steelGradeCode ?? null,
   inspection: toInspectionInput(row.inspection),

@@ -1,6 +1,6 @@
 // 회의록 화면 ↔ 서버 API (server/src/modules/meeting-minutes, API-258·259, docs/backend/meeting-minutes.md).
 // 서버가 막는 입력(빈 제목·기록, 참석자 없음, 길이)은 미리 입력칸 오류로 보인다. 없는 참석자·날짜 형식은 서버 문구를 그대로 보인다.
-import { MEETING_SUMMARY_MAX, type MeetingMinutesFromDriveInput, type MeetingNotionExportResult, type MeetingCandidateUpdateInput, type MeetingSpeakerMappingInput, type MeetingSpeakerSuggestResult, type MeetingMinutesCreateInput, type MeetingMinutesPage, type MeetingMinutesView, type MeetingRegisterResult } from '@fantasteel/shared';
+import { MEETING_KEYWORD_MAX, MEETING_SUMMARY_MAX, type MeetingMinutesFromDriveInput, type MeetingNotionExportResult, type MeetingCandidateUpdateInput, type MeetingSpeakerMappingInput, type MeetingSpeakerSuggestResult, type MeetingMinutesCreateInput, type MeetingMinutesPage, type MeetingMinutesView, type MeetingRegisterResult } from '@fantasteel/shared';
 import { FieldErrors } from '@/api/errors';
 import { serverRequest, serverUpload } from '@/api/http';
 import { MEETING_AUDIO_MAX_BYTES, MEETING_LIST_PAGE_SIZE, MEETING_TITLE_MAX, MEETING_TRANSCRIPT_MAX, type MeetingMinutesAudioInput, type MeetingMinutesListQuery } from '@/api/meetingMinutes';
@@ -43,7 +43,7 @@ function audioFormOf(input: MeetingMinutesAudioInput): FormData {
 export const serverMeetingMinutesApi = {
   list: (query: MeetingMinutesListQuery): Promise<MeetingMinutesPage> =>
     serverRequest<MeetingMinutesPage>('GET', '/meeting-minutes', {
-      query: { page: query.page ?? 1, size: MEETING_LIST_PAGE_SIZE, meetingMinutesStatus: query.meetingMinutesStatus, keyword: query.keyword?.trim() || undefined },
+      query: { page: query.page ?? 1, size: MEETING_LIST_PAGE_SIZE, meetingMinutesStatus: query.meetingMinutesStatus, keyword: query.keyword?.trim().slice(0, MEETING_KEYWORD_MAX) || undefined },
     }),
 
   get: (id: number): Promise<MeetingMinutesView> => serverRequest<MeetingMinutesView>('GET', `/meeting-minutes/${id}`),

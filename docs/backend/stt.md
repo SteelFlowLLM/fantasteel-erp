@@ -27,12 +27,14 @@ DB가 아니라 `storage/settings/stt.json`에 저장한다. 파일이 없으면
 - 회사 설정: 관리자가 AI 연결 화면의 '철강맨 부르기' 카드에서 회사 전체로 끈다(`storage/settings/steelman-wake.json`, `SteelmanWakeSettingsStore`). 파일이 없으면 기본값 **부르기 켬·말로 승인 끔**(가정값). 부르기가 꺼져 있으면 이 API는 한도를 세기 전에 `VOC-011`(403)로 거절하고, 철강맨AI의 `GET ai-assistant/capabilities`가 `steelmanWake: { available, voiceApproval }`로 알려 화면이 스위치를 숨기고 마이크를 끈다. 켜 있어도 사원 각자의 스위치(기본 꺼짐)를 켜야 듣는다.
 - 설정 화면이 아니라 모든 사원이 쓰는 기능이라 권한 코드 없이 **로그인만** 본다(`ORG_MANAGE` 아님). 저장된 주소·키·모델을 그대로 쓴다.
 - 사원당 **1분 30번**(`STT_WAKE_CLIP_LIMITS.perMinute`, 가정값). 넘으면 음성 서버에 보내지 않고 `VOC-009`(429). 한도는 메모리(`SttWakeLimiter`)라 서버를 다시 켜면 비지만 1분 창이라 상관없다. 한도를 넘은 요청은 세지 않는다.
-- 크기 512KB까지(multer가 끊는다). 이름표(MIME)가 아니라 바이트 머리를 읽어(`stt-wake-clip.ts`의 `wakeClipProblem`) RIFF·WAVE·PCM이고 data 길이가 8초(+0.5초 여유) 안인 것만 받는다. 아니면 음성 서버에 보내지 않고 `COM-004`. 소리도 받아쓴 글도 **저장·로그하지 않는다**(부르는 말이 없는 글은 화면이 바로 버린다).
+- 크기 512KB까지(multer가 끊는다). 이름표(MIME)가 아니라 바이트 머리를 읽어(`stt-wake-clip.ts`의 `wakeClipProblem`) RIFF·WAVE·PCM이고 data 길이가 8초(+0.5초 여유) 안인 것만 받는다. 아니면 음성 서버에 보내지 않고 `COM-004`. 소리도 받아쓴 글도 **저장·로그하지 않는다**(부르는 말이 없는 글은 화면이 처리하지 않고, 무엇을 들었는지 띠에 5초만 보인 뒤 화면 메모리에서도 지운다, 이슈 #494).
 - 저장된 모델이 사이드카의 화자 분리 엔진(`whisper-pyannote`·`vibevoice`)이면 받아쓰기만 하는 `whisper`로 바꿔 보낸다(`quickModelOf`, 몇 초짜리라 화자 분리가 필요 없고 느리다). 제한 시간 20초.
 - 음성 서버에 닿지 않거나 거절하면 HTTP 오류가 아니라 `{ text: null, error }`라 화면이 스위치 옆에 "음성 서버가 꺼져 있어요"로 보인다. 자세한 이유(음성 서버 주소·Tailscale 이름·서버가 준 오류)는 설정 권한(`ORG_MANAGE` USE)이 있는 사원에게만 돌려주고, 나머지 사원에게는 "음성 서버에 연결할 수 없어요. 관리자에게 알려 주세요"만 준다. 자세한 이유는 서버 기록(`Logger.warn`, 사원 id 포함, 소리·글 없음)에 남는다.
 - 이 Mac 음성 서버(8001, whisper)로 `say -v Yuna`로 만든 1~3초 소리가 0.3~0.9초에 받아써졌다(2026-10-21).
+- **조각 종류 `mode`(이슈 #494)**: multipart 글 칸 `mode`(`WakeClipDto`, 보내지 않으면 `wake`). `wake`는 부르는 말을 찾는 짧은 조각(8초·512KB), `command`는 "철강맨" 뒤 명령 한 덩어리(**30초·1MB**, `STT_WAKE_CLIP_LIMITS.commandMaxSeconds·commandMaxBytes`, 가정값), `partial`은 명령을 말하는 동안 화면에 보이기만 할 중간 글(30초·1MB). multer는 가장 큰 1MB에 맞춰 받고 종류별 크기·길이(`wakeClipLimitOf`, `wakeClipProblem(buffer, maxSeconds)`)는 service가 본다. `partial`은 따로 **1분 40번**(`partialPerMinute`, 가정값) 세어 명령·부르는 말 조각의 30번을 깎지 않는다. 어느 종류도 소리·글을 저장·로그하지 않는다.
+- 측정(2026-10-22, 이 Mac 8001 whisper, `say -v Yuna`로 만든 12초 문장을 2·4·…·12초로 잘라 보냄): 길이와 거의 상관없이 **0.27~0.34초**에 받아썼다. 그래서 명령을 말하는 동안 2초마다 지금까지의 덩어리를 다시 보내 중간 글을 보이는 방식(30초 말에도 15번)을 켰다. 잘린 조각에서는 앞의 "철강맨"이 빠지기도 해 중간 글은 보이기만 하고 명령으로 쓰지 않는다.
 
-`SttClient.transcribe`는 `POST {baseUrl}/audio/transcriptions`(multipart: file, model, language=ko, response_format=verbose_json, temperature=0)를 부르고, OpenAI·whisper.cpp의 `verbose_json`과 `{ text }`만 오는 json을 모두 `{ text, segments[{ start, end, text }], durationSec }`로 바꾼다. 제한 시간은 변환 **60분**(VibeVoice처럼 느린 화자 분리 엔진 대비), 연결 확인 30초.
+`SttClient.transcribe`는 `POST {baseUrl}/audio/transcriptions`(multipart: file, model, language=ko, response_format=verbose_json, temperature=0)를 부르고, OpenAI·whisper.cpp의 `verbose_json`과 `{ text }`만 오는 json을 모두 `{ text, segments[{ start, end, text }], durationSec }`로 바꾼다. 제한 시간은 변환 **60분**(VibeVoice처럼 느린 화자 분리 엔진 대비), 연결 확인 30초. 전역 `fetch`(undici)는 응답 헤더를 5분 안에 못 받으면 끊어서, 변환 요청에만 전용 `undici.Agent`(`headersTimeout`·`bodyTimeout` = 제한 시간 + 10초, `sttAgentOptions`)를 넘겨 5분 넘게 걸리는 긴 회의도 받는다(이슈 #485, Agent는 요청마다 만들어 끝나면 닫는다). 우리 제한이 먼저 걸려 "N초 안에 응답이 없어요"가 나온다. 모델 목록·연결 확인 같은 짧은 요청은 기본 fetch다.
 
 응답 구간에 `speaker`(문자열)가 있으면 `SttSegment.speaker`로 남기고, 없거나 문자열이 아니면 null이다. 일반 whisper.cpp·OpenAI는 주지 않는다.
 
@@ -77,3 +79,7 @@ whisper-server -m ~/models/ggml-large-v3-turbo.bin --host 127.0.0.1 --port 8000 
 
 `server/src/modules/stt/stt.spec.ts` — DB 없이 `npm run test:unit -w @fantasteel/server`로 돈다.
 `steelman-wake-settings.store.spec.ts` — 회사 설정 기본값·깨진 파일·부르기를 끄면 말로 승인도 꺼짐. `stt-wake-clip.spec.ts` — WAV 머리(PCM·8초·LIST 덩이·깨진 머리). `stt-wake.spec.ts` — 철강맨 부르기: 사원별 1분 횟수(넘은 요청은 세지 않음·1분 뒤 다시), 짧은 조각 모델, 저장된 설정·20초로 보내기, 음성 서버 실패는 이유로(관리자만 자세히)·모르는 오류는 던짐, 조각 없음·WAV 아님·8초 넘음 COM-004, 한도 초과 VOC-009, 회사 설정 꺼짐 VOC-011(한도 안 셈), 로그인만(공개 아님·`ORG_MANAGE` 아님), 회사 설정 API는 `ORG_MANAGE` VIEW·USE.
+
+## 설정 파일 쓰기 (2026-10-21, #487)
+
+- `storage/settings/stt.json`·`steelman-wake.json`과 철강맨AI 브라우저 설정은 공통 함수 `writeFileAtomic`(common/storage)으로 같은 폴더의 임시 파일(무작위 이름)에 다 쓴 뒤 이름을 바꿔 끼운다. 실패하면 임시 파일(API 키가 든)을 지운다. 쓰는 도중 읽는 요청이 반쪽 JSON을 읽어 오류가 나지 않는다. LLM 설정(`llm.json`)에도 같은 문제가 있지만 그 저장소는 #468이 고치는 중이라 이 이슈에서는 건드리지 않았다 🟡.

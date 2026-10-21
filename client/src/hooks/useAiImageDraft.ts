@@ -16,7 +16,9 @@ export const AI_IMAGE_LIMIT_NOTICE = `사진은 한 번에 ${AI_IMAGE_MAX_COUNT}
 
 export function useAiImageDraft() {
   const [images, setImages] = useState<PreparedAiImage[]>([]);
-  const [busy, setBusy] = useState(false);
+  // 준비 중인 사진 수: 두 장을 동시에 붙일 때 먼저 끝난 사진이 '준비 끝'으로 만들지 않게 센다 (이슈 #476)
+  const [pending, setPending] = useState(0);
+  const busy = pending > 0;
   const [notice, setNotice] = useState<AiImageNotice | null>(null);
   // 여러 장을 연달아 처리하는 동안에도 다시 그리기를 기다리지 않고 최신 목록을 보려고 상태와 함께 든다
   const imagesRef = useRef<PreparedAiImage[]>([]);
@@ -32,7 +34,7 @@ export function useAiImageDraft() {
         setNotice({ text: AI_IMAGE_LIMIT_NOTICE, error: false });
         return;
       }
-      setBusy(true);
+      setPending((count) => count + 1);
       setNotice(null);
       try {
         const image = await prepare();
@@ -42,7 +44,7 @@ export function useAiImageDraft() {
       } catch (error) {
         setNotice({ text: error instanceof AiImageError ? error.message : '사진을 붙이지 못했어요', error: true });
       } finally {
-        setBusy(false);
+        setPending((count) => Math.max(0, count - 1));
       }
     },
     [commit],

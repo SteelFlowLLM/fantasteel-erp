@@ -1,6 +1,6 @@
 import { Type } from 'class-transformer';
-import { IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
-import { CHAT_ROOM_NAME_MAX, CHAT_ROOM_TYPE, MESSAGE_CONTENT_MAX, MESSAGE_EMOTICON_KEYS, MESSAGE_PAGE_SIZE_MAX, MESSAGE_REACTION_EMOJIS, MESSAGE_SEARCH_QUERY_MAX, type ChatRoomType, type MessageEmoticonKey, type MessageReactionEmoji } from '@fantasteel/shared';
+import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
+import { CHAT_MEMBER_PICK_MAX, CHAT_ROOM_NAME_MAX, CHAT_ROOM_TYPE, MESSAGE_CONTENT_MAX, MESSAGE_EMOTICON_KEYS, MESSAGE_PAGE_SIZE_MAX, MESSAGE_REACTION_EMOJIS, MESSAGE_SEARCH_QUERY_MAX, type ChatRoomType, type MessageEmoticonKey, type MessageReactionEmoji } from '@fantasteel/shared';
 
 export class CreateChatRoomDto {
   @IsIn(Object.values(CHAT_ROOM_TYPE), { message: '채팅방 유형은 DIRECT, GROUP, WORK 중 하나여야 해요' })
@@ -8,6 +8,7 @@ export class CreateChatRoomDto {
 
   /** 나를 뺀 멤버. 나는 자동으로 들어간다. 업무방은 비워도 된다 */
   @IsArray({ message: 'memberIds는 사원 id 배열이어야 해요' })
+  @ArrayMaxSize(CHAT_MEMBER_PICK_MAX, { message: `한 번에 ${CHAT_MEMBER_PICK_MAX}명까지 고를 수 있어요` })
   @IsInt({ each: true, message: 'memberIds는 사원 id 배열이어야 해요' })
   memberIds!: number[];
 
@@ -53,6 +54,7 @@ export class SendMessageDto {
   /** @멘션한 사원 (본문을 해석하지 않고 따로 받는다, 2026-10-07 결정). 방 멤버가 아니면 무시한다 */
   @IsOptional()
   @IsArray({ message: 'mentionedEmployeeIds는 사원 id 배열이어야 해요' })
+  @ArrayMaxSize(CHAT_MEMBER_PICK_MAX, { message: `한 번에 ${CHAT_MEMBER_PICK_MAX}명까지 멘션할 수 있어요` })
   @IsInt({ each: true, message: 'mentionedEmployeeIds는 사원 id 배열이어야 해요' })
   mentionedEmployeeIds?: number[];
 
@@ -100,6 +102,7 @@ export class UploadAttachmentDto {
 export class InviteMembersDto {
   /** 초대할 사원. 이미 멤버인 사원은 건너뛴다 */
   @IsArray({ message: 'memberIds는 사원 id 배열이어야 해요' })
+  @ArrayMaxSize(CHAT_MEMBER_PICK_MAX, { message: `한 번에 ${CHAT_MEMBER_PICK_MAX}명까지 고를 수 있어요` })
   @IsInt({ each: true, message: 'memberIds는 사원 id 배열이어야 해요' })
   memberIds!: number[];
 }

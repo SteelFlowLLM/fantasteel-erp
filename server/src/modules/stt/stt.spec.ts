@@ -1,12 +1,17 @@
 // DB 없이 도는 STT 단위 테스트: 응답 해석, WAV 머리글, 요청 형식, 오류 문구, 연결 확인, 주소 검증.
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { SttClient, SttRequestError, connectFailureMessage, parseModelList, parseTranscript, silentWav } from './stt.client';
+import { Agent } from 'undici';
+import { SttClient, SttRequestError, connectFailureMessage, parseModelList, parseTranscript, silentWav, sttAgentOptions } from './stt.client';
 import { TestSttConnectionDto, UpdateSttSettingsDto } from './dto/stt-settings.dto';
 import { SttService } from './stt.service';
 import { isBlockedSttHost, redactUrl } from './stt-url';
 import type { SttSettingsStore } from './stt-settings.store';
 
+/** 아래 describe들이 fetch를 가로채기 전의 실제 fetch (실제 서버로 부르는 시험용) */
+const realFetch = globalThis.fetch;
 const endpoint = { baseUrl: 'http://127.0.0.1:8000/v1/', apiKey: null };
 const input = { audio: Buffer.from('abc'), fileName: '회의.webm', mimeType: 'audio/webm', model: null };
 
@@ -147,6 +152,48 @@ const failureOf = (promise: Promise<unknown>): Promise<Error> =>
     },
     (error: Error) => error,
   );
+
+describe('SttClient.transcribe 긴 전사의 대기 시간 (이슈 #485)', () => {
+  // 앞 describe의 afterAll(mockRestore)가 먼저 가로채기를 풀어서 이 describe는 실행 직전에 새로 가로챈다
+  let fetchMock: jest.SpyInstance;
+  beforeAll(() => {
+    fetchMock = jest.spyOn(globalThis, 'fetch');
+  });
+  afterEach(() => fetchMock.mockReset());
+  afterAll(() => fetchMock.mockRestore());
+
+  it('전역 fetch의 기본 헤더 대기(300초)에 걸리지 않게 전사 제한 시간에 맞춘 Agent를 이 요청에만 넘긴다', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ text: '네' }), { status: 200 }));
+    await new SttClient().transcribe({ baseUrl: 'http://stt.test/v1', apiKey: null }, input);
+    const init = fetchMock.mock.calls[0][1] as RequestInit & { dispatcher?: unknown };
+    expect(init.dispatcher).toBeInstanceOf(Agent);
+    // 한 시간 제한이면 헤더·본문 모두 한 시간보다 조금 더 기다린다 (우리 제한이 먼저 걸려 안내 문구가 나온다)
+    expect(sttAgentOptions(60 * 60_000)).toEqual({ headersTimeout: 60 * 60_000 + 10_000, bodyTimeout: 60 * 60_000 + 10_000 });
+    expect(sttAgentOptions(60 * 60_000).headersTimeout).toBeGreaterThan(300_000);
+  });
+
+  it('모델 목록 같은 짧은 요청은 기본 fetch를 그대로 쓴다', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }));
+    await new SttClient().listModels({ baseUrl: 'http://stt.test/v1', apiKey: null });
+    expect((fetchMock.mock.calls[0][1] as { dispatcher?: unknown }).dispatcher).toBeUndefined();
+  });
+
+  it('응답 헤더가 한참 늦게 와도(실제 서버, 1.2초) Agent가 끊지 않고 받는다', async () => {
+    // 이 시험만 실제 fetch로 부른다 (afterEach의 mockReset이 다음 시험을 위해 되돌린다)
+    fetchMock.mockImplementation(realFetch);
+    const server = createServer((_req, res) => {
+      setTimeout(() => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ text: '늦은 답' })), 1200);
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const { port } = server.address() as AddressInfo;
+      const transcript = await new SttClient().transcribe({ baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: null }, input, 5_000);
+      expect(transcript.text).toBe('늦은 답');
+    } finally {
+      server.close();
+    }
+  });
+});
 
 describe('연결 실패 이유', () => {
   const url = 'http://192.168.0.20:8000/v1/audio/transcriptions';

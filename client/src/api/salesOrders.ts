@@ -9,8 +9,6 @@ import { serverMessengerApi } from '@/api/server/messenger';
 import { serverProductionPlanApi } from '@/api/server/production';
 import { serverSalesOrderApi } from '@/api/server/salesOrders';
 import {
-  PERMISSION,
-  type Permission,
   type ProductionPlanStatus,
   type ProductItemType,
   type ReservationStatus,
@@ -137,9 +135,6 @@ export interface CreateSalesOrderInput {
 
 /** 수주 취소 창의 구매 진행 영향 한 줄: 취소·연결 해제될 생산계획에 연결된 구매요청과 발주 (서버와 같은 모양, 표시만 한다) */
 export type CancelPurchaseImpactLine = SalesOrderCancelPurchaseImpactLine;
-
-/** 수주 화면을 여는 권한 (screens.ts의 salesOrders와 같다): 수주 등록·취소 중 하나라도 조회 이상 */
-export const SALES_ORDER_VIEW_PERMISSIONS: readonly Permission[] = [PERMISSION.SALES_ORDER_CREATE, PERMISSION.SALES_ORDER_CANCEL];
 
 export interface SalesOrderPreviewInputLine {
   itemId: number;

@@ -133,3 +133,7 @@ server/
 - 다른 사람이 만든 거래 데이터는 지우거나 바꾸지 않는다.
 - `seed.ts` 변경은 공용 DB에 자동으로 들어가지 않는다. 생기면 DB 담당자와 반영 방법을 정한다.
 - 첨부·밀시트 PDF는 각자 PC의 `STORAGE_DIR`에 저장된다 (공유하려면 Supabase Storage 이전이 필요하고, 이는 별도 작업).
+
+## 9. AWS 배포
+
+AWS 한 대(Caddy + pm2, DB는 Supabase, LLM·음성은 사용자 Mac의 Tailscale)에 올리는 템플릿과 순서는 [deploy/aws/README.md](../deploy/aws/README.md)에 있다(`Caddyfile`·`server.env.example`·`client.env.example`·`ecosystem.config.cjs`). 서버는 **한 대·프로세스 하나**만 띄우고(일꾼·스케줄러·로그인 실패 제한이 프로세스 메모리를 쓴다), 종료 신호(SIGTERM)에 진행 중인 일을 정리한다(`enableShutdownHooks`). 빌드 전에 `npm run generate:sql -w @fantasteel/server`가 필요하며 Supabase 스키마가 먼저 최신이어야 한다(8장).

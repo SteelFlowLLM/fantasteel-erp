@@ -34,7 +34,24 @@ import { serverSalesOrderApi } from '@/api/server/salesOrders';
 import { imageMimeOf } from '@/features/messenger/lib/attachment';
 import { findMentions } from '@/features/messenger/lib/messageText';
 
-const listRaw = () => serverRequest<ServerRoomListItem[]>('GET', '/chat-rooms');
+/**
+ * 채팅방 목록. 안 읽은 수 배지·최근 방 드롭다운·방 목록 세 조회가 같은 `/chat-rooms`를 한꺼번에 불러서(소켓 이벤트·무효화마다 셋이 같이 다시 읽는다)
+ * 같은 순간(같은 자바스크립트 작업 안)에 시작한 요청은 하나만 보내 응답을 함께 쓴다 (이슈 #476).
+ * 시간 창을 두지 않고 다음 작업 턴에 공유를 끝내서, 변경 직후의 다시 읽기가 변경 전에 시작한 요청의 응답을 받는 일이 없다.
+ */
+let listShared: Promise<ServerRoomListItem[]> | null = null;
+const listRaw = (): Promise<ServerRoomListItem[]> => {
+  if (listShared) return listShared;
+  const promise = serverRequest<ServerRoomListItem[]>('GET', '/chat-rooms');
+  listShared = promise;
+  const clear = () => {
+    if (listShared === promise) listShared = null;
+  };
+  // 응답이 오면, 아니면 같은 작업 턴이 끝나면(다음 턴 시작 요청과는 나누지 않는다) 공유를 끝낸다
+  setTimeout(clear, 0);
+  promise.then(clear, clear);
+  return promise;
+};
 const roomRaw = (chatRoomId: number) => serverRequest<ServerRoomDetail>('GET', `/chat-rooms/${chatRoomId}`);
 
 const previewOf = (room: ServerRoomListItem): ChatRoomPreview => ({

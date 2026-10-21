@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { LOT_STATUS, LOT_TYPE, PURCHASE_REQUISITION_STATUS, type PurchaseOrderStatus, type PurchaseRequisitionStatus } from '@fantasteel/shared';
 import type { Prisma } from '../../generated/prisma/client';
-import { lockPurchaseOrderByItemId } from '../../generated/prisma/sql';
+import { lockProductionPlan, lockPurchaseOrderByItemId } from '../../generated/prisma/sql';
 import type { Tx } from '../../prisma/prisma.service';
 
 /** 목록·상세가 함께 쓰는 읽기 모양: 품목·요청자(부서)·승인자·근거 계획(→ 수주) */
@@ -83,6 +83,11 @@ export class PurchasingRepository {
 
   findProductionPlan(tx: Tx, id: number) {
     return tx.productionPlan.findUnique({ where: { id }, select: { id: true, salesOrderItem: { select: { salesOrderId: true } } } });
+  }
+
+  /** 생산계획 행을 잠근다 (같은 계획의 원료 구매요청을 동시에 두 건 만들지 않게). 없으면 null */
+  async lockProductionPlan(tx: Tx, productionPlanId: number) {
+    return (await tx.$queryRawTyped(lockProductionPlan(productionPlanId)))[0] ?? null;
   }
 
   findOpenRequisitionForPlan(tx: Tx, productionPlanId: number, itemId: number) {

@@ -28,7 +28,7 @@
 
 | Method | Path | 이름 | 권한 | 비고 ([CSV]) |
 | --- | --- | --- | --- | --- |
-| GET | `shipment-requests` | 출하요청 목록 | `SHIPMENT_REQUEST_MANAGE` VIEW 또는 `GOODS_ISSUE_CONFIRM` VIEW | `shipmentRequestNo`(번호 일부, 대소문자 무시)로 거른다(상단 통합 검색) |
+| GET | `shipment-requests` | 출하요청 목록 | `SHIPMENT_REQUEST_MANAGE` VIEW 또는 `GOODS_ISSUE_CONFIRM` VIEW | `shipmentRequestNo`(번호 일부, 대소문자 무시)로 거른다(상단 통합 검색). `withItems=true`(이슈 #476)면 줄마다 상세(`GET :id`와 같은 값: 품목·배정·출고 확정자)를 함께 준다: 화면이 목록 줄마다 상세를 따로 부르던 N+1을 없앤다 |
 | POST | `shipment-requests` | 출하요청 등록 | `SHIPMENT_REQUEST_MANAGE` USE | 출하 가능 매수 초과 시 SHP-002 |
 | GET | `shipment-requests/:id` | 출하요청 상세 | 목록과 같음 | |
 | POST | `shipment-requests/:id/cancel` | 출하요청 취소 | `SHIPMENT_REQUEST_MANAGE` USE | 출고 후면 SHP-003 |
@@ -150,3 +150,9 @@
 - 저장 이름은 `{밀시트 번호}_{고객사}_{발행일 YYYYMMDD}.pdf`(예: `MS-2610-0028-1_나래조선_20261006.pdf`)다. shared의 `millSheetPdfFileName`이 만들고, 서버 저장 파일·브라우저 'PDF로 저장' 기본 이름(문서 제목)·화면의 경로가 같은 규칙을 쓴다. 고객사 이름의 공백·사용할 수 없는 글자는 `_`로 바꾸고 30자까지만 쓴다. 저장소가 앞에 붙이는 임의 id(`<uuid>-`)는 그대로다.
 
 참고: `nextMillSheetNumber`는 같은 tx 안의 밀시트 수 + 1이므로, 수주가 여럿이면 밀시트를 하나 저장한 뒤 다음 번호를 받는 순서로 부른다(미리 여러 번 받으면 같은 번호가 나온다).
+
+## 9. 출고 확정 잠금·제한 시간·밀시트 날짜 (2026-10-21, #478)
+
+- 출고 확정은 품목마다 예약 전환 작업 로그를 남기므로, 모든 재고 행을 첫 작업 로그 전에 잠근다(inventory.md 10장).
+- 출고 확정 트랜잭션 제한 시간을 30초로 늘렸다(LOT마다 재검증·소진·작업 로그. 수주 등록·취소와 같은 값).
+- 밀시트 히트 생산일은 제강 실적 완료 시각을 서울 날짜로 바꿔 넣는다. 전에는 UTC로 잘라 한국 0~9시에 끝난 히트가 전날로 찍혀 같은 밀시트의 슬래브·코일 생산완료일과 어긋났다. 이미 발행한 밀시트 스냅샷은 바꾸지 않는다.

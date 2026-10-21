@@ -25,9 +25,6 @@ export const AI_RESEARCH_STATUS_LABEL: Record<AiResearchStatus, string> = {
   CANCELLED: '취소됨',
 };
 
-/** 끝난 상태 (더 바뀌지 않는다. COMPLETED는 더 조사하기로 QUEUED가 될 수 있다) */
-export const AI_RESEARCH_FINISHED_STATUSES: readonly AiResearchStatus[] = ['COMPLETED', 'FAILED', 'CANCELLED'];
-
 /** 정해 둔 한도 (가정값) */
 export const AI_RESEARCH_LIMITS = {
   questionMin: 2,
@@ -182,13 +179,6 @@ export interface AiResearchPendingRevision {
   search: boolean;
 }
 
-/** POST ai-research/runs/:id/revisions */
-export interface CreateAiResearchRevisionInput {
-  instruction: string;
-  /** 필요하면 더 검색 (기본 true) */
-  search?: boolean;
-}
-
 /** 차트 한 점. y는 출처(sourceId)의 글에 실제로 있는 숫자만 (서버가 확인한다) */
 export interface AiResearchChartPoint {
   x: string;
@@ -294,22 +284,7 @@ export interface AiResearchNotionExportResult {
   run: AiResearchRunView;
 }
 
-export interface UpdateAiResearchPlanInput {
-  revision: number;
-  plan: AiResearchPlan;
-}
-
-export interface StartAiResearchRunInput {
-  revision: number;
-}
-
-/** POST ai-research/runs/:id/plan/suggest (이슈 #416). plan은 화면의 지금 계획(저장하지 않은 고침 포함) */
-export interface SuggestAiResearchPlanInput {
-  instruction: string;
-  plan: AiResearchPlan;
-}
-
-/** 말로 고치기 결과. 서버는 저장하지 않는다. dropped = 규칙(검색어 확인·같은 검색어·6단계)에 맞지 않아 뺀 단계 수 */
+/** POST ai-research/runs/:id/plan/suggest (이슈 #416) 말로 고치기 결과. 서버는 저장하지 않는다. dropped = 규칙(검색어 확인·같은 검색어·6단계)에 맞지 않아 뺀 단계 수 */
 export interface AiResearchPlanSuggestion {
   plan: AiResearchPlan;
   dropped: number;

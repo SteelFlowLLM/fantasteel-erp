@@ -2,6 +2,7 @@
    화면은 Tailwind 유틸리티로만 만든다. 이 파일에는 토큰과 Tailwind로 표현할 수 없는 기본값만 둔다. */
 @import 'tailwindcss';
 @import './icons.css';
+@import './wake-orb.css';
 
 @theme {
   /* 색: B안 토큰만 쓰도록 기본 팔레트를 비운다 */
@@ -126,7 +127,7 @@ html[data-font-size] {
   width: calc(100dvw / var(--app-zoom));
 }
 
-/* 글꼴: next/font가 <html>에 --font-plex-sans / --font-plex-mono 변수를 단다 */
+/* 글꼴: styles/fonts.css가 :root에 --font-plex-sans / --font-plex-mono 변수를 단다 */
 @theme inline {
   --font-sans: var(--font-plex-sans), 'IBM Plex Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
   --font-mono: var(--font-plex-mono), 'IBM Plex Mono', 'D2Coding', ui-monospace, monospace;

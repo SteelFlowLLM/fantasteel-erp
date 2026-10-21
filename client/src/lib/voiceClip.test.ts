@@ -39,7 +39,38 @@ describe('VoiceSegmenter', () => {
     expect(feed(segmenter, 0.002, 1000)).toEqual([]);
   });
 
-  it('쉬지 않고 말하면 8초에서 자르고, 그 크기를 배경으로 삼아 같은 소리가 이어지면 더 보내지 않는다', () => {
+  it('8초보다 길게 말하면 8초에서 잘라 보내고 끊지 않고 이어 받아, 나머지를 다음 조각으로 낸다 (이슈 #494)', () => {
+    const segmenter = new VoiceSegmenter({ sampleRate: RATE });
+    feed(segmenter, 0.002, 600);
+    const first = feed(segmenter, 0.2, 10_000);
+    expect(first).toHaveLength(1);
+    expect(segmenter.lastClip).toEqual({ mode: 'wake', truncated: true });
+    expect(segmenter.speaking).toBe(true);
+    const rest = feed(segmenter, 0.002, 1000);
+    expect(rest).toHaveLength(1);
+    expect(rest[0].length).toBeGreaterThan(2 * RATE);
+    expect(segmenter.lastClip).toEqual({ mode: 'wake', truncated: false });
+  });
+
+  it('명령 듣기는 30초까지 한 덩어리로 받고, 1.2초 조용해야 끝나며, 길어도 배경으로 삼지 않는다', () => {
+    const segmenter = new VoiceSegmenter({ sampleRate: RATE });
+    segmenter.mode = 'command';
+    feed(segmenter, 0.002, 600);
+    expect(feed(segmenter, 0.2, 12_000)).toEqual([]);
+    // 0.8초 쉬어도 이어진다
+    expect(feed(segmenter, 0.002, 800)).toEqual([]);
+    feed(segmenter, 0.2, 2_000);
+    const done = feed(segmenter, 0.002, 1_300);
+    expect(done).toHaveLength(1);
+    expect(segmenter.lastClip).toEqual({ mode: 'command', truncated: false });
+    const long = feed(segmenter, 0.2, 31_000);
+    expect(long).toHaveLength(1);
+    expect(long[0].length).toBe(30 * RATE);
+    expect(segmenter.speaking).toBe(true);
+    expect(segmenter.snapshot()?.length).toBeGreaterThan(0);
+  });
+
+  it('쉬지 않고 16초 넘게 이어지면(기계 소리) 그 크기를 배경으로 삼아 같은 소리가 이어지면 더 보내지 않는다', () => {
     const segmenter = new VoiceSegmenter({ sampleRate: RATE });
     feed(segmenter, 0.002, 600);
     const clips = feed(segmenter, 0.2, 20_000);
@@ -59,6 +90,25 @@ describe('VoiceSegmenter', () => {
     expect(segmenter.speaking).toBe(false);
     feed(segmenter, 0.2, 500);
     expect(segmenter.speaking).toBe(true);
+  });
+});
+
+describe('말 시작 민감도 (이슈 #494)', () => {
+  it('작은 목소리(크기 0.01)는 보통이면 놓치고, 높음이면 잡는다. 듣는 중에 바꿔도 된다', () => {
+    const normal = new VoiceSegmenter({ sampleRate: RATE });
+    feed(normal, 0.001, 1000);
+    expect(normal.startThreshold).toBeCloseTo(0.015, 5);
+    expect(feed(normal, 0.01, 1500)).toEqual([]);
+    expect(normal.speaking).toBe(false);
+    expect(normal.lastRms).toBeCloseTo(0.01, 5);
+
+    // 조용한 곳에서 켠 뒤 민감도를 높이면 같은 목소리를 잡는다
+    const raised = new VoiceSegmenter({ sampleRate: RATE });
+    feed(raised, 0.001, 1000);
+    raised.minStartRms = 0.007;
+    feed(raised, 0.01, 1500);
+    expect(raised.speaking).toBe(true);
+    expect(feed(raised, 0.001, 1000)).toHaveLength(1);
   });
 });
 

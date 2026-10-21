@@ -47,3 +47,41 @@ export function microphoneErrorMessage(error: unknown, secureContext: boolean): 
   if (name === 'NotReadableError') return '마이크를 다른 프로그램이 쓰고 있어요';
   return '마이크를 켜지 못했어요';
 }
+
+/**
+ * 녹음 시작 한 번을 지키는 표 (이슈 #476). 권한 창이 떠 있는 동안 [녹음 시작]을 또 눌러도 마이크·타이머가 하나 더 생기지 않고,
+ * 권한 창이 떠 있는 사이 화면을 옮겨(cancel) 나중에 허락해도 그 마이크를 바로 끄도록 부른 쪽이 isCurrent로 확인한다.
+ */
+export interface RecordStartGuard {
+  /** 시작할 수 있으면 이번 시작의 번호, 이미 시작 중·녹음 중이거나 취소됐으면 null */
+  begin: () => number | null;
+  /** 이번 시작이 아직 유효한지 (그 사이 취소·다른 시작이 없었는지) */
+  isCurrent: (token: number) => boolean;
+  /** 시작 중·녹음 중 표시를 푼다 (녹음이 끝났거나 시작에 실패했을 때) */
+  end: () => void;
+  /** 화면을 떠난다: 진행 중이던 시작은 모두 무효가 되고 더는 시작할 수 없다 */
+  cancel: () => void;
+}
+
+export function createRecordStartGuard(): RecordStartGuard {
+  let busy = false;
+  let cancelled = false;
+  let token = 0;
+  return {
+    begin: () => {
+      if (busy || cancelled) return null;
+      busy = true;
+      token += 1;
+      return token;
+    },
+    isCurrent: (value) => !cancelled && value === token,
+    end: () => {
+      busy = false;
+    },
+    cancel: () => {
+      cancelled = true;
+      busy = false;
+      token += 1;
+    },
+  };
+}

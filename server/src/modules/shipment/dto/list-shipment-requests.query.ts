@@ -1,5 +1,5 @@
-import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import { SHIPMENT_REQUEST_STATUS, type ShipmentRequestStatus } from '@fantasteel/shared';
 
 /** 출하요청 목록 조건. 페이징은 page·size (컨벤션 5장), 최신 등록순 */
@@ -18,6 +18,12 @@ export class ListShipmentRequestsQuery {
   @IsString()
   @MaxLength(30, { message: '출하요청 번호는 30자까지 입력해 주세요' })
   shipmentRequestNo?: string;
+
+  /** true면 목록 줄마다 상세(품목·배정)를 함께 준다. 화면이 줄마다 상세를 따로 부르지 않게 한다 (이슈 #476) */
+  @IsOptional()
+  @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
+  @IsBoolean({ message: 'withItems는 true 또는 false여야 합니다' })
+  withItems?: boolean;
 
   @IsOptional()
   @Type(() => Number)

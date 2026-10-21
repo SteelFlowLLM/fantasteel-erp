@@ -5,7 +5,7 @@ function setup(claimable: () => Promise<unknown[]>) {
   const findClaimable = jest.fn(claimable);
   const repository = { findClaimable, claim: jest.fn(async () => false) };
   // 일꾼이 쓰는 것은 저장소의 찾기·맡기뿐이다 (맡을 조사가 없는 경우만 시험)
-  const runner = new AiResearchRunner({} as never, repository as never, {} as never, {} as never, {} as never, {} as never, {} as never);
+  const runner = new AiResearchRunner({} as never, repository as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
   return { runner, findClaimable };
 }
 

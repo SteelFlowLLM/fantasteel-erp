@@ -26,7 +26,7 @@ import type { AiResearchPlanDto, CreateAiResearchRunDto, ListAiResearchRunsQuery
 import { AiResearchRepository, retryOnSeqConflict } from './ai-research.repository';
 import { askResearchJson } from './ai-research.llm';
 import { buildPlanReviseMessages, PLAN_JSON_SCHEMA } from './ai-research.prompt';
-import { canExtend, checkResearchQuery, defaultBudget, EMPTY_STATE, erpPartnerNames, extendedBudget, isErpSource, normalizeSeed, queryKey, readBudget, readPlan, revisionStart, seedSources, storedPlan, storedSeed, storedSources, storedState } from './ai-research.rules';
+import { canExtend, checkResearchQuery, defaultBudget, EMPTY_STATE, erpPartnerNames, extendedBudget, isInternalSource, normalizeSeed, queryKey, readBudget, readPlan, revisionStart, seedSources, storedPlan, storedSeed, storedSources, storedState } from './ai-research.rules';
 import { AiResearchRunner, DEFAULT_RUNNER_CONFIG } from './ai-research.runner';
 import { researchLimits } from './ai-research.config';
 import { buildResearchNotionMarkdown, researchNotionTitle } from './ai-research.notion';
@@ -141,7 +141,7 @@ export class AiResearchService {
     const run = await this.owned(this.prisma, user, id);
     if (run.status !== AI_RESEARCH_STATUS.AWAITING_APPROVAL) throw new AppException('RES-002', '계획 확인 대기 중인 조사만 계획을 고칠 수 있어요');
     const sources = storedSources(run.sources);
-    const messages = buildPlanReviseMessages({ question: run.question, plan: dto.plan, instruction: dto.instruction, seed: storedSeed(run.seed), erp: sources.filter(isErpSource) });
+    const messages = buildPlanReviseMessages({ question: run.question, plan: dto.plan, instruction: dto.instruction, seed: storedSeed(run.seed), erp: sources.filter(isInternalSource) });
     let value: Record<string, unknown> | null;
     try {
       value = await askResearchJson(this.llmClient, { ...llmEndpointOf(settings), model: settings.model }, messages, PLAN_JSON_SCHEMA, (v) => Array.isArray(v.steps), {
@@ -232,7 +232,7 @@ export class AiResearchService {
           last = 1;
         }
         const version = last + 1;
-        const started = revisionStart({ stepsUsed: run.stepsUsed, budget: readBudget(run.budget), state: storedState(run.researchState), sourceCount: storedSources(run.sources).filter((s) => !isErpSource(s)).length }, { version, instruction, search });
+        const started = revisionStart({ stepsUsed: run.stepsUsed, budget: readBudget(run.budget), state: storedState(run.researchState), sourceCount: storedSources(run.sources).filter((s) => !isInternalSource(s)).length }, { version, instruction, search });
         // 그 사이 다른 요청(고치기·더 조사하기)이 먼저 줄에 세웠으면 updatedAt이 달라 0건이다
         const { count } = await this.repository.updateOwned(tx, { id, employeeId: user.employeeId, status: [AI_RESEARCH_STATUS.COMPLETED], updatedAt: run.updatedAt }, {
           status: AI_RESEARCH_STATUS.QUEUED,

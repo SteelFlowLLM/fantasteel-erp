@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { forwardRef, Inject, Injectable } from '@nestjs/common';
 import {
   ITEM_TYPE,
   PROCESS_TYPE,
@@ -13,6 +13,7 @@ import { AppException } from '../../common/errors/app.exception';
 import { seoulDateOnly } from '../../common/time/seoul-date';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
+import { InventoryService } from '../inventory/inventory.service';
 import type { SimulateResultsDto } from './dto/simulation.dto';
 import { hotMetalTonPerHeat, slabQtyFromHeat } from './heat-plan.calculator';
 import { HotRollingService } from './hot-rolling.service';
@@ -43,6 +44,7 @@ export class ProductionSimulationService {
     private readonly results: ProductionResultService,
     private readonly production: ProductionService,
     private readonly hotRolling: HotRollingService,
+    @Inject(forwardRef(() => InventoryService)) private readonly inventory: InventoryService,
   ) {}
 
   async simulate(user: AuthUser, productionPlanId: number, dto: SimulateResultsDto, now: Date = new Date()): Promise<SimulationResult> {
@@ -77,6 +79,9 @@ export class ProductionSimulationService {
           steps.push({ processType: PROCESS_TYPE.STEELMAKING }, { processType: PROCESS_TYPE.CONTINUOUS_CASTING });
         }
         const rolls = basis.itemType === ITEM_TYPE.COIL && plan.salesOrderItemId !== null;
+        // 열연까지 하는 계획은 마지막 열연 배정·완료가 슬래브 재고 행을 잠근다. 앞 공정 실적이 작업 로그(채번)를 먼저 잡으므로
+        // 재고 행을 지금 잠가 거래 전체 순서(계획 → 재고 → 작업 로그)를 지킨다 (#478 리뷰)
+        if (rolls) await this.inventory.lockInventoriesFirst(tx, [basis.slabItem.id]);
         // 같은 고로·전로의 작업과 겹치지 않고 투입할 용선·히트·슬래브가 먼저 끝나 있도록, 마지막 관련 실적 뒤에 놓는다
         const todayStart = new Date(seoulDateOnly(now).getTime() - 9 * 3_600_000);
         const last = await this.resultRepository.findLastCompletedAt(tx, {

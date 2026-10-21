@@ -16,7 +16,7 @@ import { Spinner } from '@/components/StateView';
 import { NOTION_REMOVAL_HINT } from '@/features/schedule/NotionSyncToggle';
 import { ScheduleEventModal } from '@/features/schedule/ScheduleEventModal';
 import { canEditEvent, canToggleNotion, notionRemovalPending } from '@/features/schedule/lib/scheduleForm';
-import { addDays, mondayOf, seoulDayOf, weekDays, weekFromParam } from '@/features/schedule/lib/week';
+import { addDays, mondayOf, overlapsDay, weekDays, weekFromParam } from '@/features/schedule/lib/week';
 import { useShellTitle } from '@/features/shell/useShellTitle';
 import { useUrlParams } from '@/features/purchasing/hooks/useUrlParams';
 import { useAction } from '@/hooks/useAction';
@@ -137,7 +137,7 @@ export function ScheduleScreen() {
         {(list) => (
           <ol className="flex flex-col gap-2">
             {days.map((day) => {
-              const dayEvents = list.filter((event) => seoulDayOf(event.startAt) === day);
+              const dayEvents = list.filter((event) => overlapsDay(event, day));
               const dayTasks = (tasks.data ?? []).filter((task) => task.taskStatus === 'OPEN' && task.dueDate === day);
               const empty = dayEvents.length === 0 && dayTasks.length === 0;
               const isToday = day === today;

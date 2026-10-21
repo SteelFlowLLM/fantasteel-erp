@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { randomUUID } from 'node:crypto';
 import type { CookieOptions } from 'express';
 
 /** access token을 담는 httpOnly 쿠키 이름 (컨벤션 6장) */
@@ -33,8 +34,9 @@ export function readCookie(cookieHeader: string | undefined, name: string): stri
 export class AuthTokenService {
   constructor(private readonly jwt: JwtService) {}
 
+  /** jti로 로그인마다 다른 토큰을 만든다: 같은 1초에 두 기기에서 로그인해도 한쪽 로그아웃이 다른 쪽 메신저 소켓을 끊지 않게 (이슈 #488) */
   sign(employeeId: number): Promise<string> {
-    return this.jwt.signAsync({ sub: employeeId });
+    return this.jwt.signAsync({ sub: employeeId, jti: randomUUID() });
   }
 
   /** 유효하면 사원 id, 아니면 null */
@@ -51,5 +53,17 @@ export class AuthTokenService {
   /** Cookie 헤더에서 토큰을 읽어 검증한다 */
   verifyCookieHeader(cookieHeader: string | undefined): Promise<number | null> {
     return this.verify(readCookie(cookieHeader, ACCESS_TOKEN_COOKIE));
+  }
+
+  /** Cookie 헤더의 토큰을 검증하고 토큰·만료 시각(ms)도 돌려준다 (메신저 소켓이 만료 때 끊으려고, 이슈 #488). 만료가 없으면 expiresAt null */
+  async verifyCookieSession(cookieHeader: string | undefined): Promise<{ employeeId: number; token: string; expiresAt: number | null } | null> {
+    const token = readCookie(cookieHeader, ACCESS_TOKEN_COOKIE);
+    if (!token) return null;
+    try {
+      const payload = await this.jwt.verifyAsync<{ sub: number; exp?: number }>(token);
+      return { employeeId: Number(payload.sub), token, expiresAt: typeof payload.exp === 'number' ? payload.exp * 1000 : null };
+    } catch {
+      return null;
+    }
   }
 }

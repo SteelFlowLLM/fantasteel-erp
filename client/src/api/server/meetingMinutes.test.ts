@@ -39,6 +39,13 @@ describe('회의록 서버 모드 (api/server/meetingMinutes.ts)', () => {
     expect(calls[1].query).toEqual({ page: '1', size: '20' });
   });
 
+  it('목록: 검색어는 서버 상한(100자)까지만 보낸다 (넘기면 서버가 400이라 목록이 통째로 비었다, 이슈 #476)', async () => {
+    const empty: MeetingMinutesPage = { items: [], page: 1, size: 20, total: 0 };
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, (c: ServerCall) => (c.path === '/meeting-minutes' ? ok(empty) : undefined));
+    await meetingMinutesApi.list({ keyword: '가'.repeat(150) });
+    expect(calls[0].query.keyword).toHaveLength(100);
+  });
+
   it('만들기: 제목을 다듬고 참석자 중복을 없애 보낸다', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, (c: ServerCall) => (c.method === 'POST' && c.path === '/meeting-minutes' ? ok(view) : undefined));
     const created = await meetingMinutesApi.create({ meetingMinutesTitle: '  동해철강 방문 준비 ', meetingDate: '2026-10-14', attendeeIds: [5, 5, 6], transcript: '김영업: 방문합시다\n' });

@@ -46,10 +46,22 @@ function toView(row: ScheduleEventRow): ScheduleEventView {
   };
 }
 
+/**
+ * 일정 시각 글을 시각으로. 시간대(Z·±hh:mm)가 없으면 서울 시각으로 읽는다 (#487).
+ * new Date는 시간대 없는 글을 서버 로컬 시간으로 읽어, 서버가 UTC(AWS)면 9시간 밀린다
+ */
+export function seoulDateTimeOf(text: string): Date {
+  const value = text.trim();
+  if (/(Z|[+-]\d{2}:?\d{2})$/i.test(value)) return new Date(value);
+  return new Date(value.includes('T') ? `${value}+09:00` : `${value}T00:00:00+09:00`);
+}
+
 /** 입력 시각을 확인한다. schedule_event에 end_at > start_at CHECK가 있어 DB 오류가 되기 전에 업무 오류로 알린다 */
 function fieldsOf(input: ScheduleEventInput): ScheduleEventFields {
-  const startAt = new Date(input.startAt);
-  const endAt = new Date(input.endAt);
+  const startAt = seoulDateTimeOf(input.startAt);
+  const endAt = seoulDateTimeOf(input.endAt);
+  // DTO가 ISO 8601만 받지만, 읽을 수 없는 시각이 DB까지 가 서버 오류가 되지 않게 한 번 더 막는다
+  if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime())) throw new AppException('COM-004', '시각은 YYYY-MM-DDTHH:mm 형식으로 입력해 주세요');
   if (endAt.getTime() <= startAt.getTime()) throw new AppException('COM-004', '끝나는 시각은 시작 시각보다 뒤여야 해요');
   return { scheduleEventTitle: input.scheduleEventTitle, scheduleEventDescription: input.scheduleEventDescription ?? null, startAt, endAt, notionSync: input.notionSync };
 }

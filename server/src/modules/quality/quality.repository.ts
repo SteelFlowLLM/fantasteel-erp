@@ -9,7 +9,7 @@ import {
   type LotType,
 } from '@fantasteel/shared';
 import { Prisma } from '../../generated/prisma/client';
-import { findLotEligibility } from '../../generated/prisma/sql';
+import { findLotEligibility, lockInventoryByItemId, lockLotsForInspectionUpdate, lockShipmentRequest } from '../../generated/prisma/sql';
 import type { Tx } from '../../prisma/prisma.service';
 
 export interface QualityInspectionListFilter {
@@ -213,6 +213,24 @@ export class QualityRepository {
         },
       },
     });
+  }
+
+  /**
+   * 측정값 수정 잠금 (#487). 거래 전체 잠금 순서(출하요청 → 재고 행 → LOT)를 따른다:
+   * 이 LOT들의 출하 배정(확정·소진)이 걸린 출하요청(id 순) → 그 제품 규격의 재고 행(item_id 순) → LOT(id 순).
+   * 출고 확정(출하요청 → … → LOT 출고)·열연 실적(재고 행 → 슬래브 LOT)과 서로 기다리지 않게 한다. 없는 재고 행은 잠그지 않고 넘어간다
+   */
+  async lockForInspectionUpdate(tx: Tx, lotIds: number[]): Promise<void> {
+    const allocations = await tx.allocation.findMany({
+      where: { lotId: { in: lotIds }, allocationPurpose: ALLOCATION_PURPOSE.SHIPMENT, allocationStatus: { in: [ALLOCATION_STATUS.CONFIRMED, ALLOCATION_STATUS.CONSUMED] } },
+      select: { shipmentRequestItem: { select: { shipmentRequestId: true } } },
+    });
+    const requestIds = [...new Set(allocations.flatMap((a) => (a.shipmentRequestItem ? [a.shipmentRequestItem.shipmentRequestId] : [])))].sort((a, b) => a - b);
+    for (const id of requestIds) await tx.$queryRawTyped(lockShipmentRequest(id));
+    const lots = await tx.lot.findMany({ where: { id: { in: lotIds }, itemId: { not: null } }, select: { itemId: true } });
+    const itemIds = [...new Set(lots.flatMap((l) => (l.itemId === null ? [] : [l.itemId])))].sort((a, b) => a - b);
+    for (const itemId of itemIds) await tx.$queryRawTyped(lockInventoryByItemId(itemId));
+    await tx.$queryRawTyped(lockLotsForInspectionUpdate(lotIds));
   }
 
   /**

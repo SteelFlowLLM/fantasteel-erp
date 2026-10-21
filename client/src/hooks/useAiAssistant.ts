@@ -1,5 +1,5 @@
 // AI 어시스턴트 훅. 답은 화면 토스트가 아니라 대화에 바로 보이므로 useAction이 아니라 대화 저장소에 직접 넣는다.
-// LLM 연결 실패(COM-999)는 화면 오류 코드가 아니라 서버가 알려 준 이유(모델 미설정·응답 없음)가 그대로 보인다.
+// LLM 연결 실패는 서버가 오류 코드(AST-002 모델 없음·AST-003 연결 실패·AST-004 시간 초과·AST-005 그 밖)와 이유를 알려 주고, 화면은 코드에 맞는 안내를 보인다 (lib/aiLlmFailure.ts).
 // 답은 스트림으로 받아 저장소에 쌓는다: 답을 기다리는 동안 패널을 닫아도 답이 대화에 남는다.
 // 대화는 서버가 저장한다(이슈 #399): 질문에 대화 id를 보내면 서버가 지난 대화를 DB에서 읽고, 답이 끝나면 질문과 답을 저장한다.
 import type { AiAgentControlCommand, AiAgentInput, AiAssistantImageInput, AiAssistantScreenContext, AiAssistantStreamEvent, AiReasoningLevel } from '@fantasteel/shared';

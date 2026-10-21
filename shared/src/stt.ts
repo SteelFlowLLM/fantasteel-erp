@@ -84,7 +84,30 @@ export interface SttLocalServerView {
  * 철강맨 부르기 (이슈 #457, 문서에 없는 기능): 브라우저가 소리 크기로 잡은 말소리 조각 하나를 글로 바꾼다.
  * 조각은 16kHz·모노 WAV라 8초면 약 256KB다. 사원당 1분 횟수는 계속 켜 둔 마이크가 음성 서버를 독차지하지 않게 하는 가정값이다.
  */
-export const STT_WAKE_CLIP_LIMITS = { maxSeconds: 8, maxBytes: 512 * 1024, perMinute: 30 } as const;
+export const STT_WAKE_CLIP_LIMITS = {
+  maxSeconds: 8,
+  maxBytes: 512 * 1024,
+  perMinute: 30,
+  /** 명령 듣기(이슈 #494): "철강맨" 뒤 말이 끝날 때까지 한 덩어리. 30초면 약 960KB (가정값) */
+  commandMaxSeconds: 30,
+  commandMaxBytes: 1024 * 1024,
+  /** 말하는 동안 지금까지의 덩어리를 다시 보내 글을 조금씩 보이는 요청(partial)은 따로 센다 (가정값) */
+  partialPerMinute: 40,
+} as const;
+
+/**
+ * 조각 종류 (이슈 #494). wake: 부르는 말을 찾는 짧은 조각(8초) · command: "철강맨" 뒤 명령 한 덩어리(30초) ·
+ * partial: 명령을 말하는 동안 보이기만 하는 중간 글(30초, 따로 셈). 보내지 않으면 wake
+ */
+export type SttWakeClipMode = 'wake' | 'command' | 'partial';
+export const STT_WAKE_CLIP_MODES: readonly SttWakeClipMode[] = ['wake', 'command', 'partial'];
+
+/** 이 종류의 조각이 받을 수 있는 최대 길이(초)와 크기(바이트) */
+export function wakeClipLimitOf(mode: SttWakeClipMode): { maxSeconds: number; maxBytes: number } {
+  return mode === 'wake'
+    ? { maxSeconds: STT_WAKE_CLIP_LIMITS.maxSeconds, maxBytes: STT_WAKE_CLIP_LIMITS.maxBytes }
+    : { maxSeconds: STT_WAKE_CLIP_LIMITS.commandMaxSeconds, maxBytes: STT_WAKE_CLIP_LIMITS.commandMaxBytes };
+}
 
 /** POST stt/wake-clip. 소리는 저장하지 않고 글만 돌려준다. 음성 서버에 닿지 않으면 text 없이 이유를 준다 */
 export interface SttWakeClipView {

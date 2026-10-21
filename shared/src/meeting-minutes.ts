@@ -342,3 +342,6 @@ export function missingFieldsOf(c: Pick<MeetingCandidate, 'kind' | 'title' | 'as
 export function notionSyncOf(c: Pick<MeetingCandidate, 'notionSync'>): boolean {
   return c.notionSync ?? true;
 }
+
+/** 회의록 목록 검색어의 최대 글자 수. 서버 DTO와 화면이 같은 값을 쓴다 (이슈 #476, 넘으면 서버가 400이라 목록이 통째로 비었다) */
+export const MEETING_KEYWORD_MAX = 100;

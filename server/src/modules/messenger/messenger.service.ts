@@ -211,7 +211,7 @@ function workRoomNoticeOf(event: RecordedBusinessEvent): string {
 }
 
 /** 커밋을 기다렸다 소켓으로 보낼 때 다시 확인하는 간격(ms). 끝까지 없으면 롤백된 것으로 보고 보내지 않는다 */
-const EMIT_RETRY_DELAYS_MS = [100, 300, 1000, 3000];
+const EMIT_RETRY_DELAYS_MS = [100, 300, 1000, 3000, 10_000, 30_000];
 
 /** 시스템 메시지(보낸 사원 없음)의 보낸 사람 표시 */
 const SYSTEM_SENDER_NAME = '시스템';
@@ -600,6 +600,9 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
       const notices: MessageWithSender[] = [];
 
       if (dto.chatRoomType === CHAT_ROOM_TYPE.DIRECT) {
+        // 두 사람이 서로에게 거의 동시에 1:1을 열어도 방이 하나만 생기게 찾기 전에 잠근다 (이슈 #488)
+        const [low, high] = [me, memberIds[0]].sort((a, b) => a - b);
+        await this.repository.lockRoomCreation(tx, `direct:${low}:${high}`);
         const existing = await this.repository.findDirectRoomOf(tx, [me, memberIds[0]]);
         if (existing) return { result: { id: existing.id, reused: true }, changed: false, notices };
         return { result: await this.insertRoom(tx, { chatRoomType: CHAT_ROOM_TYPE.DIRECT, chatRoomName: null, salesOrderId: null }, [me, ...memberIds]), changed: true, notices };
@@ -607,6 +610,7 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
 
       if (dto.chatRoomType === CHAT_ROOM_TYPE.WORK) {
         const salesOrderId = dto.salesOrderId as number;
+        await this.repository.lockRoomCreation(tx, `work:${salesOrderId}`);
         const [salesOrder] = await this.repository.findSalesOrderNos(tx, [salesOrderId]);
         if (!salesOrder) throw new AppException('COM-003', '수주를 찾을 수 없어요');
         const existing = await this.repository.findWorkRoomOf(tx, salesOrderId);
@@ -742,18 +746,31 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
     if (files.length === 0) throw new AppException('COM-004', '첨부할 파일을 골라 주세요 (files 필드)');
     if (files.length > MESSAGE_ATTACHMENT_MAX_COUNT) throw new AppException('COM-004', `파일은 한 번에 ${MESSAGE_ATTACHMENT_MAX_COUNT}개까지 보낼 수 있어요`);
     const named = files.map((file) => ({ file, fileName: checkedFileName(file) }));
-    // 저장소에 먼저 올리면 멤버가 아닌 사람의 파일이 남으므로 멤버 확인을 먼저 한다
+    // 저장소에 먼저 올리면 실패한 요청의 파일이 남으므로, 멤버·답글 대상 확인을 먼저 한다 (이슈 #488)
     await this.requireMember(this.prisma, chatRoomId, user.employeeId);
+    const parentMessageId = dto.parentMessageId ?? null;
+    if (parentMessageId !== null) await this.requireReplyTarget(this.prisma, chatRoomId, parentMessageId);
     // 재전송이면 파일을 다시 저장하지 않는다
     const clientMessageId = dto.clientMessageId ?? null;
     const duplicate = clientMessageId ? await this.findDuplicate(user.employeeId, chatRoomId, clientMessageId) : null;
     if (duplicate) return duplicate;
-    const attachments = [];
-    for (const { file, fileName } of named) {
-      attachments.push({ filePath: await this.storage.save('messages', fileName, file.buffer), fileName, fileSize: file.size });
+    const attachments: { filePath: string; fileName: string; fileSize: number }[] = [];
+    // 메시지가 커밋되기 전에 실패하거나 거의 동시 재전송으로 먼저 저장된 메시지를 돌려받으면 이번에 쓴 파일은 DB에 남지 않으므로 지운다.
+    // 커밋된 뒤의 실패(ERP 링크 조회 등)는 파일을 메시지가 쓰므로 지우지 않는다
+    const progress = { committed: false };
+    const removeSaved = () => Promise.all(attachments.map((a) => this.storage.remove(a.filePath).catch((error: unknown) => this.logger.warn(`첨부 정리 실패 (${a.filePath}): ${String(error)}`))));
+    try {
+      for (const { file, fileName } of named) {
+        attachments.push({ filePath: await this.storage.save('messages', fileName, file.buffer), fileName, fileSize: file.size });
+      }
+      const content = dto.content?.trim() || null;
+      const posted = await this.postMessageResult(user, chatRoomId, { content, attachments, clientMessageId, parentMessageId }, [], progress);
+      if (!posted.saved) await removeSaved();
+      return posted.view;
+    } catch (error) {
+      if (!progress.committed) await removeSaved();
+      throw error;
     }
-    const content = dto.content?.trim() || null;
-    return this.postMessage(user, chatRoomId, { content, attachments, clientMessageId, parentMessageId: dto.parentMessageId ?? null }, []);
   }
 
   /** 같은 보내기 id로 이미 저장한 메시지가 있으면 그 메시지 (다른 방이면 잘못된 재사용이라 COM-004) */
@@ -871,26 +888,34 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
    * 메시지 저장 → 보낸 사람 읽음 위치 이동 → 알림 (같은 tx) → 커밋 뒤 멤버에게 소켓 발송.
    * 알림 (REQ-MSG-005): 멘션된 멤버는 MENTION, 업무방이면 나머지 멤버는 WORK_ROOM_MESSAGE. 한 메시지로 한 사람에게 1건만.
    */
-  private async postMessage(
+  private async postMessage(user: AuthUser, chatRoomId: number, data: NewMessage, mentionedEmployeeIds: readonly number[]): Promise<ChatMessageView> {
+    return (await this.postMessageResult(user, chatRoomId, data, mentionedEmployeeIds)).view;
+  }
+
+  /** postMessage와 같고, 이번 요청이 새로 저장했는지(saved)도 알린다. 먼저 저장된 같은 보내기 id의 메시지를 돌려주면 false */
+  private async postMessageResult(
     user: AuthUser,
     chatRoomId: number,
     data: NewMessage,
     mentionedEmployeeIds: readonly number[],
-  ): Promise<ChatMessageView> {
+    /** 메시지 tx가 커밋되면 committed를 true로 바꾼다 (첨부 정리가 커밋 뒤 실패와 앞 실패를 가르려고) */
+    progress: { committed: boolean } = { committed: false },
+  ): Promise<{ view: ChatMessageView; saved: boolean }> {
     const me = user.employeeId;
     // 재전송 중복 방지 (#151): 이미 저장된 보내기 id면 알림·소켓 없이 처음 메시지를 돌려준다
     if (data.clientMessageId) {
       const duplicate = await this.findDuplicate(me, chatRoomId, data.clientMessageId);
-      if (duplicate) return duplicate;
+      if (duplicate) return { view: duplicate, saved: false };
     }
     let saved: { message: MessageWithSender; memberIds: number[] };
     try {
       saved = await this.saveMessage(user, chatRoomId, data, mentionedEmployeeIds);
+      progress.committed = true;
     } catch (error) {
       // 같은 보내기 id가 거의 동시에 두 번 들어오면 부분 unique에 걸린다 → 먼저 저장된 메시지를 돌려준다
       if (data.clientMessageId && error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         const duplicate = await this.findDuplicate(me, chatRoomId, data.clientMessageId);
-        if (duplicate) return duplicate;
+        if (duplicate) return { view: duplicate, saved: false };
       }
       throw error;
     }
@@ -901,7 +926,7 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
     this.gateway.emitMessage(memberIds, (employeeId) => toMessageView(message, employeeId, unreadMemberCount, erpLinksOf));
     // 재전송 중복은 위에서 먼저 돌려보내므로, 새로 저장한 메시지만 AI를 부른다
     if (message.content && mentionsAi(message.content)) this.answerAiInBackground(user, message.chatRoomId, message.id, message.content);
-    return toMessageView(message, me, unreadMemberCount, erpLinksOf);
+    return { view: toMessageView(message, me, unreadMemberCount, erpLinksOf), saved: true };
   }
 
   /** @AI 호출 (REQ-AST-002): 보낸 메시지의 응답은 기다리지 않고 AI 답을 나중에 방에 남긴다 */

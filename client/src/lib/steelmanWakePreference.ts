@@ -1,13 +1,17 @@
 // 철강맨 부르기 (이슈 #457)의 켜기·말로 승인 허용 설정. 계정에 저장할 컬럼이 없어 이 브라우저에 두되 사원마다 따로 둔다:
 // 한 사원이 켜고 나간 브라우저로 다른 사원이 들어와도 그 사원은 마이크·말로 승인이 꺼진 채(기본)로 시작한다.
+import { parseWakeSensitivity, type WakeSensitivity } from '@/lib/steelmanWakeDisplay';
+
 export const STEELMAN_WAKE_KEY = 'fantasteel.steelman-wake';
 
 export interface SteelmanWakePreference {
   wake: boolean;
   voiceApproval: boolean;
+  /** 말 시작 민감도 (이슈 #494). 없으면 보통 */
+  sensitivity: WakeSensitivity;
 }
 
-const OFF: SteelmanWakePreference = { wake: false, voiceApproval: false };
+const OFF: SteelmanWakePreference = { wake: false, voiceApproval: false, sensitivity: 'normal' };
 
 type PreferenceStorage = Pick<Storage, 'getItem' | 'setItem'>;
 
@@ -20,7 +24,7 @@ export function parseSteelmanWakePreference(raw: string | null): SteelmanWakePre
     const value: unknown = JSON.parse(raw);
     if (typeof value !== 'object' || value === null) return OFF;
     const record = value as Record<string, unknown>;
-    return { wake: record.wake === true, voiceApproval: record.voiceApproval === true };
+    return { wake: record.wake === true, voiceApproval: record.voiceApproval === true, sensitivity: parseWakeSensitivity(record.sensitivity) };
   } catch {
     return OFF;
   }

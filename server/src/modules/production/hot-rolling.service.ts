@@ -45,12 +45,11 @@ export class HotRollingService {
     if (plan.item.itemType !== ITEM_TYPE.COIL) throw new AppException('COM-004', '열연 투입은 코일 계획만 해요');
     const basis = await this.production.heatPlanBasisOf(tx, plan.itemId);
     const slabItemId = basis.slabItem.id;
-    const [lots, allocations, inventory, candidates] = await Promise.all([
-      this.plans.findLotsOfPlans(tx, [productionPlanId]),
-      this.inventory.hotRollingAllocationsOfPlan(tx, productionPlanId),
-      this.plans.findInventory(tx, slabItemId),
-      this.inventory.hotRollingCandidates(tx, slabItemId),
-    ]);
+    // 트랜잭션 안에서도 불리므로 한 연결에 쿼리를 겹쳐 보내지 않고 차례로 읽는다 (pg 다음 버전에서 오류, #478)
+    const lots = await this.plans.findLotsOfPlans(tx, [productionPlanId]);
+    const allocations = await this.inventory.hotRollingAllocationsOfPlan(tx, productionPlanId);
+    const inventory = await this.plans.findInventory(tx, slabItemId);
+    const candidates = await this.inventory.hotRollingCandidates(tx, slabItemId);
     const coils = lots.filter((l) => l.lotType === LOT_TYPE.COIL).map((l) => ({ ...toPlanLot(l), hasConfirmedAllocation: l.allocations.length > 0 }));
     const failedCoilQty = coils.filter((c) => c.judgement === 'FAIL').length;
     const usableCoilQty = coils.length - failedCoilQty;
@@ -68,12 +67,10 @@ export class HotRollingService {
       plan.salesOrderItemId === null ? '수주 연결이 없는 코일 계획은 열연하지 않아요. 남은 합격 슬래브는 여재예요' : !open ? '완료·취소된 계획이에요' : null;
     const recommendableQty = notRollableReason === null ? Math.min(neededQty, Math.max(0, pool.availableQty)) : 0;
     const allocatedLotIds = allocations.map((a) => a.lotId);
-    const [owners, yards, allocatedLots, resultRows] = await Promise.all([
-      this.plans.findPlanIdsOfLots(tx, [...candidates.map((c) => c.id), ...allocatedLotIds]),
-      this.plans.findYardNames(tx),
-      this.plans.findLotsByIds(tx, allocatedLotIds),
-      this.resultRepository.findResults(tx, { productionPlanId, processType: PROCESS_TYPE.HOT_ROLLING }),
-    ]);
+    const owners = await this.plans.findPlanIdsOfLots(tx, [...candidates.map((c) => c.id), ...allocatedLotIds]);
+    const yards = await this.plans.findYardNames(tx);
+    const allocatedLots = await this.plans.findLotsByIds(tx, allocatedLotIds);
+    const resultRows = await this.resultRepository.findResults(tx, { productionPlanId, processType: PROCESS_TYPE.HOT_ROLLING });
     const planNos = await this.plans.findPlanNos(tx, [...new Set([...owners.values()].flatMap((id) => (id === null ? [] : [id])))]);
     const sourcePlanNoOf = (lotId: number) => {
       const owner = owners.get(lotId);

@@ -78,6 +78,8 @@ export const ERROR_CODE = {
   // 🟡 정의서 9.3에 없음. 공통 기반에 필요해 둔 값이며 팀 확인 후 정의서에 올린다.
   'AUTH-001': { message: '사원번호 또는 비밀번호가 올바르지 않습니다', status: 401 },
   'AUTH-002': { message: '로그인이 필요합니다', status: 401 },
+  // 🟡 정의서 9.3에 없음 (로그인 실패 횟수 제한, 이슈 #485). 팀 확인 후 정의서에 올린다.
+  'AUTH-003': { message: '로그인에 여러 번 실패해 잠시 막았어요. 5분쯤 뒤에 다시 해 주세요', status: 429 },
   'COM-004': { message: '입력값 형식이 올바르지 않습니다', status: 400 },
   'COM-999': { message: '서버 오류가 발생했습니다', status: 500 },
 } as const satisfies Record<string, ErrorDefinition>;

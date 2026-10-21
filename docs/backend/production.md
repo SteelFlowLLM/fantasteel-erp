@@ -194,3 +194,10 @@
 **다른 모듈에 넣은 것**: inventory에 열연 배정 함수(`hotRollingCandidates`, `confirmHotRollingAllocation`, `releaseHotRollingAllocation`, `consumeHotRollingAllocations`, `hotRollingAllocationsOfPlan`)와 TypedSQL `allocateRollingQty.sql`. 공통 채번(`numbering.repository`)은 LOT 유형도 함께 거르도록 고쳤다(같은 날 두 번째 히트가 슬래브 번호를 최댓값으로 잡던 문제).
 
 **수주 담당 확인 필요**: 수주 충족 계산의 `planRemainingTargetQty`는 완료 계획을 0으로 본다. 생산 완료 기준이라 완료 계획에도 검사 대기 제품이 있을 수 있어, 생산 쪽 재생산 판단(`plan-progress.calculator.ts` `planOpenRemainingQty`)은 완료 계획의 판정 대기분을 남긴다. 같은 식으로 맞추면 수주 화면의 "재생산 필요"도 검사 중에 뜨지 않는다.
+
+## 10. 동시성·날짜 (2026-10-21, #478)
+
+- 수주 취소가 계획을 잠근 뒤 최신 상태로 취소·연결 해제한다(sales-order.md 9장). 열연 실적을 시작·완료 한 번에 등록할 때는 계획 잠금 다음, 시작 작업 로그 전에 슬래브 재고 행을 잠근다(inventory.md 10장).
+- 작업 실적 등록·완료 트랜잭션 제한 시간을 30초로 늘렸다(열연 완료는 LOT마다 쿼리가 돈다).
+- 계획 상세의 히트 표 생산일은 제강 완료 시각의 서울 날짜다(전에는 UTC 날짜).
+- 같은 트랜잭션 안의 `Promise.all`(열연 상세·계획 상태 갱신)을 차례 실행으로 바꿨다(pg 다음 버전에서 오류).

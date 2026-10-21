@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addDays, isDateString, mondayOf, seoulDayOf, weekDays, weekFromParam } from '@/features/schedule/lib/week';
+import { addDays, isDateString, mondayOf, overlapsDay, seoulDayOf, weekDays, weekFromParam } from '@/features/schedule/lib/week';
 
 describe('주 계산 (월요일 시작, Asia/Seoul)', () => {
   it('월요일은 그대로, 수요일·일요일은 그 주 월요일로', () => {
@@ -30,3 +30,19 @@ describe('주 계산 (월요일 시작, Asia/Seoul)', () => {
     expect(seoulDayOf('2026-10-20T05:00:00.000Z')).toBe('2026-10-20');
   });
 });
+
+describe('overlapsDay (#487)', () => {
+  const lateSunday = { startAt: '2026-11-08T14:30:00.000Z', endAt: '2026-11-08T15:30:00.000Z' }; // 서울 일 23:30 ~ 월 00:30
+  it('날을 넘기는 일정은 두 날에 모두, 지난주에 시작해 걸친 일정은 이번 주 첫날에 보인다', () => {
+    expect(overlapsDay(lateSunday, '2026-11-08')).toBe(true);
+    expect(overlapsDay(lateSunday, '2026-11-09')).toBe(true);
+    expect(overlapsDay(lateSunday, '2026-11-10')).toBe(false);
+  });
+
+  it('끝이 그날 0시 정각이면 그날에는 넣지 않는다', () => {
+    const untilMidnight = { startAt: '2026-11-08T14:00:00.000Z', endAt: '2026-11-08T15:00:00.000Z' }; // 일 23:00 ~ 월 00:00
+    expect(overlapsDay(untilMidnight, '2026-11-08')).toBe(true);
+    expect(overlapsDay(untilMidnight, '2026-11-09')).toBe(false);
+  });
+});
+

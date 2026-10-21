@@ -1,0 +1,39 @@
+# AWS 배포용 Caddyfile 템플릿 (이슈 #485)
+# 쓰는 법: "erp.example.com"을 우리 도메인으로 바꿔 서버의 /etc/caddy/Caddyfile 로 저장하고 sudo systemctl reload caddy.
+#   방화벽(보안 그룹)에서 80·443이 열려 있어야 Caddy가 https 인증서를 받는다. 8787·5173은 밖으로 열지 않는다(127.0.0.1에서만 받는다).
+
+erp.example.com {
+	# 압축은 화면(HTML·JS·CSS)에만 한다. /api/v1에 걸면 AI 답(NDJSON 스트림)·회의 분석 응답을 모아서 보내 실시간으로 안 보인다
+	@static not path /api/v1/* /socket.io/*
+	encode @static zstd gzip
+
+	# ERP 서버 API. 화면 서버(Next)를 거치지 않고 바로 보낸다 (회의 녹음 500MB 올리기·몇 분 걸리는 AI 답)
+	handle /api/v1/* {
+		reverse_proxy 127.0.0.1:8787 {
+			# 흐르는 대로 바로 보낸다 (스트리밍 답)
+			flush_interval -1
+			# 서버가 클라이언트 IP(로그인 실패 횟수 제한)를 Caddy가 붙인 X-Forwarded-For로 읽는다. 사용자가 보낸 값은 Caddy가 덮어쓴다
+			transport http {
+				# 응답 헤더 대기: 받아쓰기·긴 AI 답이 한참 말없이 일할 수 있다 (서버 쪽 제한이 따로 있다)
+				response_header_timeout 30m
+				read_timeout 30m
+				write_timeout 30m
+			}
+		}
+	}
+
+	# 메신저·알림 실시간 연결 (웹소켓)
+	handle /socket.io/* {
+		reverse_proxy 127.0.0.1:8787
+	}
+
+	# 화면 (Next)
+	handle {
+		reverse_proxy 127.0.0.1:5173
+	}
+
+	# 서버 업로드 상한과 맞춘다: 회의 녹음 500MB + 머리 여유
+	request_body {
+		max_size 510MB
+	}
+}
