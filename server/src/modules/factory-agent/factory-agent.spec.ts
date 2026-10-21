@@ -194,32 +194,41 @@ describe('위험 감지 작업 로그와 감지 큐 (#509)', () => {
   it('idle()은 줄 선 감지가 모두 끝날 때까지 기다린다 (기다리는 사이 들어온 감지까지)', async () => {
     const repository = moduleRef.get(FactoryAgentRepository);
     const seen: number[] = [];
-    let release = () => {};
-    const spy = jest
-      .spyOn(repository, 'findSalesOrderItemOfLot')
-      .mockImplementationOnce((_tx, lotId) => {
-        seen.push(lotId);
-        return new Promise((resolve) => {
-          release = () => resolve(null);
-        }) as unknown as ReturnType<FactoryAgentRepository['findSalesOrderItemOfLot']>;
-      })
-      .mockImplementationOnce((_tx, lotId) => {
-        seen.push(lotId);
-        return Promise.resolve(null) as unknown as ReturnType<FactoryAgentRepository['findSalesOrderItemOfLot']>;
-      });
+    const releases: (() => void)[] = [];
+    // 두 감지 모두 풀어 줄 때까지 끝나지 않게 한다: 첫 감지만 기다리고 돌아오면(루프 없이 큐를 한 번만 기다리면) 실패한다
+    const pendingFind = (_tx: unknown, lotId: number) => {
+      seen.push(lotId);
+      return new Promise((resolve) => {
+        releases.push(() => resolve(null));
+      }) as unknown as ReturnType<FactoryAgentRepository['findSalesOrderItemOfLot']>;
+    };
+    const settle = async () => {
+      for (let i = 0; i < 3; i++) await new Promise((resolve) => setImmediate(resolve));
+    };
+    const spy = jest.spyOn(repository, 'findSalesOrderItemOfLot').mockImplementationOnce(pendingFind).mockImplementationOnce(pendingFind);
     try {
       void agent.onInspectionRegistered(-1);
       let idled = false;
-      const idle = agent.idle().then(() => {
+      void agent.idle().then(() => {
         idled = true;
       });
       void agent.onInspectionRegistered(-2);
-      await new Promise((resolve) => setImmediate(resolve));
+      await settle();
+      expect(seen).toEqual([-1]);
       expect(idled).toBe(false);
-      release();
-      await idle;
+
+      releases[0]?.();
+      await settle();
+      // 첫 감지가 끝나 두 번째가 시작됐지만 아직 끝나지 않았다
       expect(seen).toEqual([-1, -2]);
+      expect(idled).toBe(false);
+
+      releases[1]?.();
+      await settle();
+      expect(idled).toBe(true);
     } finally {
+      // 단언이 실패해도 큐가 막혀 뒤 시험이 시간 초과로 번지지 않게 남은 감지를 모두 풀어 준다
+      for (const release of releases) release();
       spy.mockRestore();
     }
   });
