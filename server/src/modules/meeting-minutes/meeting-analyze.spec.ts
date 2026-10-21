@@ -170,13 +170,106 @@ describe('POST /meeting-minutes/:id/analyze (API-260)', () => {
     expect(llmClient.chatJson).not.toHaveBeenCalled();
   });
 
-  it('4만 자를 넘는 전사는 400 VOC-005로 거절하고 상태를 바꾸지 않는다', async () => {
+  it('20만 자를 넘는 전사는 400 VOC-005로 거절하고 상태를 바꾸지 않는다', async () => {
     const row = await prisma.meetingMinutes.create({
-      data: { meetingMinutesTitle: '긴 회의', meetingDate: new Date('2026-10-15T00:00:00.000Z'), meetingMinutesStatus: 'TRANSCRIBED', transcript: '가'.repeat(40_001), creatorId: purchaseId },
+      data: { meetingMinutesTitle: '긴 회의', meetingDate: new Date('2026-10-15T00:00:00.000Z'), meetingMinutesStatus: 'TRANSCRIBED', transcript: '가'.repeat(200_001), creatorId: purchaseId },
     });
     const res = await call('POST', `/meeting-minutes/${row.id}/analyze`, purchaseCookie);
     expect([res.status, res.body.error?.code]).toEqual([400, 'VOC-005']);
     expect((await prisma.meetingMinutes.findUniqueOrThrow({ where: { id: row.id } })).meetingMinutesStatus).toBe('TRANSCRIBED');
+  });
+
+  it('4만 자를 넘는 전사는 조각마다 1차 분석 → 합치기 → 조각마다 2차 검토를 하고 진행 상황과 조각별 기록을 남긴다', async () => {
+    // 발언 600개 × 약 100자 = 약 6만 자 → 조각 3개
+    const segments = Array.from({ length: 600 }, (_, i) => ({ start: null, end: null, text: `${i + 1}번째 발언입니다. ${'철강 생산 일정과 납기를 이야기합니다. '.repeat(4)}` }));
+    const transcript = segments.map((x) => x.text).join('\n');
+    expect(transcript.length).toBeGreaterThan(40_000);
+    const row = await prisma.meetingMinutes.create({
+      data: { meetingMinutesTitle: '긴 회의', meetingDate: new Date('2026-10-15T00:00:00.000Z'), meetingMinutesStatus: 'TRANSCRIBED', transcript, transcriptSegments: segments, creatorId: purchaseId },
+    });
+    await prisma.meetingAttendee.create({ data: { meetingMinutesId: row.id, employeeId: purchaseId } });
+
+    const progressSeen: unknown[] = [];
+    const task = (title: string, evidence: number[]) => ({ kind: 'TASK', title, evidence, assigneeName: null, attendeeNames: [], dueDate: null, description: null, startAt: null, endAt: null, itemName: null, quantityTon: null, relatedSalesOrderNo: null, sourceText: null });
+    llmClient.chatJson.mockImplementation(async (...args: unknown[]) => {
+      const schema = args[3] as { name: string };
+      const user = (args[2] as { content: string }[])[1].content;
+      progressSeen.push((await prisma.meetingMinutes.findUniqueOrThrow({ where: { id: row.id } })).analysisProgress);
+      const numbers = [...user.matchAll(/^\[(\d+)\]/gm)].map((m) => Number(m[1]));
+      const part = /(\d+)개 부분 중 (\d+)번째/.exec(user);
+      const index = part ? Number(part[2]) : 0;
+      const first = numbers[0];
+      if (schema.name === 'meeting_analysis') {
+        return {
+          summary: `부분 ${index} 요약`,
+          decisions: [{ text: '매주 월요일 회의', evidence: [first] }],
+          items: [task(`할 일 ${index}`, [first]), task('매주 회의록 공유', [first + 1]), task('조각 밖 근거', [first === 1 ? 600 : 1])],
+        };
+      }
+      if (schema.name === 'meeting_summary_merge') {
+        expect(user).toContain('[1/3 부분] 부분 1 요약');
+        return { summary: '합친 회의 요약' };
+      }
+      if (index === 3) throw new LlmRequestError('2차 검토 시간이 지났어요');
+      return { scan: [], missed: index === 2 ? [task('빠진 일', [first + 2]), task('조각 밖 빠진 일', [1])] : [], concerns: [] };
+    });
+
+    await call('POST', `/meeting-minutes/${row.id}/analyze`, purchaseCookie);
+    await runner.drain();
+    const view = (await call<MeetingMinutesView>('GET', `/meeting-minutes/${row.id}`, purchaseCookie)).body.data;
+    expect(view.meetingMinutesStatus).toBe('REVIEW');
+    expect(view.analysisProgress).toBeNull();
+    expect(view.summary).toBe('합친 회의 요약');
+    expect(view.analysisResult?.decisions.map((d) => d.text)).toEqual(['매주 월요일 회의']);
+
+    const candidates = view.analysisResult?.candidates ?? [];
+    expect(candidates.map((c) => c.title)).toEqual(['할 일 1', '매주 회의록 공유', '할 일 2', '할 일 3', '빠진 일']);
+    // 조각마다 뽑은 같은 일은 하나로, 근거는 원문 위치(0부터) 그대로 모은다
+    expect(candidates[1].evidence).toHaveLength(3);
+    expect(candidates[1].evidence[0]).toBe(1);
+    expect(candidates[4]).toMatchObject({ fromReview: true });
+    expect(view.analysisResult?.review).toEqual({ ok: true, missedCount: 1, concernCount: 0, failedChunks: 1 });
+
+    const steps = view.analysisResult?.trace?.steps ?? [];
+    expect(steps.map((x) => [x.stage, x.chunk?.index ?? null, x.ok])).toEqual([
+      ['ANALYSIS', 1, true],
+      ['ANALYSIS', 2, true],
+      ['ANALYSIS', 3, true],
+      ['MERGE', null, true],
+      ['REVIEW', 1, true],
+      ['REVIEW', 2, true],
+      ['REVIEW', 3, false],
+    ]);
+    expect(steps[0].chunk).toMatchObject({ total: 3, firstSegment: 1 });
+    expect(steps[2].chunk?.lastSegment).toBe(600);
+    expect(steps[0].changes).toContainEqual({ action: 'DROPPED', title: '조각 밖 근거', reason: DROP.evidence });
+    expect(steps[3].changes.filter((c) => c.title === '매주 회의록 공유')).toHaveLength(2);
+    expect(steps[5].changes).toContainEqual({ action: 'DROPPED', title: '조각 밖 빠진 일', reason: DROP.evidence });
+    expect(steps[6].error).toBe('2차 검토 시간이 지났어요');
+
+    expect(progressSeen).toEqual([
+      { phase: 'ANALYSIS', current: 1, total: 3 },
+      { phase: 'ANALYSIS', current: 2, total: 3 },
+      { phase: 'ANALYSIS', current: 3, total: 3 },
+      { phase: 'MERGE', current: 1, total: 1 },
+      { phase: 'REVIEW', current: 1, total: 3 },
+      { phase: 'REVIEW', current: 2, total: 3 },
+      { phase: 'REVIEW', current: 3, total: 3 },
+    ]);
+  });
+
+  it('긴 전사의 한 조각이라도 1차 분석에 실패하면 몇 번째 조각인지 담아 FAILED로 둔다', async () => {
+    const segments = Array.from({ length: 600 }, (_, i) => ({ start: null, end: null, text: `${i + 1}번째 발언. ${'가'.repeat(90)}` }));
+    const row = await prisma.meetingMinutes.create({
+      data: { meetingMinutesTitle: '긴 회의', meetingDate: new Date('2026-10-15T00:00:00.000Z'), meetingMinutesStatus: 'TRANSCRIBED', transcript: segments.map((x) => x.text).join('\n'), transcriptSegments: segments, creatorId: purchaseId },
+    });
+    llmClient.chatJson.mockResolvedValueOnce({ summary: '앞', decisions: [], items: [] }).mockRejectedValueOnce(new LlmRequestError('AI 응답 시간이 지났어요'));
+    await call('POST', `/meeting-minutes/${row.id}/analyze`, purchaseCookie);
+    await runner.drain();
+    const saved = await prisma.meetingMinutes.findUniqueOrThrow({ where: { id: row.id } });
+    expect(saved.meetingMinutesStatus).toBe('FAILED');
+    expect(saved.failureReason).toMatch(/^3개 조각 중 2번째\(발언 \d+~\d+\) 분석 실패: AI 응답 시간이 지났어요$/);
+    expect(saved.analysisProgress).toBeNull();
   });
 
   it('LLM 오류는 FAILED와 그 문구로 남기고, 실패한 회의록은 다시 정리할 수 있다', async () => {

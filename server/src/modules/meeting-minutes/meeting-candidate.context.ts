@@ -166,12 +166,16 @@ export class MeetingCandidateContextService {
     return { ...candidate, context: lines, issues: [...kept, ...issues.filter((i) => !kept.includes(i))] };
   }
 
-  applyAll(tx: Tx, candidates: MeetingCandidate[], today?: string): Promise<MeetingCandidate[]> {
-    return Promise.all(candidates.map((c) => this.apply(tx, c, today)));
+  /** 차례로 읽는다: 같은 트랜잭션 연결에서 쿼리를 겹쳐 보내면 pg 다음 버전이 오류를 낸다 */
+  async applyAll(tx: Tx, candidates: MeetingCandidate[], today?: string): Promise<MeetingCandidate[]> {
+    const applied: MeetingCandidate[] = [];
+    for (const candidate of candidates) applied.push(await this.apply(tx, candidate, today));
+    return applied;
   }
 
   private async stockOf(tx: Tx, itemId: number): Promise<{ onHandTon: string; incomingTon: string }> {
-    const [onHandTon, orderItems] = await Promise.all([this.repository.sumRawMaterialOnHandTon(tx, itemId), this.repository.findOpenPurchaseOrderItems(tx, itemId)]);
+    const onHandTon = await this.repository.sumRawMaterialOnHandTon(tx, itemId);
+    const orderItems = await this.repository.findOpenPurchaseOrderItems(tx, itemId);
     return { onHandTon, incomingTon: incomingTonOf(orderItems) };
   }
 }

@@ -1,6 +1,6 @@
 import type { MeetingCandidate, MeetingMinutesView } from '@fantasteel/shared';
 import { describe, expect, it } from 'vitest';
-import { analyzeAvailability, approvalBlocker, contextLinesOf, decisionCounts, evidenceLabel, formatDuration, formatSchedule, groupCandidates, registerPreview, reviewSummaryText, traceSummaryText } from '@/lib/meetingAnalysis';
+import { analysisProgressText, analyzeAvailability, approvalBlocker, contextLinesOf, decisionCounts, evidenceLabel, formatDuration, formatSchedule, groupCandidates, registerPreview, reviewSummaryText, traceChunkText, traceSummaryText } from '@/lib/meetingAnalysis';
 
 const minutes = (over: Partial<MeetingMinutesView> = {}): MeetingMinutesView => ({
   id: 1,
@@ -12,6 +12,7 @@ const minutes = (over: Partial<MeetingMinutesView> = {}): MeetingMinutesView => 
   speakers: [],
   summary: null,
   analysisResult: null,
+  analysisProgress: null,
   failureReason: null,
   creator: { id: 5, name: '정다은' },
   attendees: [],
@@ -39,8 +40,9 @@ describe('analyzeAvailability', () => {
     expect(analyzeAvailability(minutes({ meetingMinutesStatus: 'FAILED', transcript: null }), 5)).toEqual({ ok: false, reason: null });
   });
 
-  it('4만 자를 넘으면 사유를 알린다', () => {
-    expect(analyzeAvailability(minutes({ transcript: '가'.repeat(40_001) }), 5)).toEqual({ ok: false, reason: expect.stringContaining('4만 자') });
+  it('4만 자를 넘어도 나눠 분석하고, 20만 자를 넘으면 사유를 알린다', () => {
+    expect(analyzeAvailability(minutes({ transcript: '가'.repeat(40_001) }), 5)).toEqual({ ok: true });
+    expect(analyzeAvailability(minutes({ transcript: '가'.repeat(200_001) }), 5)).toEqual({ ok: false, reason: expect.stringContaining('20만 자') });
   });
 });
 
@@ -107,6 +109,7 @@ describe('contextLinesOf', () => {
 describe('reviewSummaryText', () => {
   it('성공하면 빠진 후보·지적 건수, 실패하면 1차 결과만 보인다고 알린다', () => {
     expect(reviewSummaryText({ ok: true, missedCount: 2, concernCount: 0 })).toBe('2차 검토: 빠진 후보 2건 · 지적 0건');
+    expect(reviewSummaryText({ ok: true, missedCount: 1, concernCount: 1, failedChunks: 2 })).toBe('2차 검토: 빠진 후보 1건 · 지적 1건 (조각 2개는 검토 실패)');
     expect(reviewSummaryText({ ok: false, error: '시간 초과' })).toBe('2차 검토 실패 — 1차 결과만 보여요');
   });
 
@@ -136,5 +139,20 @@ describe('AI 실행 기록 표시', () => {
     });
     expect(traceSummaryText({ steps: [step([{ action: 'DROPPED' }, { action: 'CHANGED' }]), step([{ action: 'DROPPED' }])], totalMs: 90_000 })).toBe('AI 호출 2번 · 1분 30초 · 버림 2 · 고침 1');
     expect(traceSummaryText({ steps: [step([])], totalMs: 1500 })).toBe('AI 호출 1번 · 1.5초');
+  });
+});
+
+describe('긴 전사 조각 분석 표시', () => {
+  it('진행 안내는 조각이 여럿일 때만 몇 번째인지 보인다', () => {
+    expect(analysisProgressText(null)).toBeNull();
+    expect(analysisProgressText({ phase: 'ANALYSIS', current: 1, total: 1 })).toBe('1차 분석 중');
+    expect(analysisProgressText({ phase: 'ANALYSIS', current: 2, total: 5 })).toBe('1차 분석 중 (조각 2/5)');
+    expect(analysisProgressText({ phase: 'MERGE', current: 1, total: 1 })).toBe('조각 결과를 합치는 중');
+    expect(analysisProgressText({ phase: 'REVIEW', current: 5, total: 5 })).toBe('2차 검토 중 (조각 5/5)');
+  });
+
+  it('실행 기록의 조각 표시는 나눈 분석에만 붙는다', () => {
+    expect(traceChunkText(undefined)).toBeNull();
+    expect(traceChunkText({ index: 2, total: 3, firstSegment: 210, lastSegment: 432 })).toBe('조각 2/3 · 발언 #210~#432');
   });
 });

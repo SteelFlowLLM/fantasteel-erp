@@ -126,6 +126,8 @@ export interface MeetingMinutesView {
   summary: string | null;
   /** AI 분석 결과(API-260). 서버가 검증한 후보만 담고, 읽을 수 없는 모양이면 null */
   analysisResult: MeetingAnalysis | null;
+  /** AI 정리 중(ANALYZING)일 때만 값이 있다 */
+  analysisProgress: MeetingAnalysisProgress | null;
   failureReason: string | null;
   creator: { id: number; name: string };
   attendees: MeetingAttendeeView[];
@@ -147,8 +149,19 @@ export interface MeetingNotionExportResult {
 
 export type MeetingMinutesPage = PageResult<MeetingMinutesListItem>;
 
-/** AI 분석에 보낼 수 있는 전사의 최대 글자 수 (긴 회의는 나눠 분석하는 방식이 생길 때까지 거절한다) */
-export const MEETING_ANALYSIS_MAX_CHARS = 40000;
+/** AI 분석에 보낼 수 있는 전사의 최대 글자 수. 넘는 전사는 조각으로 나눠 분석한다 (🟡 가정값: 한국어 회의 약 10시간) */
+export const MEETING_ANALYSIS_MAX_CHARS = 200000;
+
+/** 분석 단계: 1차 분석(조각마다) → 조각 합치기 → 2차 검토(조각마다) */
+export type MeetingAnalysisPhase = 'ANALYSIS' | 'MERGE' | 'REVIEW';
+
+/** AI 정리 중인 회의록의 진행 상황. 긴 전사는 몇 번째 조각을 보는지 알 수 있다 */
+export interface MeetingAnalysisProgress {
+  phase: MeetingAnalysisPhase;
+  /** 1부터 */
+  current: number;
+  total: number;
+}
 
 export type MeetingCandidateKind = 'TASK' | 'EVENT' | 'PURCHASE';
 
@@ -216,8 +229,8 @@ export interface MeetingDecision {
   evidence: number[];
 }
 
-/** AI 2차 검토 결과. 실패해도 1차 결과는 그대로 남는다 */
-export type MeetingReviewResult = { ok: true; missedCount: number; concernCount: number } | { ok: false; error: string };
+/** AI 2차 검토 결과. 실패해도 1차 결과는 그대로 남는다. 긴 전사를 나눠 검토했으면 실패한 조각 수(failedChunks)를 함께 둔다 */
+export type MeetingReviewResult = { ok: true; missedCount: number; concernCount: number; failedChunks?: number } | { ok: false; error: string };
 
 /** 서버가 모델 답에서 버리거나 고친 것 한 줄. 어느 항목인지 알 수 있게 모델이 쓴 제목을 함께 둔다 */
 export interface MeetingTraceChange {
@@ -227,11 +240,14 @@ export interface MeetingTraceChange {
   reason: string;
 }
 
-export type MeetingTraceStage = 'ANALYSIS' | 'REVIEW';
+/** MERGE는 긴 전사를 나눠 분석했을 때 조각 요약을 하나로 합치는 단계 */
+export type MeetingTraceStage = MeetingAnalysisPhase;
 
 /** AI 실행 기록의 한 단계 (1차 분석, 2차 검토). 모델이 무엇을 냈고 서버가 무엇을 걸렀는지 사람이 따라가 보게 한다 */
 export interface MeetingTraceStep {
   stage: MeetingTraceStage;
+  /** 긴 전사를 나눠 분석했을 때 몇 번째 조각인지 (1부터). 나누지 않았으면 없다 */
+  chunk?: { index: number; total: number; firstSegment: number; lastSegment: number };
   model: string;
   durationMs: number;
   ok: boolean;

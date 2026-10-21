@@ -22,7 +22,7 @@ import { useMe } from '@/hooks/useMe';
 import { cn } from '@/lib/cn';
 import { fmtDateTime } from '@/lib/format';
 import { toast } from '@/stores/useToastStore';
-import { analyzeAvailability, approvalBlocker, contextLinesOf, decisionCounts, evidenceLabel, formatSchedule, groupCandidates, registerPreview, reviewSummaryText } from '@/lib/meetingAnalysis';
+import { analysisProgressText, analyzeAvailability, approvalBlocker, contextLinesOf, decisionCounts, evidenceLabel, formatSchedule, groupCandidates, registerPreview, reviewSummaryText } from '@/lib/meetingAnalysis';
 
 function AiLabel() {
   return (
@@ -440,6 +440,7 @@ export function MeetingAnalysisPanel({ minutes, onJump }: { minutes: MeetingMinu
   const analyze = useAction(meetingMinutesApi.analyze);
   const availability = analyzeAvailability(minutes, me.employeeId);
   const status = minutes.meetingMinutesStatus;
+  const progressText = analysisProgressText(minutes.analysisProgress);
   const rerun = status === MEETING_MINUTES_STATUS.REVIEW || (status === MEETING_MINUTES_STATUS.FAILED && minutes.analysisResult !== null);
   const retry = status === MEETING_MINUTES_STATUS.FAILED;
   const showResult = (status === MEETING_MINUTES_STATUS.REVIEW || status === MEETING_MINUTES_STATUS.CONFIRMED) && minutes.analysisResult !== null;
@@ -469,6 +470,7 @@ export function MeetingAnalysisPanel({ minutes, onJump }: { minutes: MeetingMinu
           <div role="status" className="flex items-center gap-2 text-sm text-run">
             <span className="size-3.5 animate-spin rounded-full border-2 border-run border-t-transparent" aria-hidden />
             AI가 정리하는 중…
+            {progressText ? <span className="text-ink-2">{progressText}</span> : null}
           </div>
         ) : showResult && minutes.analysisResult ? (
           <Result analysis={minutes.analysisResult} minutes={minutes} onJump={onJump} />

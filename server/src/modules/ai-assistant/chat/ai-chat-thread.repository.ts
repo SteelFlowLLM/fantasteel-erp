@@ -6,12 +6,31 @@ import type { Tx } from '../../../prisma/prisma.service';
 /** 저장한 대화(이슈 #399)의 DB 접근. 함수의 첫 인자는 tx (컨벤션 8장) */
 @Injectable()
 export class AiChatThreadRepository {
+  /** 철강맨AI 패널 대화만 센다 (회의 질문 대화는 회의록 화면에서 본다) */
   countByEmployee(tx: Tx, employeeId: number) {
-    return tx.aiChatThread.count({ where: { employeeId } });
+    return tx.aiChatThread.count({ where: { employeeId, meetingMinutesId: null } });
   }
 
   list(tx: Tx, employeeId: number, take: number, skip: number) {
-    return tx.aiChatThread.findMany({ where: { employeeId }, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }], take, skip });
+    return tx.aiChatThread.findMany({ where: { employeeId, meetingMinutesId: null }, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }], take, skip });
+  }
+
+  /** 이 사원이 이 회의에 물은 대화 (사원·회의록마다 하나) */
+  findMeetingThread(tx: Tx, employeeId: number, meetingMinutesId: number) {
+    return tx.aiChatThread.findUnique({ where: { employeeId_meetingMinutesId: { employeeId, meetingMinutesId } } });
+  }
+
+  /** 회의 질문 대화를 찾거나 만든다. 이미 있으면 마지막으로 묻고 답한 시각만 지금으로 */
+  upsertMeetingThread(tx: Tx, employeeId: number, meetingMinutesId: number, title: string) {
+    return tx.aiChatThread.upsert({
+      where: { employeeId_meetingMinutesId: { employeeId, meetingMinutesId } },
+      create: { employeeId, meetingMinutesId, title },
+      update: { updatedAt: new Date() },
+    });
+  }
+
+  async meetingExists(tx: Tx, meetingMinutesId: number): Promise<boolean> {
+    return (await tx.meetingMinutes.count({ where: { id: meetingMinutesId } })) > 0;
   }
 
   findOwned(tx: Tx, id: number, employeeId: number) {

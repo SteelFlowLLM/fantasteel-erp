@@ -47,6 +47,7 @@ const meeting = (over: Partial<MeetingMinutesView> = {}): MeetingMinutesView => 
     model: 'm',
     analyzedAt: '2026-10-14T00:00:00Z',
   },
+  analysisProgress: null,
   failureReason: null,
   creator: { id: 7, name: '박서영' },
   attendees: [{ employeeId: 7, employeeName: '박서영', departmentName: '영업부', roleCode: ROLE.SALES }],

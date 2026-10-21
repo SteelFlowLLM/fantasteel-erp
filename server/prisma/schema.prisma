@@ -826,6 +826,7 @@ model MeetingMinutes {
   summary String? /// AI 요약 (검토 후 확정본)
   analysisResult Json? @map("analysis_result") @db.JsonB /// AI 분석 결과·검토 중 수정본
   failureReason String? @map("failure_reason") @db.VarChar /// 전사·분석 실패 사유 (FAILED일 때)
+  analysisProgress Json? @map("analysis_progress") @db.JsonB /// AI 정리 진행 {phase, current, total}. ANALYZING일 때만 읽는다
   creatorId Int @map("creator_id") /// 회의록 작성자. 후보 항목을 허가하는 사람
   confirmedAt DateTime? @map("confirmed_at") @db.Timestamptz(3) /// 확정 시각. 확정 후 수정·재분석 불가
   notionPageUrl String? @map("notion_page_url") @db.VarChar /// Notion으로 내보낸 페이지 주소. 한 번만 내보낸다
@@ -840,6 +841,7 @@ model MeetingMinutes {
   tasks Task[] @relation("TaskMeetingMinutes")
   scheduleEvents ScheduleEvent[] @relation("ScheduleEventMeetingMinutes")
   actionDrafts ActionDraft[] @relation("ActionDraftMeetingMinutes")
+  chatThreads AiChatThread[] @relation("AiChatThreadMeetingMinutes")
 
   @@index([creatorId])
   @@index([meetingDate])
@@ -1156,13 +1158,17 @@ model AiChatThread {
   id Int @id @default(autoincrement())
   employeeId Int @map("employee_id") /// 대화한 사원 (본인만 본다)
   title String @db.VarChar /// 첫 질문 앞 40자
+  meetingMinutesId Int? @map("meeting_minutes_id") /// 회의 질문 대화면 그 회의록. 사원·회의록마다 하나
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3) /// 마지막으로 묻고 답한 시각 (목록 순서)
 
   employee Employee @relation("AiChatThreadEmployee", fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  meetingMinutes MeetingMinutes? @relation("AiChatThreadMeetingMinutes", fields: [meetingMinutesId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   messages AiChatMessage[] @relation("AiChatMessageThread")
 
+  @@unique([employeeId, meetingMinutesId])
   @@index([employeeId, updatedAt])
+  @@index([meetingMinutesId])
   @@map("ai_chat_thread")
 }
 

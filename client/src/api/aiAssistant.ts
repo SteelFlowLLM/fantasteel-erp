@@ -55,6 +55,8 @@ export const aiAssistantApi = {
   /** 저장한 대화 목록 (이슈 #399). 내 대화만, 마지막으로 묻고 답한 순서 */
   listThreads: (page: number, size = AI_CHAT_THREAD_PAGE_SIZE): Promise<PageResult<AiChatThreadSummaryView>> => serverRequest('GET', '/ai-assistant/threads', { query: { page, size } }),
   getThread: (id: number): Promise<AiChatThreadView> => serverRequest('GET', `/ai-assistant/threads/${id}`),
+  /** 이 회의에 물은 내 대화 (회의 질문 저장). 아직 묻지 않았으면 null. 지우기는 deleteThread */
+  getMeetingThread: (meetingMinutesId: number): Promise<AiChatThreadView | null> => serverRequest('GET', `/ai-assistant/meeting-threads/${meetingMinutesId}`),
   /** 대화와 메시지를 모두 지운다 (되살릴 수 없다) */
   deleteThread: (id: number): Promise<AiChatThreadSummaryView> => serverRequest('DELETE', `/ai-assistant/threads/${id}`),
   /** 답을 만드는 과정을 이벤트로 받는다. 마지막 이벤트는 done 또는 error. signal로 멈추면 AbortError가 던져진다 */

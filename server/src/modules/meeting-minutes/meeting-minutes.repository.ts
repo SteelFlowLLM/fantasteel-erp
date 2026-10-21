@@ -25,6 +25,7 @@ export const meetingMinutesDetailSelect = {
   transcriptSegments: true,
   summary: true,
   analysisResult: true,
+  analysisProgress: true,
   failureReason: true,
   confirmedAt: true,
   notionPageUrl: true,
@@ -83,8 +84,13 @@ export class MeetingMinutesRepository {
         transcript: { not: null },
         meetingMinutesStatus: { in: [MEETING_MINUTES_STATUS.TRANSCRIBED, MEETING_MINUTES_STATUS.REVIEW, MEETING_MINUTES_STATUS.FAILED] },
       },
-      data: { meetingMinutesStatus: MEETING_MINUTES_STATUS.ANALYZING, failureReason: null },
+      data: { meetingMinutesStatus: MEETING_MINUTES_STATUS.ANALYZING, failureReason: null, analysisProgress: Prisma.DbNull },
     });
+  }
+
+  /** 분석 진행 상황 (아직 ANALYZING인 행만). updated_at도 바뀌어 살아 있다는 표시를 겸한다 */
+  setAnalysisProgress(tx: Tx, id: number, progress: Prisma.InputJsonObject) {
+    return tx.meetingMinutes.updateMany({ where: { id, meetingMinutesStatus: MEETING_MINUTES_STATUS.ANALYZING }, data: { analysisProgress: progress } });
   }
 
   /** 아직 ANALYZING인 행만 바꾼다 */
@@ -232,6 +238,12 @@ export class MeetingMinutesRepository {
   /** 회의록 지우기: 참석자 행부터 지운다 (FK가 Restrict) */
   deleteAllAttendees(tx: Tx, meetingMinutesId: number) {
     return tx.meetingAttendee.deleteMany({ where: { meetingMinutesId } });
+  }
+
+  /** 회의록 지우기: 사원들이 이 회의에 물은 대화를 메시지부터 지운다 (FK가 Restrict) */
+  async deleteChatThreads(tx: Tx, meetingMinutesId: number): Promise<void> {
+    await tx.aiChatMessage.deleteMany({ where: { thread: { meetingMinutesId } } });
+    await tx.aiChatThread.deleteMany({ where: { meetingMinutesId } });
   }
 
   /** 지울 수 있는 상태일 때만 지운다. 그 사이 분석을 시작했거나 확정했으면 0건 */
