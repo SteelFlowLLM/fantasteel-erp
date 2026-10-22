@@ -108,6 +108,9 @@ class OptionsTest(unittest.TestCase):
     def test_참석자_수는_최대_화자_수로_넘긴다(self) -> None:
         self.assertEqual(server.speaker_options({"max_speakers": "6"}), {"max_speakers": 6})
 
+    def test_ERP가_두_값을_같이_보내면_최대_화자_수를_먼저_쓴다(self) -> None:
+        self.assertEqual(server.speaker_options({"max_speakers": "6", "num_speakers": "6"}), {"max_speakers": 6})
+
     def test_옛_ERP의_정확한_화자_수도_받는다(self) -> None:
         self.assertEqual(server.speaker_options({"num_speakers": "3"}), {"num_speakers": 3})
 
@@ -382,6 +385,85 @@ class ChunkedRunTest(unittest.TestCase):
             long_thread.join(10)
         self.assertEqual(raised.exception.status, 503)
         self.assertEqual(raised.exception.message, server.BUSY_MESSAGE)
+
+
+class GateTest(unittest.TestCase):
+    """엔진·화자 분리 차례를 실패·포기·끊김에서도 제대로 놓는지 (PR #528 리뷰)"""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        for name, value in (("SHORT_AUDIO_SEC", 0.5), ("QUICK_AUDIO_SEC", 2.0), ("CHUNK_SEC", 1.0), ("CHUNK_SEARCH_SEC", 0.25), ("QUICK_WAIT_SEC", 0.3)):
+            patcher = mock.patch.object(server, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.long_wav = os.path.join(self.tmp.name, "long.wav")
+        write_wav(self.long_wav, [(0.7, True), (0.3, False)] * 4)
+
+    def test_502가_아닌_실패에도_엔진_차례를_놓는다(self) -> None:
+        def broken(path: str, language: str, prompt: Optional[str] = None) -> dict[str, Any]:
+            raise ValueError("깨진 응답")
+
+        with mock.patch.object(server, "whisper_transcribe", broken):
+            with self.assertRaises(ValueError):
+                server.run_whisper_engine(self.long_wav, "ko", diarization=False, tmp_dir=self.tmp.name)
+        self.assertTrue(server.engine_gate.acquire(quick=True, timeout=0.1))
+        server.engine_gate.release()
+
+    def test_짧은_요청이_기다리다_포기하면_긴_전사가_다음_조각을_이어_간다(self) -> None:
+        gate = server.EngineGate()
+        self.assertTrue(gate.acquire(quick=False))
+        long_got: list[bool] = []
+        quick_thread = threading.Thread(target=lambda: gate.acquire(quick=True, timeout=0.3))
+        quick_thread.start()
+        time.sleep(0.05)
+        # 짧은 요청이 기다리는 동안 다른 긴 전사도 줄을 선다(짧은 요청이 있어 양보 중). 짧은 요청이 시간이 지나 포기해도 긴 전사는 계속 기다렸다 차례를 얻어야 한다
+        long_thread = threading.Thread(target=lambda: long_got.append(gate.acquire(quick=False, timeout=2)))
+        long_thread.start()
+        quick_thread.join(2)
+        gate.release()
+        long_thread.join(2)
+        self.assertEqual(long_got, [True])
+
+    def test_짧은_화자_분리_요청은_오래_기다리지_않고_바쁘다고_알린다(self) -> None:
+        short = os.path.join(self.tmp.name, "short.wav")
+        write_wav(short, [(1.5, True)])
+        server.diarize_lock.acquire()
+        try:
+            with self.assertRaises(server.SidecarError) as raised:
+                server.run_whisper_engine(short, "ko", diarization=True, tmp_dir=self.tmp.name)
+        finally:
+            server.diarize_lock.release()
+        self.assertEqual((raised.exception.status, raised.exception.message), (503, server.BUSY_MESSAGE))
+
+    def test_다시_받아쓴_결과가_비면_처음_것을_쓴다(self) -> None:
+        calls = {"n": 0}
+
+        def looping(path: str, language: str, prompt: Optional[str] = None) -> dict[str, Any]:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return {"segments": [{"start": i * 0.2, "end": i * 0.2 + 0.2, "text": "같은 말을 또 합니다"} for i in range(5)] + [{"start": 1.5, "end": 2.5, "text": "뒤의 진짜 말이에요"}]}
+            return {"segments": []}
+
+        wav = os.path.join(self.tmp.name, "one.wav")
+        write_wav(wav, [(3.0, True)])
+        with mock.patch.object(server, "whisper_transcribe", looping):
+            segments = server.transcribe_chunks(wav, [(0.0, 3.0)], "ko", None, False, server.no_progress, self.tmp.name)
+        self.assertEqual(segments[-1]["text"], "뒤의 진짜 말이에요")
+
+    def test_ERP가_연결을_끊으면_남은_조각을_받아쓰지_않는다(self) -> None:
+        fake = FakeWhisper()
+        seen: list[int] = []
+
+        def progress(stage: str, current: int, total: int) -> None:
+            seen.append(current)
+            if current == 2:
+                raise server.ClientGone()
+
+        with mock.patch.object(server, "whisper_transcribe", fake):
+            with self.assertRaises(server.ClientGone):
+                server.run_whisper_engine(self.long_wav, "ko", diarization=False, progress=progress, tmp_dir=self.tmp.name)
+        self.assertEqual((seen, len(fake.calls)), ([1, 2], 1))
 
 
 class StreamTest(unittest.TestCase):

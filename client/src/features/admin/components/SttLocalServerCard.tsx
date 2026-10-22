@@ -13,23 +13,23 @@ import { Card, CardBody, CardFoot, CardHead } from '@/components/Card';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useAction } from '@/hooks/useAction';
 import { useSttLocalServer } from '@/hooks/useStt';
+import { localServerStep, type LocalServerAction, type LocalServerConfirm } from '@/lib/sttLocalServer';
 import { toast } from '@/stores/useToastStore';
-
-type LocalServerAction = 'start' | 'stop';
 
 export function SttLocalServerCard({ canEdit }: { canEdit: boolean }) {
   const query = useSttLocalServer();
-  const [confirm, setConfirm] = useState<{ action: LocalServerAction; warning: string } | null>(null);
-  const done = (action: LocalServerAction, okText: string) => (result: SttLocalServerActionView) => {
-    if (result.needsConfirm) {
-      setConfirm({ action, warning: result.warning ?? '음성 서버가 회의 녹음을 받아쓰는 중이에요' });
+  const [confirm, setConfirm] = useState<LocalServerConfirm | null>(null);
+  const done = (action: LocalServerAction) => (result: SttLocalServerActionView) => {
+    const step = localServerStep(action, result);
+    if (step.kind === 'confirm') {
+      setConfirm(step.confirm);
       return;
     }
     setConfirm(null);
-    toast.ok(okText);
+    toast.ok(step.message);
   };
-  const start = useAction(sttApi.startLocalServer, { invalidate: [sttKeys.localServer()], onSuccess: done('start', '음성 서버를 켰어요') });
-  const stop = useAction(sttApi.stopLocalServer, { invalidate: [sttKeys.localServer()], onSuccess: done('stop', '음성 서버를 껐어요. 다음 로그인 때 다시 켜져요') });
+  const start = useAction(sttApi.startLocalServer, { invalidate: [sttKeys.localServer()], onSuccess: done('start') });
+  const stop = useAction(sttApi.stopLocalServer, { invalidate: [sttKeys.localServer()], onSuccess: done('stop') });
   const status = query.data;
   if (!status?.supported) return null;
   const busy = start.isPending || stop.isPending;
@@ -68,8 +68,8 @@ export function SttLocalServerCard({ canEdit }: { canEdit: boolean }) {
       ) : null}
       {confirm ? (
         <ConfirmDialog
-          title={confirm.action === 'start' ? '받아쓰는 중인데 다시 켤까요?' : '받아쓰는 중인데 끌까요?'}
-          confirmLabel={confirm.action === 'start' ? '그래도 다시 켜기' : '그래도 끄기'}
+          title={confirm.title}
+          confirmLabel={confirm.confirmLabel}
           tone="danger"
           pending={busy}
           onCancel={() => setConfirm(null)}

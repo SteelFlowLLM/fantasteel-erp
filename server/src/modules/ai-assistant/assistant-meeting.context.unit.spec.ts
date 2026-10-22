@@ -114,11 +114,11 @@ describe('회의 질문 맥락 (Voice2ERP 묶음 3)', () => {
     expect(text).not.toContain('빠졌어요');
   });
 
-  it('회의 내용 글자 수는 모델 문맥 길이의 절반(1토큰≈2자)이고, 모르면 3만 자, 커도 AI 정리 상한 20만 자 (이슈 #522)', () => {
+  it('회의 내용 글자 수는 모델 문맥 길이의 35%(1자=1토큰)이고, 모르면 3만 자, 커도 첫 글자 제한에 맞춰 8만 자 (이슈 #522)', () => {
     expect(meetingContextChars(null)).toBe(MEETING_CONTEXT_MAX_CHARS);
-    expect(meetingContextChars(32_768)).toBe(32_768);
-    expect(meetingContextChars(131_072)).toBe(131_072);
-    expect(meetingContextChars(262_144)).toBe(200_000);
+    expect(meetingContextChars(32_768)).toBe(11_468);
+    expect(meetingContextChars(131_072)).toBe(45_875);
+    expect(meetingContextChars(262_144)).toBe(80_000);
     expect(meetingContextChars(2_048)).toBe(6_000);
   });
 

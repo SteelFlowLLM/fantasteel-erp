@@ -48,7 +48,7 @@ export interface SttTranscribeInput {
    * 말하지 않은 참석자가 있어도 한 사람을 둘로 쪼개지 않게 한다 (이슈 #522)
    */
   maxSpeakers?: number;
-  /** 용어 힌트(whisper initial prompt). whisper.cpp·OpenAI·사이드카 모두 받는다 (이슈 #522) */
+  /** 용어 힌트(whisper initial prompt). 사이드카 모델일 때만 보낸다(외부 음성 API로 회사 이름이 나가지 않게, 이슈 #522) */
   prompt?: string;
   /** 주면 사이드카에 진행을 함께 보내 달라고 한다(stream=progress). 다른 서버는 무시하고 한 번에 답한다 */
   onProgress?: (progress: SttProgress) => void;
@@ -122,8 +122,13 @@ export class SttClient {
     form.append('language', input.language ?? 'ko');
     form.append('response_format', 'verbose_json');
     form.append('temperature', '0');
-    if (input.maxSpeakers && SIDECAR_MODELS.has(input.model ?? '')) form.append('max_speakers', String(input.maxSpeakers));
-    if (input.prompt) form.append('prompt', input.prompt);
+    if (input.maxSpeakers && SIDECAR_MODELS.has(input.model ?? '')) {
+      form.append('max_speakers', String(input.maxSpeakers));
+      // 다시 설치하기 전의 옛 사이드카는 max_speakers를 몰라 힌트가 빠진다(합성 34분 92% → 71%). 옛 사이드카는 이 정확값을 쓰고 새 사이드카는 max_speakers를 먼저 본다
+      form.append('num_speakers', String(input.maxSpeakers));
+    }
+    // 용어 힌트(고객사·공급업체·사원 이름)는 이 회사가 띄운 사이드카에만 보낸다. 외부 음성 API로 회사 이름이 나가지 않게 한다
+    if (input.prompt && SIDECAR_STREAM_MODELS.has(input.model ?? '')) form.append('prompt', input.prompt);
     if (input.onProgress && SIDECAR_STREAM_MODELS.has(input.model ?? '')) form.append('stream', 'progress');
 
     let res: Response;

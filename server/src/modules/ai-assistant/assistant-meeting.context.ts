@@ -1,13 +1,13 @@
 import { MEETING_MINUTES_STATUS_LABEL, ROLE_LABEL, type MeetingCandidate, type MeetingCandidateRegistered, type MeetingMinutesView } from '@fantasteel/shared';
 import { segmentPromptText } from '../meeting-minutes/meeting-analysis.prompt';
-import { MEETING_CONTEXT_DEFAULT_CHARS, MEETING_QUESTION_CONTEXT_SHARE, transcriptCharsFor } from '../meeting-minutes/meeting-context-budget';
+import { MEETING_CONTEXT_DEFAULT_CHARS, MEETING_QUESTION_CONTEXT_SHARE, MEETING_QUESTION_MAX_CHARS, transcriptCharsFor } from '../meeting-minutes/meeting-context-budget';
 
 /** 회의 내용 블록의 글자 수 상한 (문맥 길이를 모를 때). 작은 로컬 모델의 문맥 길이를 넘지 않게 한다 (가정값) */
 export const MEETING_CONTEXT_MAX_CHARS = MEETING_CONTEXT_DEFAULT_CHARS;
 
 /** 모델 문맥 길이(토큰)로 정한 회의 내용 블록 글자 수 (이슈 #522). 모르면 MEETING_CONTEXT_MAX_CHARS */
 export function meetingContextChars(contextLength: number | null): number {
-  return transcriptCharsFor(contextLength, MEETING_QUESTION_CONTEXT_SHARE, MEETING_CONTEXT_MAX_CHARS);
+  return transcriptCharsFor(contextLength, MEETING_QUESTION_CONTEXT_SHARE, MEETING_CONTEXT_MAX_CHARS, MEETING_QUESTION_MAX_CHARS);
 }
 
 /** 전사가 넘칠 때 앞부분 몫. 나머지는 끝부분(마지막 결론·정리 발언)에 준다 */

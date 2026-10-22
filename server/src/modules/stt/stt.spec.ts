@@ -125,19 +125,22 @@ describe('SttClient.transcribe', () => {
     await new SttClient().transcribe(endpoint, { ...input, model: 'whisper-1', maxSpeakers: 6 });
     const bodyOf = (call: number) => (fetchMock.mock.calls[call][1] as RequestInit).body as FormData;
     expect(bodyOf(0).get('max_speakers')).toBe('6');
-    expect(bodyOf(0).get('num_speakers')).toBeNull();
+    // 다시 설치하기 전의 옛 사이드카도 화자 수 힌트를 쓰게 정확값도 같이 보낸다 (새 사이드카는 max_speakers를 먼저 본다)
+    expect(bodyOf(0).get('num_speakers')).toBe('6');
     expect(bodyOf(1).get('max_speakers')).toBeNull();
+    expect(bodyOf(1).get('num_speakers')).toBeNull();
   });
 
-  it('용어 힌트는 prompt로 어느 서버에나 보내고, 진행은 사이드카 모델에만 stream=progress로 청한다 (이슈 #522)', async () => {
+  it('용어 힌트와 진행 요청(stream=progress)은 사이드카 모델에만 보낸다: 외부 음성 API로 회사 이름이 가지 않게 (이슈 #522)', async () => {
     fetchMock.mockImplementation(async () => new Response(JSON.stringify({ text: '' }), { status: 200 }));
     const onProgress = jest.fn();
     await new SttClient().transcribe(endpoint, { ...input, model: 'whisper-1', prompt: '강종 SM355B', onProgress });
     await new SttClient().transcribe(endpoint, { ...input, model: 'whisper', prompt: '강종 SM355B', onProgress });
     await new SttClient().transcribe(endpoint, { ...input, model: 'whisper-pyannote' });
     const bodyOf = (call: number) => (fetchMock.mock.calls[call][1] as RequestInit).body as FormData;
-    expect(bodyOf(0).get('prompt')).toBe('강종 SM355B');
+    expect(bodyOf(0).get('prompt')).toBeNull();
     expect(bodyOf(0).get('stream')).toBeNull();
+    expect(bodyOf(1).get('prompt')).toBe('강종 SM355B');
     expect(bodyOf(1).get('stream')).toBe('progress');
     // 진행을 받을 곳이 없으면 청하지 않는다
     expect(bodyOf(2).get('stream')).toBeNull();

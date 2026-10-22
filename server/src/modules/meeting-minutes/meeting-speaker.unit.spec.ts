@@ -137,9 +137,9 @@ describe('AI 화자 추정 (이슈 #406)', () => {
     expect(text).not.toContain('처음 발언 몇 개만');
   });
 
-  it('전사 글자 수는 모델 문맥 길이의 절반(1토큰≈2자)이고, 모르면 2.4만 자, 2분 안에 답하게 8만 자까지 (이슈 #522)', () => {
+  it('전사 글자 수는 모델 문맥 길이의 절반(1자=1토큰)이고, 모르면 2.4만 자, 2분 안에 답하게 8만 자까지 (이슈 #522)', () => {
     expect(speakerTranscriptChars(null)).toBe(SUGGEST_TRANSCRIPT_MAX);
-    expect(speakerTranscriptChars(32_768)).toBe(32_768);
+    expect(speakerTranscriptChars(32_768)).toBe(16_384);
     expect(speakerTranscriptChars(262_144)).toBe(80_000);
   });
 

@@ -150,6 +150,17 @@ class SidecarError(Exception):
 
 
 @contextlib.contextmanager
+def hold_diarize(quick: bool) -> Iterator[None]:
+    """화자 분리 차례. 짧은 요청은 엔진 차례처럼 QUICK_WAIT_SEC까지만 기다리고 바쁘다고 알린다"""
+    if not diarize_lock.acquire(timeout=QUICK_WAIT_SEC if quick else -1):
+        raise SidecarError(503, BUSY_MESSAGE)
+    try:
+        yield
+    finally:
+        diarize_lock.release()
+
+
+@contextlib.contextmanager
 def long_job() -> Iterator[None]:
     global _active_long_jobs
     with _active_lock:
@@ -798,7 +809,8 @@ def transcribe_chunks(
             # 되풀이가 시작된 곳부터 새 문맥으로(힌트 없이) 다시 받아쓰고, 덜 되풀이한 쪽을 쓴다
             log.warning("조각 %d/%d에서 whisper가 같은 말을 되풀이해 그 자리부터 다시 받아써요", index + 1, len(chunks))
             again = transcribe_span(wav_path, found[at]["start"], end, False, language, None, quick, tmp_dir, f"chunk-{index}-again")
-            if repeated_run(again) < repeated_run(found[at:]):
+            # 다시 받아쓴 결과가 비면 뒤의 진짜 말까지 사라지므로 바꾸지 않는다
+            if again and repeated_run(again) < repeated_run(found[at:]):
                 found = found[:at] + again
         segments.extend(found)
     return segments
@@ -831,7 +843,7 @@ def run_whisper_engine(
         # 회의 전체를 한 번에 나눠야 조각이 달라도 같은 사람이 같은 화자로 이어진다. whisper.cpp 차례는 쥐지 않아 그동안 부르기 조각이 지나간다.
         # 말소리 구간이 없으면 받아쓰지 않는다 (짧은 녹음도 같다)
         progress("diarize", 1, 1)
-        with diarize_lock:
+        with hold_diarize(quick):
             turns = diarize(wav_path, speakers)
         if not turns:
             return [], duration
@@ -871,8 +883,9 @@ def get_vibevoice() -> Any:
 def run_vibevoice(wav_path: str, progress: Progress = no_progress) -> tuple[list[dict[str, Any]], float]:
     quick = wav_duration(wav_path) < QUICK_AUDIO_SEC
     progress("transcribe", 1, 1)
-    # 한 모델이 전사와 화자 분리를 한 번에 해 나누지 않는다. 메모리가 커 다른 엔진과 겹치지 않게 둘 다 쥔다
-    with engine_gate.hold(quick, QUICK_WAIT_SEC if quick else None), diarize_lock:
+    # 한 모델이 전사와 화자 분리를 한 번에 해 나누지 않는다. 메모리가 커 다른 엔진과 겹치지 않게 둘 다 쥔다.
+    # 화자 분리 차례를 먼저 잡아, 그것을 기다리는 동안 엔진 차례를 쥐고 있지 않게 한다(그동안 부르기 조각이 지나간다)
+    with hold_diarize(quick), engine_gate.hold(quick, QUICK_WAIT_SEC if quick else None):
         output = get_vibevoice().generate(wav_path, max_tokens=VIBEVOICE_MAX_TOKENS, verbose=False)
     segments: list[dict[str, Any]] = []
     raw_labels: list[Optional[str]] = []
