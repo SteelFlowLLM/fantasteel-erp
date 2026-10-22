@@ -12,8 +12,8 @@ const texts = (lines: ReturnType<typeof netRequirements>) =>
   lines.map((l) => [l.productionPlanId, tonText(l.usedRemainingTon), tonText(l.usedScheduledReceiptTon), tonText(l.netRequirementTon)]);
 
 describe('MRP 소요량 (업무 프로세스 4.4, mrp.md 4장)', () => {
-  it('시드 예: 히트 250t, 제강 수율 0.90 → 용선 277.778t, 철광석 444.444·석탄 166.667·석회석 41.667t, 합금철 20kg/t → 5.000t', () => {
-    const result = planRequirements('250', '0.90', [
+  it('시드 예: 히트 250t, 제강 수율 0.90 → 용선 277.778t, 철광석 444.445·석탄 166.667·석회석 41.667t, 합금철 20kg/t → 5.000t', () => {
+    const result = planRequirements('250', 1, '0.90', [
       { itemId: 1, isFerroalloy: false, consumptionRate: '1.6' },
       { itemId: 2, isFerroalloy: false, consumptionRate: '0.6' },
       { itemId: 3, isFerroalloy: false, consumptionRate: '0.15' },
@@ -21,12 +21,28 @@ describe('MRP 소요량 (업무 프로세스 4.4, mrp.md 4장)', () => {
     ]);
 
     expect(tonText(result.requiredHotMetalTon)).toBe('277.778');
-    // 용선을 277.778로 먼저 반올림하면 철광석이 444.445가 된다: 중간값은 반올림하지 않는다
+    // 실적과 같이 용선을 277.778로 먼저 반올림한다: 철광석 277.778 × 1.6 = 444.4448 → 444.445 (#531)
     expect(result.materials.map((m) => [m.itemId, tonText(m.requiredTon)])).toEqual([
-      [1, '444.444'],
+      [1, '444.445'],
       [2, '166.667'],
       [3, '41.667'],
       [SMN, '5.000'],
+    ]);
+  });
+});
+
+describe('MRP 소요량은 실적 투입과 같다 (#531)', () => {
+  it('히트 3개면 히트 1개 몫(반올림 뒤)의 3배: 실적 시뮬레이션 투입량 합계와 같다', () => {
+    const rates = [
+      { itemId: 1, isFerroalloy: false, consumptionRate: '0.6' },
+      { itemId: SMN, isFerroalloy: true, consumptionRate: '10' },
+    ];
+    const result = planRequirements('250', 3, '0.90', rates);
+    // 실적: 제선 1건 용선 277.778 → 석탄 round3(277.778 × 0.6) = 166.667, 제강 용강 round3(277.778 × 0.9) = 250.000 → 합금철 2.500
+    expect(tonText(result.requiredHotMetalTon)).toBe('833.334');
+    expect(result.materials.map((m) => [m.itemId, tonText(m.requiredTon)])).toEqual([
+      [1, '500.001'],
+      [SMN, '7.500'],
     ]);
   });
 });

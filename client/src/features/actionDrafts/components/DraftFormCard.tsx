@@ -29,6 +29,7 @@ import { useAction } from '@/hooks/useAction';
 import { useDraftRawMaterials } from '@/hooks/useActionDrafts';
 import { useCanUse } from '@/hooks/usePermission';
 import { cn } from '@/lib/cn';
+import { createSubmitLock } from '@/lib/submitLock';
 import { fmtMDHM, fmtTon } from '@/lib/format';
 import { withEulReul } from '@/lib/josa';
 import { toast } from '@/stores/useToastStore';
@@ -102,10 +103,20 @@ export function DraftFormCard({ draft, payload, failure, onConfirmFailure }: Dra
     },
   });
   const pending = update.isPending || confirm.isPending || execute.isPending || reject.isPending;
+  // 확정·다시 실행·반려를 렌더를 기다리지 않고 잠근다: 더블클릭한 두 번째 요청을 보내지 않는다 (#531)
+  const [lock] = useState(createSubmitLock);
+  const once = (run: () => Promise<unknown>) => () => {
+    if (!lock.tryEnter()) return;
+    void run()
+      .catch(() => {
+        // 안내는 useAction(토스트)과 onError가 한다
+      })
+      .finally(() => lock.release());
+  };
 
   const setField = <K extends keyof DraftForm>(key: K, value: DraftForm[K]) => setForm((current) => ({ ...current, [key]: value }));
   const save = () => update.mutate({ actionDraftId: draft.id, payload: buildDraftPayload(form), expectedUpdatedAt: draft.updatedAt });
-  const doConfirm = async () => {
+  const doConfirm = once(async () => {
     onConfirmFailure(null);
     setFieldErrors({});
     try {
@@ -115,7 +126,7 @@ export function DraftFormCard({ draft, payload, failure, onConfirmFailure }: Dra
     } catch {
       // 안내는 useAction(토스트)과 onError(위 배너·칸 아래 안내)가 한다
     }
-  };
+  });
 
   const materialList = materials.data ?? [];
   const material = materialList.find((m) => m.id === form.itemId);
@@ -297,7 +308,7 @@ export function DraftFormCard({ draft, payload, failure, onConfirmFailure }: Dra
               <Button
                 variant="danger-outline"
                 disabled={rejectReason.trim() === '' || pending}
-                onClick={() => reject.mutate({ actionDraftId: draft.id, rejectReason: rejectReason.trim(), expectedUpdatedAt: draft.updatedAt })}
+                onClick={once(() => reject.mutateAsync({ actionDraftId: draft.id, rejectReason: rejectReason.trim(), expectedUpdatedAt: draft.updatedAt }))}
               >
                 반려 확정
               </Button>
@@ -311,7 +322,7 @@ export function DraftFormCard({ draft, payload, failure, onConfirmFailure }: Dra
               <Button icon="check" className="ml-auto" disabled={!dirty || reasonTooLong || pending} onClick={save}>
                 저장
               </Button>
-              <Button variant="primary" icon="send" disabled={reasonTooLong || pending} onClick={() => void doConfirm()}>
+              <Button variant="primary" icon="send" disabled={reasonTooLong || pending} onClick={doConfirm}>
                 확정하고 구매요청 만들기
               </Button>
             </>
@@ -322,7 +333,7 @@ export function DraftFormCard({ draft, payload, failure, onConfirmFailure }: Dra
                 반려
               </Button>
               <span className="text-cap text-ink-3">확정된 값은 바꿀 수 없어요</span>
-              <Button variant="primary" icon="refresh" className="ml-auto" disabled={pending} onClick={() => execute.mutate({ actionDraftId: draft.id })}>
+              <Button variant="primary" icon="refresh" className="ml-auto" disabled={pending} onClick={once(() => execute.mutateAsync({ actionDraftId: draft.id }))}>
                 구매요청 만들기 다시 실행
               </Button>
             </>

@@ -52,7 +52,7 @@ afterAll(async () => {
 });
 
 describe('MRP 소요량 조회 (REQ-PRD-005, 업무 프로세스 4.4)', () => {
-  it('시드 예: SM355A 남은 히트 1개 → 용선 277.778t, 철광석 444.444·석탄 166.667·석회석 41.667·합금철 5.000t. 만든 히트는 뺀다', async () => {
+  it('시드 예: SM355A 남은 히트 1개 → 용선 277.778t, 철광석 444.445·석탄 166.667·석회석 41.667·합금철 5.000t(실적과 같은 반올림, #531). 만든 히트는 뺀다', async () => {
     const plan = await createPlan(2, DUE);
     const result = await prisma.productionResult.create({ data: { productionPlanId: plan.id, processType: 'STEELMAKING', converterCode: 'BOF1', startedAt: new Date() } });
     const grade = await prisma.steelGrade.findUniqueOrThrow({ where: { steelGradeCode: 'SM355A' } });
@@ -63,7 +63,7 @@ describe('MRP 소요량 조회 (REQ-PRD-005, 업무 프로세스 4.4)', () => {
 
     expect(view.heatCapacityTon).toBe('250.000');
     expect(row).toEqual(expect.objectContaining({ requiredDate: DUE, isBeforePeriod: false, remainingHeatCount: 1, heatTon: '250.000', requiredHotMetalTon: '277.778', salesOrderNo: `T-SO-MRP-${seq}` }));
-    expect(Object.fromEntries((row?.materials ?? []).map((m) => [m.itemCode, m.requiredTon]))).toEqual({ ORE01: '444.444', COL01: '166.667', LIM01: '41.667', SMN01: '5.000' });
+    expect(Object.fromEntries((row?.materials ?? []).map((m) => [m.itemCode, m.requiredTon]))).toEqual({ ORE01: '444.445', COL01: '166.667', LIM01: '41.667', SMN01: '5.000' });
   });
 
   it('계획 몫 확정 발주(필요일 전 도착)는 그 계획이 먼저 써서 순소요 0, 기존 구매요청 번호를 보여 준다', async () => {
@@ -71,20 +71,20 @@ describe('MRP 소요량 조회 (REQ-PRD-005, 업무 프로세스 4.4)', () => {
     const ore = await prisma.item.findUniqueOrThrow({ where: { itemCode: 'ORE01' } });
     const requester = await prisma.employee.findUniqueOrThrow({ where: { employeeNo: '2207005' } });
     const requisition = await prisma.purchaseRequisition.create({
-      data: { purchaseRequisitionNo: `T-PR-MRP-${seq}`, itemId: ore.id, requestedTon: '444.444', desiredReceiptDate: new Date(`${DUE}T00:00:00.000Z`), requesterId: requester.id, productionPlanId: plan.id, purchaseRequisitionStatus: 'ORDERED' },
+      data: { purchaseRequisitionNo: `T-PR-MRP-${seq}`, itemId: ore.id, requestedTon: '444.445', desiredReceiptDate: new Date(`${DUE}T00:00:00.000Z`), requesterId: requester.id, productionPlanId: plan.id, purchaseRequisitionStatus: 'ORDERED' },
     });
     await prisma.purchaseOrder.create({
       data: {
         purchaseOrderNo: `T-PO-MRP-${seq}`,
         supplierId: ore.defaultSupplierId ?? 0,
-        purchaseOrderItems: { create: [{ purchaseRequisitionId: requisition.id, itemId: ore.id, orderedTon: '444.444', expectedReceiptDate: new Date('2099-12-01T00:00:00.000Z') }] },
+        purchaseOrderItems: { create: [{ purchaseRequisitionId: requisition.id, itemId: ore.id, orderedTon: '444.445', expectedReceiptDate: new Date('2099-12-01T00:00:00.000Z') }] },
       },
     });
 
     const view = await mrp.requirements({ from: DUE, to: DUE });
     const oreLine = view.plans.find((p) => p.productionPlanId === plan.id)?.materials.find((m) => m.itemId === ore.id);
 
-    expect(oreLine).toEqual(expect.objectContaining({ requiredTon: '444.444', netRequirementTon: '0.000' }));
+    expect(oreLine).toEqual(expect.objectContaining({ requiredTon: '444.445', netRequirementTon: '0.000' }));
     expect(view.requisitionLines.some((l) => l.productionPlanId === plan.id && l.itemId === ore.id)).toBe(false);
     expect(view.materials.find((m) => m.itemId === ore.id)?.scheduledReceiptTon).not.toBe('0.000');
   });

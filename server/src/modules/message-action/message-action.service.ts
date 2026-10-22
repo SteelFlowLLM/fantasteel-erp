@@ -273,6 +273,10 @@ export class MessageActionService {
     try {
       await retryOnNumberConflict(() =>
         run(() => this.prisma.$transaction(async (tx) => {
+          // 잠근 뒤 아직 읽은 그대로(승인·같은 updatedAt)인지 본다. 다른 요청이 먼저 실행했으면 경합이다 (#531)
+          await this.repository.lockDraft(tx, draft.id);
+          const current = await this.repository.findDraft(tx, draft.id);
+          if (current?.draftStatus !== DRAFT_STATUS.APPROVED || current.updatedAt.getTime() !== draft.updatedAt.getTime()) throw new DraftChangedError();
           const result = await definition.execute(tx, draft, user);
           await this.changeDraft(tx, draft, { draftStatus: DRAFT_STATUS.EXECUTED, executionErrorCode: null, executionAttemptCount: { increment: 1 } });
           await this.businessEventRecorder.record(tx, {
@@ -341,6 +345,8 @@ export class MessageActionService {
     expectedUpdatedAt: string | null | undefined,
     allowed: readonly string[] = EDITABLE_STATUSES,
   ): Promise<{ draft: DraftRow; definition: ActionDefinition }> {
+    // 트랜잭션 안이면 잠근 뒤 읽는다: 더블클릭한 두 확정이 같은 상태를 보고 둘 다 기록하지 않게 (#531)
+    await this.repository.lockDraft(tx, id);
     const draft = await this.repository.findDraft(tx, id);
     if (!draft) throw new AppException('COM-003', '초안을 찾을 수 없어요');
     const definition = this.registry.get(draft.actionType);

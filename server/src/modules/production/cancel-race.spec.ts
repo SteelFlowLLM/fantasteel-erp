@@ -83,10 +83,10 @@ beforeAll(async () => {
   const base = await prisma.item.findUniqueOrThrow({ where: { itemCode: 'SL-SM355A-250x1500x10000' } });
   const coilBase = await prisma.item.findUniqueOrThrow({ where: { itemCode: 'CL-SM355A-4.5x1500x544000' } });
   const slab = await prisma.item.create({
-    data: { itemCode: 'SL-RC-TEST', itemName: '취소 경합 슬래브', itemType: 'SLAB', unitType: 'QTY', steelGradeId: base.steelGradeId, thicknessMm: '250', widthMm: '1500', lengthMm: '10002', theoreticalWeightTon: calcTheoreticalWeightTon('250', '1500', '10002'), defaultYardId: base.defaultYardId },
+    data: { itemCode: 'SL-RC-TEST', itemName: '취소 경합 슬래브', itemType: 'SLAB', unitType: 'QTY', steelGradeId: base.steelGradeId, thicknessMm: '250', widthMm: '1500', lengthMm: '10009', theoreticalWeightTon: calcTheoreticalWeightTon('250', '1500', '10009'), defaultYardId: base.defaultYardId },
   });
   const coil = await prisma.item.create({
-    data: { itemCode: 'CL-RC-TEST', itemName: '취소 경합 코일', itemType: 'COIL', unitType: 'QTY', steelGradeId: coilBase.steelGradeId, thicknessMm: '4.5', widthMm: '1500', lengthMm: '544002', theoreticalWeightTon: calcTheoreticalWeightTon('4.5', '1500', '544002'), defaultYardId: coilBase.defaultYardId },
+    data: { itemCode: 'CL-RC-TEST', itemName: '취소 경합 코일', itemType: 'COIL', unitType: 'QTY', steelGradeId: coilBase.steelGradeId, thicknessMm: '4.5', widthMm: '1500', lengthMm: '544009', theoreticalWeightTon: calcTheoreticalWeightTon('4.5', '1500', '544009'), defaultYardId: coilBase.defaultYardId },
   });
   await prisma.specMapping.create({ data: { slabItemId: slab.id, coilItemId: coil.id } });
   slabItemId = slab.id;

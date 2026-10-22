@@ -111,6 +111,7 @@ export function TraceGraph({ trace, selected, onSelect }: { trace: Pick<LotTrace
         >
           <b className="font-semibold text-brand">{LOT_RELATION_EVIDENCE_LABEL.PERIOD_BASED}</b>
           <span className="tabular-nums">{fmtPeriod(p.periodStartedAt, p.periodEndedAt)}</span>
+          {p.inputTon ? <span className="tabular-nums">원료 차감 {fmtTon(p.inputTon)}</span> : null}
         </div>
       ))}
       {layout.edgeLabels.map((l) => (
@@ -119,7 +120,9 @@ export function TraceGraph({ trace, selected, onSelect }: { trace: Pick<LotTrace
           className="pointer-events-none absolute z-[2] flex -translate-x-1/2 -translate-y-1/2 flex-col items-center rounded-[9px] bg-surface px-1.5 py-px text-2xs whitespace-nowrap text-ink-2 shadow-[inset_0_0_0_1px_var(--color-line-strong)]"
           style={{ left: l.x, top: l.y }}
         >
-          <span>{LOT_RELATION_EVIDENCE_LABEL.ACTUAL_INPUT}</span>
+          <span>
+            {l.inputKind} {LOT_RELATION_EVIDENCE_LABEL.ACTUAL_INPUT}
+          </span>
           {l.inputTon ? <span className="tabular-nums">{fmtTon(l.inputTon)}</span> : null}
         </div>
       ))}

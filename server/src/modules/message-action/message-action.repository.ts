@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { BUSINESS_EVENT_TYPE, DRAFT_STATUS, ITEM_TYPE } from '@fantasteel/shared';
 import type { Prisma } from '../../generated/prisma/client';
+import { lockActionDraft } from '../../generated/prisma/sql';
 import type { Tx } from '../../prisma/prisma.service';
 
 /** 아직 처리되지 않은 초안 상태 (ERD 부분 unique action_draft_open_message_type_key와 같은 목록) */
@@ -89,6 +90,11 @@ export class MessageActionRepository {
 
   updateDraft(tx: Tx, id: number, data: Prisma.ActionDraftUpdateInput) {
     return tx.actionDraft.update({ where: { id }, data, select: draftSelect });
+  }
+
+  /** 초안 행을 트랜잭션 끝까지 잠근다. 잠근 뒤 읽어야 동시 요청이 같은 상태를 보고 둘 다 바꾸지 않는다 (#531) */
+  async lockDraft(tx: Tx, id: number): Promise<void> {
+    await tx.$queryRawTyped(lockActionDraft(id));
   }
 
   /** 읽은 뒤 아무도 고치지 않았을 때만 바꾼다. 바꿨으면 true */
