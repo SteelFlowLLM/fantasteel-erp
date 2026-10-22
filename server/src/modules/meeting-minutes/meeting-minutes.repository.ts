@@ -39,7 +39,20 @@ export const meetingMinutesDetailSelect = {
   },
 } satisfies Prisma.MeetingMinutesSelect;
 
+/** 철강맨AI 회의 검색용: 목록 칸에 요약과 AI 분석 결과(결정사항)를 더한다. 전사 글(수 MB)은 읽지 않는다 */
+const digestSelect = { ...listSelect, summary: true, analysisResult: true } satisfies Prisma.MeetingMinutesSelect;
+/** 한 회의를 자세히 볼 때(철강맨AI): 요약 칸에 참석자를 더한다. 이 칸도 전사 글은 읽지 않는다 */
+const digestDetailSelect = {
+  ...digestSelect,
+  attendees: {
+    orderBy: { id: 'asc' },
+    select: { employeeId: true, employee: { select: { employeeName: true, department: { select: { departmentName: true } }, role: { select: { roleCode: true } } } } },
+  },
+} satisfies Prisma.MeetingMinutesSelect;
+
 export type MeetingMinutesListRow = Prisma.MeetingMinutesGetPayload<{ select: typeof listSelect }>;
+export type MeetingMinutesDigestRow = Prisma.MeetingMinutesGetPayload<{ select: typeof digestSelect }>;
+export type MeetingMinutesDigestDetailRow = Prisma.MeetingMinutesGetPayload<{ select: typeof digestDetailSelect }>;
 export type MeetingMinutesDetailRow = Prisma.MeetingMinutesGetPayload<{ select: typeof meetingMinutesDetailSelect }>;
 
 /** DB 접근만 둔다. 첫 인자는 항상 tx (컨벤션 6장) */
@@ -69,6 +82,15 @@ export class MeetingMinutesRepository {
   /** 회의일 최신순, 같은 날은 나중에 만든 것이 위 */
   findList(tx: Tx, where: Prisma.MeetingMinutesWhereInput, page: { skip: number; take: number }) {
     return tx.meetingMinutes.findMany({ where, select: listSelect, orderBy: [{ meetingDate: 'desc' }, { id: 'desc' }], ...page });
+  }
+
+  /** 철강맨AI 회의 검색: 회의일 최신순으로 요약·결정사항 칸까지 읽는다 */
+  findDigests(tx: Tx, where: Prisma.MeetingMinutesWhereInput, page: { skip: number; take: number }) {
+    return tx.meetingMinutes.findMany({ where, select: digestSelect, orderBy: [{ meetingDate: 'desc' }, { id: 'desc' }], ...page });
+  }
+
+  findDigestDetail(tx: Tx, id: number) {
+    return tx.meetingMinutes.findUnique({ where: { id }, select: digestDetailSelect });
   }
 
   /** 아직 TRANSCRIBING인 행만 바꾼다. 그 사이 다른 상태가 됐으면 0건 */

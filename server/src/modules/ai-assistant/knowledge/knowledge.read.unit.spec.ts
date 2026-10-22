@@ -2,8 +2,9 @@ import { parseAssistantAnswer } from '../assistant.answer';
 import { buildAssistantMessages, knowledgeCatalog } from '../assistant.prompt';
 import { knowledgeTool } from '../tools/knowledge.tool';
 import { GLOSSARY_TERMS } from './glossary.generated';
-import { KNOWLEDGE_TEXT_MAX, lookupKnowledge } from './knowledge.read';
+import { KNOWLEDGE_TEXT_MAX, lookupKnowledge, readableKsSections } from './knowledge.read';
 import { KnowledgeReads } from './knowledge.reads';
+import { KS_SECTIONS } from './ks.generated';
 import { MANUAL_GUIDES } from './manual.generated';
 import { PROCESS_STEPS } from './process.generated';
 
@@ -23,7 +24,16 @@ describe('지식 목록 (프롬프트)', () => {
     expect(catalog).toContain('용어(kind: glossary)');
     expect(catalog).toContain('TRM ID');
     expect(catalog).not.toContain(GLOSSARY_TERMS[0].id);
-    expect(catalog.split('\n')).toHaveLength(4);
+    expect(catalog.split('\n')).toHaveLength(5);
+  });
+
+  it('KS 규격·검사 기준은 읽을 수 있는 절의 번호와 제목을 싣고, 문서 작업 메모 절은 싣지 않는다', () => {
+    expect(catalog).toContain('KS 규격·검사 기준(kind: ks)');
+    expect(catalog).toContain('KS-8 강종별 기준값 (SPHC·SS275·SM355A)');
+    expect(catalog).toContain('KS-7-1 코일 치수 허용차');
+    expect(catalog).not.toContain('KS-9 ');
+    expect(catalog).not.toContain('KS-10 ');
+    expect(readableKsSections().map((section) => section.id)).not.toEqual(expect.arrayContaining(['KS-9', 'KS-10']));
   });
 
   it('시스템 프롬프트에 들어간다', () => {
@@ -60,8 +70,38 @@ describe('read_knowledge', () => {
     await expect(read({ kind: 'glossary', id: '예약 수량' })).rejects.toThrow(/비슷한 용어: TRM-/);
   });
 
+  it('KS 규격을 절 번호·숫자·제목으로 읽는다', async () => {
+    const byId = await read({ kind: 'ks', id: 'KS-8' });
+    expect(byId.hideSource).toBe(true);
+    expect(byId.data).toMatchObject({ 종류: 'ks', id: 'KS-8', 이름: '강종별 기준값 (SPHC·SS275·SM355A)' });
+    expect(JSON.stringify(byId.data)).toContain('SS275');
+    expect((await read({ kind: 'ks', id: 'ks-8' })).data).toMatchObject({ id: 'KS-8' });
+    expect((await read({ kind: 'ks', id: '7-1' })).data).toMatchObject({ id: 'KS-7-1' });
+    expect((await read({ kind: 'ks', id: '코일 치수 허용차' })).data).toMatchObject({ id: 'KS-7-1' });
+  });
+
+  it('KS 규격은 강종·규격 번호·낱말로 적어도 가장 맞는 절을 읽는다', async () => {
+    expect((await read({ kind: 'ks', id: 'SS275' })).data).toMatchObject({ id: 'KS-8' });
+    expect((await read({ kind: 'ks', id: 'SS275 인장강도' })).data).toMatchObject({ id: 'KS-8' });
+    expect((await read({ kind: 'ks', id: 'KS D 3500' })).data).toMatchObject({ id: 'KS-7-1' });
+    expect((await read({ kind: 'ks', id: 'SM355' })).data).toMatchObject({ id: expect.stringMatching(/^KS-8/) });
+  });
+
+  it('없는 KS 절과 문서 작업 메모 절은 가능한 값을 알려 준다', async () => {
+    await expect(read({ kind: 'ks', id: 'KS-99' })).rejects.toThrow(/없는 KS 규격 절이에요: KS-99. 가능한 값: KS-1 한눈에 보기/);
+    await expect(read({ kind: 'ks', id: 'KS-9' })).rejects.toThrow('없는 KS 규격 절이에요');
+    await expect(read({ kind: 'ks', id: 'KS-10' })).rejects.toThrow('없는 KS 규격 절이에요');
+  });
+
+  it('KS 절 본문이 길면 4000자에서 자른다', () => {
+    const long = [{ id: 'KS-1', title: '긴 절', text: '표'.repeat(KNOWLEDGE_TEXT_MAX * 2) }];
+    const found = lookupKnowledge('ks', 'KS-1', { guides: [], steps: [], terms: [], ks: long });
+    expect(found.found && found.text).toContain('길어서 여기까지만 읽었어요');
+    expect(KS_SECTIONS.every((section) => section.text.length < KNOWLEDGE_TEXT_MAX)).toBe(true);
+  });
+
   it('kind·id가 틀리면 이유를 알린다', async () => {
-    await expect(read({ kind: 'x', id: 'a' })).rejects.toThrow('kind는 manual, process, glossary 중 하나예요');
+    await expect(read({ kind: 'x', id: 'a' })).rejects.toThrow('kind는 manual, process, glossary, ks 중 하나예요');
     await expect(read({ kind: 'manual' })).rejects.toThrow('id가 필요해요');
   });
 
@@ -99,5 +139,17 @@ describe('읽은 항목의 출처 인정 (parseAssistantAnswer)', () => {
       { kind: 'GLOSSARY', id: term.id, label: term.name },
     ]);
     expect(parsed.answer).not.toContain('[');
+  });
+
+  it('KS 규격은 읽은 절만 출처로 인정하고 본문의 [KS-8] 표시는 지운다', () => {
+    const reads = new KnowledgeReads();
+    reads.add(JSON.stringify({ kind: 'ks', id: 'SS275 인장강도' }));
+    reads.add(JSON.stringify({ kind: 'ks', id: 'KS-99' }));
+    expect(reads.sections.map((section) => section.id)).toEqual(['KS-8']);
+    const parsed = parseAssistantAnswer('SS275 인장강도 기준은 표와 같아요 [KS-8] 치수 허용차도 있어요 (KS-7-1)', [], [], [], reads.sections);
+    expect(parsed.sources).toEqual([{ kind: 'KS', id: 'KS-8', label: '강종별 기준값 (SPHC·SS275·SM355A)' }]);
+    expect(parsed.answer).not.toContain('[KS-8]');
+    expect(parsed.answer).not.toContain('(KS-7-1)');
+    expect(parseAssistantAnswer('기준은 [KS-8]', []).sources).toEqual([]);
   });
 });

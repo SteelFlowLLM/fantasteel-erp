@@ -1,5 +1,6 @@
 import type { GlossaryTerm } from './glossary.types';
 import { KNOWLEDGE_KINDS, lookupKnowledge, type KnowledgeKind } from './knowledge.read';
+import type { KsSection } from './ks.types';
 import type { ManualGuide } from './manual.types';
 import type { ProcessStep } from './process.types';
 
@@ -8,6 +9,7 @@ export class KnowledgeReads {
   readonly terms: GlossaryTerm[] = [];
   readonly steps: ProcessStep[] = [];
   readonly guides: ManualGuide[] = [];
+  readonly sections: KsSection[] = [];
 
   /** 도구 인자(JSON)로 읽은 항목을 기록한다. 인자가 틀렸거나 없는 항목이면 기록하지 않는다 */
   add(argumentsJson: string): void {
@@ -24,6 +26,7 @@ export class KnowledgeReads {
     if (!found.found) return;
     if (found.kind === 'glossary') pushOnce(this.terms, found.entry);
     else if (found.kind === 'process') pushOnce(this.steps, found.entry);
+    else if (found.kind === 'ks') pushOnce(this.sections, found.entry);
     else pushOnce(this.guides, found.entry);
   }
 }

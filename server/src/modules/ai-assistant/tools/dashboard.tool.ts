@@ -1,4 +1,4 @@
-import { PERMISSION, PROCESS_TYPE, PROCESS_TYPE_LABEL, PRODUCTION_PLAN_STATUS_LABEL, SHIPMENT_REQUEST_STATUS_LABEL, type ProcessYieldRow } from '@fantasteel/shared';
+import { PERMISSION, PROCESS_TYPE, PROCESS_TYPE_LABEL, PRODUCTION_PLAN_STATUS_LABEL, SHIPMENT_REQUEST_STATUS_LABEL, type Permission, type ProcessYieldRow } from '@fantasteel/shared';
 import type { DashboardService } from '../../dashboard/dashboard.service';
 import { limitRows, optionalEnum, ToolArgumentError, type AssistantTool } from './assistant-tool';
 
@@ -6,15 +6,28 @@ export const DASHBOARD_TOOL_WIDGETS = ['process_flow', 'shipment_result', 'proce
 type DashboardToolWidget = (typeof DASHBOARD_TOOL_WIDGETS)[number];
 
 /**
+ * 위젯마다 그 대시보드 API(GET dashboard/widgets/*)의 화면 권한. 빈 목록은 모든 사원.
+ * 공정 흐름·여재 보유는 모든 사원, 출하 실적은 출고 확정 VIEW, 공정별 수율은 작업 실적 확정 VIEW.
+ */
+export const DASHBOARD_WIDGET_PERMISSIONS: Record<DashboardToolWidget, readonly Permission[]> = {
+  process_flow: [],
+  shipment_result: [PERMISSION.GOODS_ISSUE_CONFIRM],
+  process_yield: [PERMISSION.PRODUCTION_RESULT_CONFIRM],
+  surplus_age: [],
+};
+
+/**
  * 대시보드 현황 (GET dashboard/widgets/*, REQ-DSH-001·002). 숫자는 대시보드 service의 계산을 그대로 넘긴다.
- * 공정 흐름·여재 보유는 모든 사원, 출하 실적은 출고 확정 VIEW, 공정별 수율은 작업 실적 확정 VIEW를 service가 확인한다.
+ * 권한은 위젯마다 따로 본다(scoped): 출하 실적 권한만 있는 사원이 공정별 수율을 읽거나, 그 숫자가 담긴 사내 채팅 AI 답이
+ * 수율 권한이 없는 방 멤버에게 보이지 않게 한다. service도 같은 권한을 한 번 더 확인한다.
  * 수주 충족·제품 재고는 get_sales_orders·get_inventory가 같은 숫자를 줘서 넣지 않는다.
  */
 export function dashboardTool(dashboard: DashboardService): AssistantTool {
   return {
     access: {
-      checkedBy: 'SERVICE',
+      checkedBy: 'TOOLBOX',
       permissions: [PERMISSION.GOODS_ISSUE_CONFIRM, PERMISSION.PRODUCTION_RESULT_CONFIRM],
+      scoped: { argument: 'widget', permissions: DASHBOARD_WIDGET_PERMISSIONS },
       note: '공정 흐름 현황·여재 보유 기간은 모든 사원이 볼 수 있고, 출하 실적은 출고 확정, 공정별 수율은 작업 실적 확정 조회 권한이 필요해요.',
     },
     definition: {
