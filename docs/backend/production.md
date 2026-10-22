@@ -168,6 +168,8 @@
 | POST | `production-results` | RESULT USE | `completedAt`이 없으면 작업 시작만, 있으면 시작·완료를 한 번에. `startedAt`·`completedAt`에 시간대(`Z`·`±hh:mm`)가 없으면 서울 시각으로 읽는다(일정과 같은 `seoulDateTimeOf`, 2026-10-22 이슈 #496). 전에는 서버 로컬 시간으로 읽어 서버가 UTC면 9시간 밀렸다. 읽을 수 없는 시각은 COM-004 |
 | POST ➕ | `production-results/:id/complete` | RESULT USE | 작업 시작한 실적 완료(초안 행 API-101) |
 | POST | `production-plans/:id/simulate-results` | RESULT USE | 실적 시뮬레이션 `{ randomSeed? }` |
+| GET ➕ | `production-plans/hot-rolling` | HOT_ROLLING VIEW | 열연 투입 목록(이슈 #498): 코일 계획마다 상세와 같은 규칙의 요약 값(`slabItemCode`·`shortageQty`·`usableCoilQty`·`failedCoilQty`·`confirmedAllocationQty`·`neededQty`·`isRollable`). 완료·취소 계획도 포함하고, 기준정보가 모자라 슬래브 규격을 정할 수 없으면 `slabItemCode`가 null. 계획·LOT·열연 배정을 한 번에 읽고, 슬래브 규격(히트 편성 기준)도 `heatPlanBasesOf`로 규격 여러 개를 한 번에(라우팅·설정값은 한 번만, 규격은 `in`) 읽어 계획마다 상세(FIFO 후보까지)·기준 쿼리를 따로 읽던 N+1을 없앤다. 생산계획 목록도 같은 함수를 쓴다. 페이징 `page`·`size`, 최신 계획부터 |
+| GET ➕ | `production-plans/reproduction-checks` | PLAN VIEW | 계획 여러 개의 연결 수주 품목 표시값과 재생산 판단(이슈 #498). `?productionPlanIds=1,2,3`(쉼표, 100개까지). 계획 상세(`:id`)의 `reproduction`과 같은 값이라 불합격 LOT 목록이 계획 상세를 계획마다 따로 부르지 않는다. 없는 계획은 빠지고 수주 연결이 없는 계획은 `reproduction`이 null |
 | GET ➕ | `production-plans/:id/hot-rolling` | HOT_ROLLING VIEW | 열연 투입 화면(필요 매수·슬래브 재고·FIFO 후보·배정·코일) |
 | POST ➕ | `production-plans/:id/hot-rolling/recommend` | HOT_ROLLING USE | FIFO 추천(ALLOCATION_RECOMMENDED만) |
 | POST | `production-plans/:id/hot-rolling/allocations` | HOT_ROLLING USE | 배정 확정 `{ lotIds }` (초안 행 API-103을 v1 경로로) |

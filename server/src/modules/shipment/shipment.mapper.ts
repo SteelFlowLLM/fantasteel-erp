@@ -4,6 +4,7 @@ import {
   type AllocationStatus,
   type ItemType,
   type MillSheetDetail,
+  type MillSheetListItem,
   type MillSheetSnapshot,
   type MillSheetSummary,
   type ShipmentRequestDetail,
@@ -11,6 +12,7 @@ import {
   type ShipmentRequestSummary,
 } from '@fantasteel/shared';
 import { seoulDateOnly } from '../../common/time/seoul-date';
+import type { listMillSheetSummaries } from '../../generated/prisma/sql';
 import type { SnapshotHeatInput, SnapshotInspectionInput, SnapshotLotInput } from './mill-sheet-snapshot';
 import type {
   MillSheetDetailRow,
@@ -82,6 +84,29 @@ export function toMillSheetSummary(row: MillSheetSummaryRow): MillSheetSummary {
     salesOrderNo: row.salesOrder.salesOrderNo,
     issuedAt: row.issuedAt.toISOString(),
     pdfPath: row.pdfPath,
+  };
+}
+
+/** SQL이 jsonb 배열로 준 값에서 글자만 (옛 스냅샷에 없거나 다른 모양이면 빠진다) */
+const stringsOf = (value: unknown): string[] => (Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []);
+
+/** 목록 한 줄: 요약 + 스냅샷에서 뽑은 고객사·매수·히트·규격. 값이 없는 옛 스냅샷은 빈 칸으로 넘긴다 */
+export function toMillSheetListItem(row: listMillSheetSummaries.Result): MillSheetListItem {
+  return {
+    id: row.id,
+    millSheetNo: row.mill_sheet_no,
+    shipmentRequestId: row.shipment_request_id,
+    shipmentRequestNo: row.shipment_request_no,
+    salesOrderId: row.sales_order_id,
+    salesOrderNo: row.sales_order_no,
+    issuedAt: row.issued_at.toISOString(),
+    pdfPath: row.pdf_path,
+    customerName: row.customer_name ?? '',
+    totalQty: row.total_qty ?? 0,
+    totalWeightTon: row.total_weight_ton ?? '0.000',
+    heatNos: stringsOf(row.heat_nos),
+    itemTypes: [...new Set(stringsOf(row.item_types))],
+    itemCodes: [...new Set(stringsOf(row.item_codes))],
   };
 }
 

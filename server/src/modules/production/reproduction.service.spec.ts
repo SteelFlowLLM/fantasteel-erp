@@ -138,3 +138,25 @@ describe('재생산 계획 생성 (API-202)', () => {
     expect(await codeOf(production.createReproductionPlan(producer, 999_999))).toBe('COM-003');
   });
 });
+
+describe('계획 여러 개의 재생산 판단 (이슈 #498)', () => {
+  it('계획 상세의 reproduction과 같은 값을 한 번에 주고, 수주 연결이 끊긴 계획은 null, 없는 계획은 뺀다', async () => {
+    const a = await order(4);
+    await cast(a.plan.id, ['PASS', 'PASS', 'FAIL', 'FAIL']);
+    await prisma.productionPlan.update({ where: { id: a.plan.id }, data: { productionPlanStatus: 'COMPLETED' } });
+    const b = await order(2);
+    await cast(b.plan.id, ['FAIL', 'FAIL']);
+    const detached = await order(1);
+    await prisma.productionPlan.update({ where: { id: detached.plan.id }, data: { salesOrderItemId: null } });
+
+    const checks = await production.reproductionChecksOfPlans([a.plan.id, b.plan.id, detached.plan.id, b.plan.id, 999_999]);
+    expect(checks.map((c) => c.productionPlanId)).toEqual([a.plan.id, b.plan.id, detached.plan.id]);
+    for (const check of checks) {
+      const detail = await production.getPlanDetail(check.productionPlanId);
+      expect(check).toEqual({ productionPlanId: detail.id, customerName: detail.customerName, itemCode: detail.itemCode, itemType: detail.itemType, dueDate: detail.dueDate, reproduction: detail.reproduction });
+    }
+    expect(checks[0].reproduction).toMatchObject({ salesOrderItemId: a.salesOrderItemId, orderedQty: 4, unsecuredQty: 2 });
+    expect(checks[2].reproduction).toBeNull();
+    expect(await production.reproductionChecksOfPlans([])).toEqual([]);
+  });
+});

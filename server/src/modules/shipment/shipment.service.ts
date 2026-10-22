@@ -8,7 +8,7 @@ import {
   type AuthUser,
   type ItemType,
   type MillSheetDetail,
-  type MillSheetSummary,
+  type MillSheetListItem,
   millSheetPdfFileName,
   type PageResult,
   type ShipmentRequestDetail,
@@ -30,7 +30,7 @@ import type { ListMillSheetsQuery } from './dto/list-mill-sheets.query';
 import type { ListShipmentRequestsQuery } from './dto/list-shipment-requests.query';
 import { renderMillSheetPdf } from './mill-sheet-pdf';
 import { buildMillSheetSnapshot } from './mill-sheet-snapshot';
-import { toMillSheetDetail, toMillSheetSummary, toShipmentRequestDetail, toShipmentRequestSummary, toSnapshotLotInput } from './shipment.mapper';
+import { toMillSheetDetail, toMillSheetListItem, toShipmentRequestDetail, toShipmentRequestSummary, toSnapshotLotInput } from './shipment.mapper';
 import { ShipmentRepository } from './shipment.repository';
 
 /**
@@ -377,17 +377,17 @@ export class ShipmentService {
     return next;
   }
 
-  /** 밀시트 목록 (API-232). 권한 MILL_SHEET_READ VIEW는 컨트롤러 데코레이터가 본다 */
-  async listMillSheets(query: ListMillSheetsQuery): Promise<PageResult<MillSheetSummary>> {
+  /** 밀시트 목록 (API-232). 권한 MILL_SHEET_READ VIEW는 컨트롤러 데코레이터가 본다. 고객사·매수·히트·규격은 스냅샷에서 뽑아 함께 준다(이슈 #498) */
+  async listMillSheets(query: ListMillSheetsQuery): Promise<PageResult<MillSheetListItem>> {
     const where: Prisma.MillSheetWhereInput = {
       ...(query.shipmentRequestId ? { shipmentRequestId: query.shipmentRequestId } : {}),
       ...(query.salesOrderId ? { salesOrderId: query.salesOrderId } : {}),
     };
     const [rows, total] = await Promise.all([
-      this.repository.findMillSheets(this.prisma, where, (query.page - 1) * query.size, query.size),
+      this.repository.findMillSheetList(this.prisma, { shipmentRequestId: query.shipmentRequestId, salesOrderId: query.salesOrderId }, (query.page - 1) * query.size, query.size),
       this.repository.countMillSheets(this.prisma, where),
     ]);
-    return { items: rows.map(toMillSheetSummary), page: query.page, size: query.size, total };
+    return { items: rows.map(toMillSheetListItem), page: query.page, size: query.size, total };
   }
 
   /** 밀시트 조회 (API-233, REQ-SHP-004). 저장된 스냅샷만 돌려주고 현재 고객사·검사값을 다시 읽지 않는다 */

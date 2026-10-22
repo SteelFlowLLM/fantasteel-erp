@@ -1,4 +1,4 @@
-// 밀시트 서버 어댑터: 목록(상세 스냅샷으로 채움)·상세(스냅샷 이름 맞춤, 수주 줄 번호)·PDF 생성(POST pdf).
+// 밀시트 서버 어댑터: 목록(서버가 스냅샷에서 뽑아 준 값)·상세(스냅샷 이름 맞춤, 수주 줄 번호)·PDF 생성(POST pdf).
 import type { MillSheetDetail, MillSheetSnapshot } from '@fantasteel/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { millSheetApi } from '@/api/millSheets';
@@ -63,19 +63,25 @@ const detail = (id: number, over: Partial<MillSheetDetail> = {}): MillSheetDetai
 /** 수주 상세: 어댑터는 items 순서만 본다. 밀시트 품목(52)은 수주의 둘째 줄 */
 const salesOrder50 = { id: 50, items: [{ salesOrderItemId: 51 }, { salesOrderItemId: 52 }] };
 
-/** 목록 한 줄 = 상세에서 스냅샷을 뺀 값 */
-const summary = ({ snapshot: _snapshot, ...rest }: MillSheetDetail) => rest;
+/** 목록 한 줄 = 상세에서 스냅샷을 빼고 서버가 스냅샷에서 뽑은 값을 더한 것 (이슈 #498) */
+const listItem = ({ snapshot: s, ...rest }: MillSheetDetail) => ({
+  ...rest,
+  customerName: s.customer.customerName,
+  totalQty: s.totalQty,
+  totalWeightTon: s.totalWeightTon,
+  heatNos: s.heats.map((h) => h.heatNo),
+  itemTypes: [...new Set(s.items.map((i) => i.itemType))],
+  itemCodes: [...new Set(s.items.map((i) => i.itemCode))],
+});
 
 afterEach(() => stopFakeServer());
 
 describe('밀시트 서버 어댑터 (api/server/millSheets.ts)', () => {
-  it('목록: 밀시트마다 상세 스냅샷으로 고객사·매수·히트·규격을 채우고 최근 발행 순으로 둔다', async () => {
+  it('목록: 서버가 준 고객사·매수·히트·규격을 쓰고 상세를 따로 부르지 않으며 최근 발행 순으로 둔다', async () => {
     const older = detail(1, { issuedAt: '2026-10-06T01:00:00.000Z' });
     const newer = detail(2, { pdfPath: 'mill-sheets/x-MS-2610-0002-1.pdf', snapshot: snapshot({ items: [{ ...snapshot().items[0], itemType: 'COIL', itemCode: 'CL-1' }] }) });
     const calls = useFakeServer(SEED_EMPLOYEE_NO.logisticsHead, (c) => {
-      if (c.path === '/mill-sheets') return ok(page([summary(older), summary(newer)]));
-      if (c.path === '/mill-sheets/1') return ok(older);
-      if (c.path === '/mill-sheets/2') return ok(newer);
+      if (c.path === '/mill-sheets') return ok(page([listItem(older), listItem(newer)]));
       return undefined;
     });
     const rows = await millSheetApi.list();
@@ -83,6 +89,7 @@ describe('밀시트 서버 어댑터 (api/server/millSheets.ts)', () => {
     expect(rows[0]).toMatchObject({ customerName: '나래조선', totalQty: 1, totalWeightTon: '23.550', heatNos: ['HT-001'], itemTypes: ['COIL'], itemCodes: ['CL-1'], pdfPath: 'mill-sheets/x-MS-2610-0002-1.pdf' });
     expect(rows[1]).toMatchObject({ itemTypes: ['SLAB'], shipmentRequestNo: 'DR-2610-0001', salesOrderNo: 'SO-2610-001' });
     expect(calls.find((c) => c.path === '/mill-sheets')?.query).toMatchObject({ page: '1', size: '100' });
+    expect(calls.map((c) => c.path)).toEqual(['/mill-sheets']);
   });
 
   it('상세: 출하 예정일 이름을 맞추고, 빈 생산일은 빈 글자, 수주 줄 번호는 수주 상세 순서로 매긴다', async () => {

@@ -16,6 +16,7 @@ import type {
 } from '@fantasteel/shared';
 import { ApiError, InputError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
+import { assertUnchanged } from '@/api/validation';
 import type {
   CustomerInput,
   CustomerUpdateInput,
@@ -97,7 +98,7 @@ async function listProductSpecs(): Promise<MasterProductSpecView[]> {
         isUsed: false,
         usageText: null,
         referenceText: null,
-        updatedAt: '',
+        updatedAt: item.updatedAt,
       };
     })
     .sort(
@@ -172,7 +173,8 @@ async function listRoutings(): Promise<MasterRoutingView[]> {
       .filter((r) => r.itemType === itemType)
       .sort((a, b) => a.sequenceNo - b.sequenceNo)
       .map((r) => ({ id: r.id, processType: r.processType, processSeq: r.sequenceNo, plannedYieldRate: r.plannedYieldRate })),
-    updatedAt: null,
+    // 이 품목 유형의 공정 중 가장 늦게 저장된 시각: 저장 때 expectedUpdatedAt으로 돌려보내고, 저장하면 바뀌어 폼이 다시 그려진다 (이슈 #498)
+    updatedAt: routings.filter((r) => r.itemType === itemType).map((r) => r.updatedAt).sort().at(-1) ?? null,
   }));
 }
 
@@ -202,27 +204,26 @@ async function listRawMaterials(): Promise<MasterRawMaterialView[]> {
       defaultSupplierId: item.defaultSupplierId,
       defaultSupplierName: nameOf(suppliers, item.defaultSupplierId, (s) => s.supplierName),
       referenceText: null,
-      updatedAt: '',
+      updatedAt: item.updatedAt,
     }))
     .sort((a, b) => a.itemCode.localeCompare(b.itemCode));
 }
 
 async function listCustomers(): Promise<MasterCustomerView[]> {
   const rows = await serverRequest<CustomerView[]>('GET', '/customers');
-  return rows.map((c) => ({ ...c, referenceText: null, updatedAt: '' }));
+  return rows.map((c) => ({ ...c, referenceText: null }));
 }
 
 async function listSuppliers(): Promise<MasterSupplierView[]> {
-  return (await getSuppliers()).map((s) => ({ ...s, referenceText: null, updatedAt: '' }));
+  return (await getSuppliers()).map((s) => ({ ...s, referenceText: null }));
 }
 
 async function listYards(): Promise<MasterYardView[]> {
-  return (await getYards()).map((y) => ({ ...y, referenceText: null, updatedAt: '' }));
+  return (await getYards()).map((y) => ({ ...y, referenceText: null }));
 }
 
 async function getProductionSetting(): Promise<MasterProductionSettingView> {
-  const row = await serverRequest<ProductionSettingView>('GET', '/production-settings');
-  return { ...row, updatedAt: '' };
+  return serverRequest<ProductionSettingView>('GET', '/production-settings');
 }
 
 /** 원료 품목 코드 → 기본 야드 이름 (입고 화면). 기준정보 조회 권한이 없으면 이름을 비운다 */
@@ -278,6 +279,7 @@ const updateProductSpec = async (input: ProductSpecUpdateInput) =>
     widthMm: input.widthMm.trim(),
     lengthMm: input.lengthMm.trim(),
     defaultYardId: requireChoice(input.defaultYardId, 'defaultYardId', '기본 야드를 선택해 주세요'),
+    expectedUpdatedAt: input.expectedUpdatedAt || undefined,
   });
 
 const createSpecMapping = async (input: SpecMappingInput) =>
@@ -316,13 +318,21 @@ async function createSteelGrade(input: SteelGradeInput): Promise<number> {
  */
 async function saveRouting(input: RoutingSaveInput): Promise<number> {
   const current = (await serverRequest<RoutingView[]>('GET', '/routings')).filter((r) => r.itemType === input.itemType).sort((a, b) => a.sequenceNo - b.sequenceNo);
+  // 폼을 연 뒤 이 품목 유형의 공정이 바뀌었으면 저장하지 않는다 (폼이 가진 시각 = 공정 중 가장 늦은 저장 시각, 이슈 #498)
+  assertUnchanged(current.map((r) => r.updatedAt).sort().at(-1) ?? '', input.expectedUpdatedAt, '라우팅');
   if (current.some((r) => !input.steps.some((s) => s.processType === r.processType))) {
     throw new InputError('라우팅 삭제 API가 없어 공정을 뺄 수 없어요');
   }
+  // 한 공정을 두 번 고칠 수 있어(비켜 두기 → 제자리) 서버가 돌려준 새 저장 시각을 이어서 쓴다. 읽은 시각 그대로일 때만 서버가 바꾼다
+  const updatedAtOf = new Map(current.map((r) => [r.id, r.updatedAt]));
+  const patch = async (id: number, body: object) => {
+    const saved = await serverRequest<RoutingView>('PATCH', `/routings/${id}`, { body: { ...body, expectedUpdatedAt: updatedAtOf.get(id) } });
+    updatedAtOf.set(id, saved.updatedAt);
+  };
   const targets = input.steps.map((step, index) => ({ step, sequenceNo: index + 1, row: current.find((r) => r.processType === step.processType) }));
   const moving = targets.filter((t) => t.row && t.row.sequenceNo !== t.sequenceNo);
   const spare = Math.max(input.steps.length, ...current.map((r) => r.sequenceNo)) + 1;
-  for (const [i, t] of moving.entries()) await serverRequest('PATCH', `/routings/${t.row?.id}`, { body: { sequenceNo: spare + i } });
+  for (const [i, t] of moving.entries()) if (t.row) await patch(t.row.id, { sequenceNo: spare + i });
   for (const { step, sequenceNo, row } of targets) {
     if (!row) {
       await serverRequest('POST', '/routings', { body: { itemType: input.itemType, processType: step.processType, sequenceNo, plannedYieldRate: step.plannedYieldRate } });
@@ -330,9 +340,7 @@ async function saveRouting(input: RoutingSaveInput): Promise<number> {
     }
     const rateChanged = (row.plannedYieldRate ?? null) !== step.plannedYieldRate && !(row.plannedYieldRate && step.plannedYieldRate && compareDecimal(row.plannedYieldRate, step.plannedYieldRate) === 0);
     const moved = row.sequenceNo !== sequenceNo;
-    if (moved || rateChanged) {
-      await serverRequest('PATCH', `/routings/${row.id}`, { body: { ...(moved ? { sequenceNo } : {}), ...(rateChanged ? { plannedYieldRate: step.plannedYieldRate } : {}) } });
-    }
+    if (moved || rateChanged) await patch(row.id, { ...(moved ? { sequenceNo } : {}), ...(rateChanged ? { plannedYieldRate: step.plannedYieldRate } : {}) });
   }
   return input.steps.length;
 }
@@ -367,6 +375,7 @@ const updateRawMaterial = async (input: RawMaterialUpdateInput) =>
     itemName: input.itemName,
     defaultYardId: requireChoice(input.defaultYardId, 'defaultYardId', '기본 야드를 선택해 주세요'),
     defaultSupplierId: input.defaultSupplierId,
+    expectedUpdatedAt: input.expectedUpdatedAt || undefined,
   });
 
 /** API-275~279. 쓰는 곳이 있으면 서버가 COM-004와 쓰는 곳 이름으로 막는다. 지운 행은 화면이 다시 불러온다 */
@@ -377,7 +386,7 @@ async function removeAt(path: string): Promise<void> {
 async function saveProductionSetting(input: ProductionSettingInput): Promise<number> {
   const days = Number(String(input.deliveryRiskDays).trim());
   if (!Number.isInteger(days) || days < 0) throw new InputError('납기 위험 기준일을 확인해 주세요', { deliveryRiskDays: '납기 위험 기준일은 0 이상의 정수예요' });
-  return idOf('PATCH', '/production-settings', { heatCapacityTon: input.heatCapacityTon.trim(), deliveryRiskDays: days });
+  return idOf('PATCH', '/production-settings', { heatCapacityTon: input.heatCapacityTon.trim(), deliveryRiskDays: days, expectedUpdatedAt: input.expectedUpdatedAt || undefined });
 }
 
 export const serverMasterDataWriteApi = {
@@ -392,11 +401,11 @@ export const serverMasterDataWriteApi = {
   createRawMaterial,
   updateRawMaterial,
   createCustomer: (input: CustomerInput) => idOf('POST', '/customers', input),
-  updateCustomer: (input: CustomerUpdateInput) => idOf('PATCH', `/customers/${input.id}`, { customerName: input.customerName }),
+  updateCustomer: (input: CustomerUpdateInput) => idOf('PATCH', `/customers/${input.id}`, { customerName: input.customerName, expectedUpdatedAt: input.expectedUpdatedAt || undefined }),
   createSupplier: (input: SupplierInput) => idOf('POST', '/suppliers', input),
-  updateSupplier: (input: SupplierUpdateInput) => idOf('PATCH', `/suppliers/${input.id}`, { supplierName: input.supplierName }),
+  updateSupplier: (input: SupplierUpdateInput) => idOf('PATCH', `/suppliers/${input.id}`, { supplierName: input.supplierName, expectedUpdatedAt: input.expectedUpdatedAt || undefined }),
   createYard: (input: YardInput) => idOf('POST', '/yards', { ...input, yardType: input.yardType ?? undefined }),
-  updateYard: (input: YardUpdateInput) => idOf('PATCH', `/yards/${input.id}`, { yardName: input.yardName }),
+  updateYard: (input: YardUpdateInput) => idOf('PATCH', `/yards/${input.id}`, { yardName: input.yardName, expectedUpdatedAt: input.expectedUpdatedAt || undefined }),
   saveProductionSetting,
   deleteItem: (id: number) => removeAt(`/items/${id}`),
   deleteSteelGrade: (id: number) => removeAt(`/steel-grades/${id}`),

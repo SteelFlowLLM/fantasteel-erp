@@ -168,7 +168,8 @@ function ProductSpecModal({ spec, specs, onClose }: { spec: MasterProductSpecVie
     [grade, itemType, lengthMm, spec?.id, specs, thicknessMm, weight, widthMm],
   );
 
-  const options = { onSuccess: onClose, onError: fieldErrors.takeFrom };
+  // 다른 사람이 먼저 고쳐 막히면(COM-001) 조회를 다시 읽고 옛 값으로 열린 창을 닫는다
+  const options = { onSuccess: onClose, onError: fieldErrors.takeFrom, refreshOnStale: true, onStale: onClose };
   const create = useAction(masterDataApi.createProductSpec, { ...options, success: '규격을 추가했어요' });
   const update = useAction(masterDataApi.updateProductSpec, { ...options, success: '규격을 저장했어요' });
   const pending = create.isPending || update.isPending;

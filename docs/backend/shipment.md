@@ -33,7 +33,7 @@
 | GET | `shipment-requests/:id` | 출하요청 상세 | 목록과 같음 | |
 | POST | `shipment-requests/:id/cancel` | 출하요청 취소 | `SHIPMENT_REQUEST_MANAGE` USE | 출고 후면 SHP-003 |
 | POST | `shipment-requests/:id/issue` | 출고 확정 | `GOODS_ISSUE_CONFIRM` USE | INV-002·INV-004·SHP-002. SELECT FOR UPDATE |
-| GET | `mill-sheets` | 밀시트 목록 | `MILL_SHEET_READ` VIEW | 쿼리 예: `shipmentRequestId`, `salesOrderId` |
+| GET | `mill-sheets` | 밀시트 목록 | `MILL_SHEET_READ` VIEW | 쿼리 예: `shipmentRequestId`, `salesOrderId`. 줄마다 스냅샷에서 뽑은 `customerName`·`totalQty`·`totalWeightTon`·`heatNos`·`itemTypes`·`itemCodes`를 함께 준다(이슈 #498): 화면이 밀시트마다 상세(스냅샷 전체)를 따로 부르던 N+1을 없앤다. 스냅샷 자체는 주지 않는다. 스냅샷 JSON을 서버로 읽어 오지 않고 `listMillSheetSummaries.sql`이 필요한 칸만 뽑으며, 값이 없는 옛 스냅샷은 빈 칸(빈 글자·0·빈 배열)이 되어 목록 전체가 실패하지 않는다 |
 | GET | `mill-sheets/:id` | 밀시트 조회 | `MILL_SHEET_READ` VIEW | 저장된 스냅샷을 반환 |
 | POST | `mill-sheets/:id/pdf` | 밀시트 PDF 생성 | `MILL_SHEET_READ` USE | 실패 시 SHP-001, 같은 스냅샷으로 재시도(출고 재실행 없음) |
 

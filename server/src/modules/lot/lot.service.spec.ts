@@ -148,6 +148,31 @@ describe('LotService LOT 조회·정·역추적 (REQ-LOT-001·005)', () => {
       expect(page.total).toBe(9);
       expect(page.items).toHaveLength(4);
     });
+
+    it('withLinks면 줄마다 상세와 같은 값(상위 히트·불합격 처리·현재 배정)을 함께 주고, 없으면 주지 않는다 (이슈 #498)', async () => {
+      const plain = await service.list({ lotNo: P, page: 1, size: 20 });
+      expect('heat' in plain.items[0]).toBe(false);
+
+      const linked = await service.list({ lotNo: P, withLinks: true, page: 1, size: 20 });
+      expect(linked.total).toBe(plain.total);
+      expect(linked.items.map((l) => l.id)).toEqual(plain.items.map((l) => l.id));
+      for (const lot of linked.items) {
+        const detail = await service.detail(lot.id);
+        const live = detail.allocations.filter((a) => a.allocationStatus !== ALLOCATION_STATUS.RELEASED);
+        const last = live.reduce<(typeof live)[number] | null>((found, a) => (found === null || a.id > found.id ? a : found), null);
+        expect(lot).toMatchObject({
+          rawMaterialType: detail.rawMaterialType,
+          heat: detail.heat === null ? null : { id: detail.heat.id, lotNo: detail.heat.lotNo },
+          disposition: detail.disposition,
+          allocation: last === null || (lot.lotType !== LOT_TYPE.SLAB && lot.lotType !== LOT_TYPE.COIL) ? null : { id: last.id, allocationPurpose: last.allocationPurpose, allocationStatus: last.allocationStatus },
+        });
+      }
+      const byNo = new Map(linked.items.map((l) => [l.lotNo, l]));
+      // 코일은 히트(HT)의 판정까지, 히트가 없는 원료는 원료 종류만 가진다
+      expect(byNo.get(`${P}CL-1`)).toMatchObject({ heat: { id: ids.HT, lotNo: `${P}HT-1`, inspectionResult: INSPECTION_RESULT.PASS }, allocation: { allocationStatus: ALLOCATION_STATUS.CONSUMED, allocationPurpose: ALLOCATION_PURPOSE.SHIPMENT } });
+      expect(byNo.get(`${P}SL-2`)).toMatchObject({ disposition: { dispositionStatus: 'HOLD', dispositionReason: '표면 결함' }, allocation: null });
+      expect(byNo.get(`${P}RM-R1`)).toMatchObject({ heat: null, rawMaterialType: expect.any(String) });
+    });
   });
 
   describe('상세 (API-236)', () => {

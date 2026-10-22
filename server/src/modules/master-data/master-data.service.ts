@@ -49,6 +49,11 @@ interface SpecInput {
 /** 열연 계획 수율·라우팅 수율은 routing.planned_yield_rate와 같은 소수 4자리 */
 const YIELD_SCALE = 4;
 
+/** 수정 요청이 불러온 시각 (보내지 않으면 undefined: 비교하지 않고 마지막 저장이 이긴다) */
+const expectedOf = (dto: { expectedUpdatedAt?: string | null }): Date | undefined => (dto.expectedUpdatedAt ? new Date(dto.expectedUpdatedAt) : undefined);
+/** 불러온 뒤 다른 곳에서 고쳤다 */
+const staleError = (what: string) => new AppException('COM-001', `그 사이 다른 곳에서 ${what}을(를) 고쳤어요. 새로 불러와 주세요`);
+
 /**
  * 업무 로직·트랜잭션·데이터에 따른 권한 검사 (컨벤션 6장).
  * BUSINESS_EVENT_TYPE([06])에 기준정보 이벤트가 없어 작업 로그는 남기지 않는다 (master-data.md 5장). 삭제도 같다.
@@ -64,22 +69,25 @@ export class MasterDataService {
   ) {}
 
   async listCustomers(): Promise<CustomerView[]> {
-    return this.repository.findCustomers(this.prisma);
+    return (await this.repository.findCustomers(this.prisma)).map(toPartnerView);
   }
 
   /** API-179 */
   async createCustomer(dto: CreateCustomerDto): Promise<CustomerView> {
     return this.prisma.$transaction(async (tx) => {
       if (await this.repository.findCustomer(tx, { customerCode: dto.customerCode })) throw new AppException('COM-004', `고객사 코드 ${dto.customerCode}이(가) 이미 있어요`);
-      return this.repository.createCustomer(tx, { customerCode: dto.customerCode, customerName: dto.customerName });
+      return toPartnerView(await this.repository.createCustomer(tx, { customerCode: dto.customerCode, customerName: dto.customerName }));
     });
   }
 
-  /** API-180. 이름만 바꾼다 */
+  /** API-180. 이름만 바꾼다. 불러온 뒤 다른 사람이 고쳤으면 COM-001 */
   async updateCustomer(id: number, dto: UpdateCustomerDto): Promise<CustomerView> {
     return this.prisma.$transaction(async (tx) => {
       if (!(await this.repository.findCustomer(tx, { id }))) throw new AppException('COM-003', '고객사를 찾을 수 없어요');
-      return this.repository.updateCustomer(tx, id, dto.customerName);
+      if (!(await this.repository.updateCustomer(tx, id, dto.customerName, expectedOf(dto)))) throw staleError('고객사');
+      const saved = await this.repository.findCustomer(tx, { id });
+      if (!saved) throw new AppException('COM-003', '고객사를 찾을 수 없어요');
+      return toPartnerView(saved);
     });
   }
 
@@ -132,6 +140,10 @@ export class MasterDataService {
     await this.prisma.$transaction(async (tx) => {
       const item = await this.repository.findItem(tx, id);
       if (!item) throw new AppException('COM-003', '품목을 찾을 수 없어요');
+      // 불러온 시각 그대로일 때만 바꾼다: 아래 어느 갈래로 가든 같은 조건으로 한 번에 비교한다 (동시 수정 방지, 이슈 #498)
+      const save = async (data: Prisma.ItemUncheckedUpdateManyInput) => {
+        if (!(await this.repository.updateItem(tx, id, data, expectedOf(dto)))) throw staleError('품목');
+      };
       const itemType = item.itemType as ItemType;
       if (dto.defaultYardId !== undefined) await this.assertYard(tx, dto.defaultYardId, itemType);
 
@@ -140,7 +152,7 @@ export class MasterDataService {
           throw new AppException('COM-004', '원료에는 강종·치수가 없어요');
         }
         if (dto.defaultSupplierId != null) await this.assertSupplier(tx, dto.defaultSupplierId);
-        await this.repository.updateItem(tx, id, { itemName: dto.itemName, defaultYardId: dto.defaultYardId, defaultSupplierId: dto.defaultSupplierId });
+        await save({ itemName: dto.itemName, defaultYardId: dto.defaultYardId, defaultSupplierId: dto.defaultSupplierId });
         return;
       }
 
@@ -159,13 +171,13 @@ export class MasterDataService {
         !sameDecimal(next.widthMm, item.widthMm) ||
         !sameDecimal(next.lengthMm, item.lengthMm);
       if (!specChanged) {
-        await this.repository.updateItem(tx, id, { defaultYardId: dto.defaultYardId });
+        await save({ defaultYardId: dto.defaultYardId });
         return;
       }
       if (await this.repository.isSpecUsed(tx, id)) throw new AppException('MST-002', '수주·재고에 쓰인 규격이에요. 다른 치수가 필요하면 새 규격을 추가해 주세요');
       const spec = await this.readSpec(tx, itemType, next, id);
       await this.assertMappingStillValid(tx, id, itemType, spec);
-      await this.repository.updateItem(tx, id, { ...spec, defaultYardId: dto.defaultYardId });
+      await save({ ...spec, defaultYardId: dto.defaultYardId });
     });
     return this.itemView(id);
   }
@@ -353,6 +365,7 @@ export class MasterDataService {
       processType: r.processType as ProcessType,
       sequenceNo: r.sequenceNo,
       plannedYieldRate: r.plannedYieldRate?.toFixed(YIELD_SCALE) ?? null,
+      updatedAt: r.updatedAt.toISOString(),
     }));
   }
 
@@ -374,7 +387,7 @@ export class MasterDataService {
       if (!routing) throw new AppException('COM-003', '라우팅을 찾을 수 없어요');
       const plannedYieldRate = dto.plannedYieldRate === undefined ? undefined : readPlannedYieldRate(routing.processType as ProcessType, dto.plannedYieldRate);
       if (dto.sequenceNo !== undefined) await this.assertNoRoutingConflict(tx, routing.itemType, { sequenceNo: dto.sequenceNo }, id);
-      await this.repository.updateRouting(tx, id, { sequenceNo: dto.sequenceNo, plannedYieldRate });
+      if (!(await this.repository.updateRouting(tx, id, { sequenceNo: dto.sequenceNo, plannedYieldRate }, expectedOf(dto)))) throw staleError('라우팅');
     });
     return this.routingView(id);
   }
@@ -444,22 +457,25 @@ export class MasterDataService {
 
   /** API-181 */
   async listSuppliers(): Promise<SupplierView[]> {
-    return this.repository.findSuppliers(this.prisma);
+    return (await this.repository.findSuppliers(this.prisma)).map(toPartnerView);
   }
 
   /** API-182 */
   async createSupplier(dto: CreateSupplierDto): Promise<SupplierView> {
     return this.prisma.$transaction(async (tx) => {
       if (await this.repository.findSupplierByCode(tx, dto.supplierCode)) throw new AppException('COM-004', `공급업체 코드 ${dto.supplierCode}이(가) 이미 있어요`);
-      return this.repository.createSupplier(tx, { supplierCode: dto.supplierCode, supplierName: dto.supplierName });
+      return toPartnerView(await this.repository.createSupplier(tx, { supplierCode: dto.supplierCode, supplierName: dto.supplierName }));
     });
   }
 
-  /** API-183. 이름만 바꾼다 */
+  /** API-183. 이름만 바꾼다. 불러온 뒤 다른 사람이 고쳤으면 COM-001 */
   async updateSupplier(id: number, dto: UpdateSupplierDto): Promise<SupplierView> {
     return this.prisma.$transaction(async (tx) => {
       await this.assertSupplier(tx, id);
-      return this.repository.updateSupplier(tx, id, dto.supplierName);
+      if (!(await this.repository.updateSupplier(tx, id, dto.supplierName, expectedOf(dto)))) throw staleError('공급업체');
+      const saved = await this.repository.findSupplierView(tx, id);
+      if (!saved) throw new AppException('COM-003', '공급업체를 찾을 수 없어요');
+      return toPartnerView(saved);
     });
   }
 
@@ -478,11 +494,14 @@ export class MasterDataService {
     return toYardView(row);
   }
 
-  /** API-186. 이름만 바꾼다 */
+  /** API-186. 이름만 바꾼다. 불러온 뒤 다른 사람이 고쳤으면 COM-001 */
   async updateYard(id: number, dto: UpdateYardDto): Promise<YardView> {
     const row = await this.prisma.$transaction(async (tx) => {
       if (!(await this.repository.findYard(tx, id))) throw new AppException('COM-003', '야드를 찾을 수 없어요');
-      return this.repository.updateYard(tx, id, dto.yardName);
+      if (!(await this.repository.updateYard(tx, id, dto.yardName, expectedOf(dto)))) throw staleError('야드');
+      const saved = await this.repository.findYardView(tx, id);
+      if (!saved) throw new AppException('COM-003', '야드를 찾을 수 없어요');
+      return saved;
     });
     return toYardView(row);
   }
@@ -491,7 +510,7 @@ export class MasterDataService {
   async getProductionSetting(): Promise<ProductionSettingView> {
     const row = await this.repository.findProductionSetting(this.prisma);
     if (!row) throw new AppException('COM-003', '생산 설정값이 없어요');
-    return { id: row.id, heatCapacityTon: row.heatCapacityTon.toFixed(3), deliveryRiskDays: row.deliveryRiskDays };
+    return { id: row.id, heatCapacityTon: row.heatCapacityTon.toFixed(3), deliveryRiskDays: row.deliveryRiskDays, updatedAt: row.updatedAt.toISOString() };
   }
 
   /** API-188. 1행만 두므로 :id 없이 그 행을 바꾼다 */
@@ -500,7 +519,7 @@ export class MasterDataService {
     await this.prisma.$transaction(async (tx) => {
       const row = await this.repository.findProductionSetting(tx);
       if (!row) throw new AppException('COM-003', '생산 설정값이 없어요');
-      await this.repository.updateProductionSetting(tx, row.id, { heatCapacityTon: dto.heatCapacityTon, deliveryRiskDays: dto.deliveryRiskDays });
+      if (!(await this.repository.updateProductionSetting(tx, row.id, { heatCapacityTon: dto.heatCapacityTon, deliveryRiskDays: dto.deliveryRiskDays }, expectedOf(dto)))) throw staleError('생산 설정값');
     });
     return this.getProductionSetting();
   }
@@ -511,7 +530,7 @@ export class MasterDataService {
     return this.prisma.$transaction(async (tx) => {
       if (!(await this.repository.findCustomer(tx, { id }))) throw new AppException('COM-003', '고객사를 찾을 수 없어요');
       assertUnused(await this.repository.customerUsages(tx, id));
-      return this.repository.deleteCustomer(tx, id);
+      return toPartnerView(await this.repository.deleteCustomer(tx, id));
     });
   }
 
@@ -519,7 +538,7 @@ export class MasterDataService {
     return this.prisma.$transaction(async (tx) => {
       await this.assertSupplier(tx, id);
       assertUnused(await this.repository.supplierUsages(tx, id));
-      return this.repository.deleteSupplier(tx, id);
+      return toPartnerView(await this.repository.deleteSupplier(tx, id));
     });
   }
 
@@ -614,10 +633,14 @@ function toItemView(r: ItemRow): ItemView {
     theoreticalWeightTon: r.theoreticalWeightTon?.toFixed(3) ?? null,
     defaultYardId: r.defaultYardId,
     defaultSupplierId: r.defaultSupplierId,
+    updatedAt: r.updatedAt.toISOString(),
   };
 }
 
-const toYardView = (r: { id: number; yardCode: string; yardName: string; yardType: string }): YardView => ({ ...r, yardType: r.yardType as YardType });
+/** 고객사·공급업체: 행의 updatedAt을 ISO 문자열로 (수정할 때 expectedUpdatedAt으로 돌려보낸다) */
+const toPartnerView = <T extends { updatedAt: Date }>(r: T): Omit<T, 'updatedAt'> & { updatedAt: string } => ({ ...r, updatedAt: r.updatedAt.toISOString() });
+
+const toYardView = (r: { id: number; yardCode: string; yardName: string; yardType: string; updatedAt: Date }): YardView => ({ ...r, yardType: r.yardType as YardType, updatedAt: r.updatedAt.toISOString() });
 
 function toSpecMappingItemView(r: SpecRow): SpecMappingItemView {
   return {

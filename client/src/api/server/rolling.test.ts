@@ -1,8 +1,8 @@
 // 열연 투입 서버 어댑터(api/server/production.ts serverRollingApi): 화면 모양, 확정 순서(추천 → 배정), 변경·해제 경로와 사유.
-import type { HotRollingDetail as ServerHotRollingDetail } from '@fantasteel/shared';
+import type { HotRollingDetail as ServerHotRollingDetail, HotRollingPlanListItem } from '@fantasteel/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { rollingApi } from '@/api/rolling';
-import { ok, stopFakeServer, useFakeServer } from '@/api/server/serverTestKit';
+import { ok, page, stopFakeServer, useFakeServer } from '@/api/server/serverTestKit';
 import { SEED_EMPLOYEE_NO } from '@/test/actors';
 
 afterEach(() => stopFakeServer());
@@ -45,6 +45,45 @@ const hotRolling = (rollingAllocations = [allocation(701, 11, true), allocation(
   }) as unknown as ServerHotRollingDetail;
 
 describe('열연 투입 서버 어댑터', () => {
+  it('목록: 서버 열연 투입 목록 한 번으로 코일 계획 줄을 만들고(완료·취소 포함), 계획마다 상세를 부르지 않는다. 슬래브 규격을 못 정한 계획은 뺀다', async () => {
+    const item = (id: number, productionPlanStatus: string, over: Partial<HotRollingPlanListItem> = {}) =>
+      ({
+        plan: { id, productionPlanNo: `PP-2610-000${id}`, productionPlanStatus, salesOrderNo: 'SO-2610-002', dueDate: '2026-10-30', itemCode: 'CL-SM355A-4.5x1500x544000' },
+        slabItemCode: 'SL-SM355A-250x1500x10000',
+        shortageQty: 6,
+        usableCoilQty: 1,
+        failedCoilQty: 1,
+        confirmedAllocationQty: 2,
+        neededQty: 3,
+        isRollable: productionPlanStatus === 'IN_PROGRESS',
+        ...over,
+      }) as unknown as HotRollingPlanListItem;
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.productionHead, (c) =>
+      c.path === '/production-plans/hot-rolling' ? ok(page([item(4, 'IN_PROGRESS'), item(3, 'COMPLETED'), item(2, 'CANCELLED', { slabItemCode: null })])) : undefined,
+    );
+    const rows = await rollingApi.plans();
+    expect(rows.map((r) => [r.productionPlanId, r.productionPlanStatus, r.rollable])).toEqual([
+      [4, 'IN_PROGRESS', true],
+      [3, 'COMPLETED', false],
+    ]);
+    expect(rows[0]).toEqual({
+      productionPlanId: 4,
+      productionPlanNo: 'PP-2610-0004',
+      productionPlanStatus: 'IN_PROGRESS',
+      salesOrderNo: 'SO-2610-002',
+      dueDate: '2026-10-30',
+      coilItemCode: 'CL-SM355A-4.5x1500x544000',
+      slabItemCode: 'SL-SM355A-250x1500x10000',
+      shortageQty: 6,
+      rolledQty: 1,
+      failedCoilQty: 1,
+      allocatedQty: 2,
+      neededQty: 3,
+      rollable: true,
+    });
+    expect(calls.map((c) => c.path)).toEqual(['/production-plans/hot-rolling']);
+  });
+
   it('상세: 추천 LOT·열연할 수 있는 배정·코일 품질을 화면 모양으로 바꾼다', async () => {
     useFakeServer(SEED_EMPLOYEE_NO.productionHead, (c) => (c.path === '/production-plans/400/hot-rolling' ? ok(hotRolling()) : undefined));
     const detail = await rollingApi.detail(400);

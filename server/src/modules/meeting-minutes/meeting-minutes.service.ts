@@ -117,7 +117,7 @@ function toListItem(row: MeetingMinutesListRow): MeetingMinutesListItem {
 
 
 /**
- * 회의록 (REQ-VOC-002·003, BP-VOC-01). 글·음성 전사를 저장하고, 작성자가 AI 정리를 시키면 후보를 만들어 둔다(등록은 다음 단계).
+ * 회의록 (REQ-VOC-002·003, BP-VOC-01). 글·음성 전사를 저장하고, 작성자가 AI 정리를 시키면 후보를 만들어 둔다. 허가한 후보의 등록·확정(register)도 여기서 한다.
  * 작업 로그는 남기지 않는다 (REQ-LOG-002 이벤트에 회의록 생성이 없다). 전 역할이 쓰므로 권한 코드 없이 로그인만 본다.
  */
 @Injectable()

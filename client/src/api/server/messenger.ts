@@ -15,7 +15,7 @@ import type {
   CreateChatRoomResult,
   LeaveChatRoomResult,
 } from '@fantasteel/shared';
-import { MESSAGE_PAGE_SIZE_MAX, type MessageReactionEmoji } from '@fantasteel/shared';
+import { MESSAGE_PAGE_SIZE_MAX, MESSAGE_SEARCH_QUERY_MAX, type MessageReactionEmoji } from '@fantasteel/shared';
 import { serverDownload, serverRequest, serverUpload } from '@/api/http';
 import type {
   ChatRoomDetailView,
@@ -235,7 +235,7 @@ export const serverMessengerApi = {
   },
 
   searchMessages: async ({ chatRoomId, keyword }: { chatRoomId: number; keyword: string }): Promise<MessagePage> => {
-    const [room, page] = await Promise.all([roomRaw(chatRoomId), serverRequest<ServerMessagePage>('GET', `/chat-rooms/${chatRoomId}/messages/search`, { query: { q: keyword } })]);
+    const [room, page] = await Promise.all([roomRaw(chatRoomId), serverRequest<ServerMessagePage>('GET', `/chat-rooms/${chatRoomId}/messages/search`, { query: { q: keyword.slice(0, MESSAGE_SEARCH_QUERY_MAX) } })]);
     const myTargets = myTargetsOf(room);
     return { items: page.items.map((m) => toMessageView(m, myTargets)), hasMore: page.hasMore };
   },

@@ -1,13 +1,14 @@
 // 불합격 관리 화면 ↔ 서버 API (server/src/modules/quality의 rejected-lot). 서버 응답을 화면이 쓰는 모양으로 바꾼다.
 // 불합격 항목·검사 시각은 서버가 목록 행에 근거 검사(자기 검사, 히트 불합격 하위 LOT이면 상위 히트의 검사)로 같이 준다.
-// 연결 수주·부족·같은 수주 품목의 계획은 LOT의 생산계획 상세에서, 재생산 계획은 생산 모듈 API(POST /production-plans)로.
-// 서버에 아직 없는 것(지정 시각)은 빈 값이다. LOT 작업 로그는 api/server/businessEvents.ts로 읽는다.
+// 처리 상태 지정 시각(dispositionAt)도 서버가 목록 행에 준다(작업 로그 DISPOSITION_SET의 마지막 발생 시각).
+// 연결 수주·부족은 목록이면 계획 여러 개를 한 번에(GET /production-plans/reproduction-checks), 상세는 그 LOT의 생산계획 상세에서,
+// 재생산 계획은 생산 모듈 API(POST /production-plans)로. LOT 작업 로그는 api/server/businessEvents.ts로 읽는다.
 import type { PageResult, RejectedLotListItem } from '@fantasteel/shared';
 import type { ReproductionOutcome, RejectedLotDetail, RejectedLotListRow, SetDispositionInput, SetDispositionResult } from '@/api/dispositions';
 import { ApiError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
 import { inspectionItemNamesOf, serverBusinessEventApi } from '@/api/server/businessEvents';
-import { allPages, inspectionFormOfLot, linkedOfPlan, orEmpty, type LinkedOfPlan } from '@/api/server/inspections';
+import { allPages, inspectionFormOfLot, linkedOfPlan, linkedOfPlans, orEmpty, type LinkedOfPlan } from '@/api/server/inspections';
 import { serverProductionPlanApi } from '@/api/server/production';
 
 const rejectedAll = () => allPages<RejectedLotListItem>('/lots/rejected');
@@ -49,17 +50,18 @@ function listRowOf(row: RejectedLotListItem, linked: LinkedOfPlan): RejectedLotL
     productionPlanNo: row.productionPlanNo,
     productionPlanId: row.productionPlanId,
     salesOrderItem: linked.salesOrderItem,
-    // 서버에 아직 없는 것: 불합격 LOT 응답에 지정 시각이 없다
-    dispositionAt: null,
+    dispositionAt: row.dispositionAt,
   };
 }
 
-/** 불합격 LOT 목록 (근거 검사의 불합격 항목까지 한 번에 받는다). 연결 수주는 생산계획마다 한 번씩 읽는다 */
+const NO_LINK: LinkedOfPlan = { salesOrderItem: null, plans: [] };
+
+/** 불합격 LOT 목록 (근거 검사의 불합격 항목까지 한 번에 받는다). 연결 수주는 생산계획 여러 개를 한 번에 읽는다 */
 async function list(): Promise<RejectedLotListRow[]> {
   const rows = await rejectedAll();
   const planIds = [...new Set(rows.flatMap((r) => (r.productionPlanId === null ? [] : [r.productionPlanId])))];
-  const linkedByPlan = new Map(await Promise.all(planIds.map(async (id) => [id, await linkedOfPlan(id)] as const)));
-  return rows.map((r) => listRowOf(r, (r.productionPlanId === null ? undefined : linkedByPlan.get(r.productionPlanId)) ?? { salesOrderItem: null, plans: [] }));
+  const linkedByPlan = await linkedOfPlans(planIds);
+  return rows.map((r) => listRowOf(r, (r.productionPlanId === null ? undefined : linkedByPlan.get(r.productionPlanId)) ?? NO_LINK));
 }
 
 /** 불합격 LOT 하나: 근거 검사 폼. 불합격 목록에 없으면 null */

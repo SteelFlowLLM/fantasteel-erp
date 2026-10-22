@@ -1,9 +1,9 @@
 import { Body, Controller, Get, HttpCode, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
-import { PERMISSION, type AuthUser, type HeatFormation, type PageResult, type ProductionPlanDetail, type ProductionPlanSummary, type HotRollingDetail, type ProductionResultView, type ReproductionResult, type SimulationResult, type WorkContext } from '@fantasteel/shared';
+import { PERMISSION, type AuthUser, type HeatFormation, type HotRollingPlanListItem, type PageResult, type PlanReproductionCheck, type ProductionPlanDetail, type ProductionPlanSummary, type HotRollingDetail, type ProductionResultView, type ReproductionResult, type SimulationResult, type WorkContext } from '@fantasteel/shared';
 import { CurrentUser, RequirePermission } from '../../common/auth/auth.decorators';
 import { AppException } from '../../common/errors/app.exception';
-import { ConfirmHotRollingDto, ReleaseHotRollingDto } from './dto/hot-rolling.dto';
-import { CancelProductionPlanDto, CreateReproductionPlanDto, ListProductionPlansDto } from './dto/production-plan.dto';
+import { ConfirmHotRollingDto, ListHotRollingPlansDto, ReleaseHotRollingDto } from './dto/hot-rolling.dto';
+import { CancelProductionPlanDto, CreateReproductionPlanDto, ListProductionPlansDto, ListReproductionChecksDto } from './dto/production-plan.dto';
 import { SimulateResultsDto } from './dto/simulation.dto';
 import { CompleteProductionResultDto, ListProductionResultsDto, RegisterProductionResultDto } from './dto/production-result.dto';
 import { HotRollingService } from './hot-rolling.service';
@@ -34,6 +34,26 @@ export class ProductionController {
   @RequirePermission(PERMISSION.PRODUCTION_PLAN_CONFIRM, 'VIEW')
   listPlans(@Query() query: ListProductionPlansDto): Promise<PageResult<ProductionPlanSummary>> {
     return this.service.listPlans(query);
+  }
+
+  /**
+   * 열연 투입 목록 (이슈 #498): 코일 계획마다 열연 투입 화면의 요약 값. 계획마다 상세를 따로 부르던 N+1을 없앤다.
+   * 고정 경로라 production-plans/:id보다 먼저 둔다.
+   */
+  @Get('production-plans/hot-rolling')
+  @RequirePermission(PERMISSION.HOT_ROLLING_ALLOCATE, 'VIEW')
+  listHotRollingPlans(@Query() query: ListHotRollingPlansDto): Promise<PageResult<HotRollingPlanListItem>> {
+    return this.hotRolling.list(query);
+  }
+
+  /**
+   * 계획 여러 개의 연결 수주 품목과 재생산 판단 (이슈 #498): 불합격 LOT 목록이 계획 상세를 계획마다 따로 부르던 N+1을 없앤다.
+   * 고정 경로라 production-plans/:id보다 먼저 둔다.
+   */
+  @Get('production-plans/reproduction-checks')
+  @RequirePermission(PERMISSION.PRODUCTION_PLAN_CONFIRM, 'VIEW')
+  listReproductionChecks(@Query() query: ListReproductionChecksDto): Promise<PlanReproductionCheck[]> {
+    return this.service.reproductionChecksOfPlans(query.productionPlanIds);
   }
 
   /** 재생산 계획 생성 (API-202): 일반 계획은 수주 등록 때 자동으로 생기므로 이 API는 재생산용 */

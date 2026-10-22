@@ -1,5 +1,5 @@
 import { Transform, Type } from 'class-transformer';
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { ArrayMaxSize, ArrayNotEmpty, IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import { ITEM_TYPE, PRODUCTION_PLAN_STATUS, type ItemType, type ProductionPlanStatus } from '@fantasteel/shared';
 
 const PRODUCT_TYPES = [ITEM_TYPE.SLAB, ITEM_TYPE.COIL];
@@ -49,4 +49,14 @@ export class CreateReproductionPlanDto {
   @IsInt({ message: '수주 품목 id는 정수여야 해요' })
   @Min(1, { message: '수주 품목 id는 1 이상이어야 해요' })
   salesOrderItemId!: number;
+}
+
+/** 계획 여러 개의 재생산 판단을 한 번에 읽는 조건 (이슈 #498). 계획 id는 쉼표로 이어서 보낸다 */
+export class ListReproductionChecksDto {
+  @Transform(({ value }) => (typeof value === 'string' ? value.split(',').filter((v) => v.trim() !== '').map(Number) : value))
+  @ArrayNotEmpty({ message: '계획 id를 하나 이상 보내 주세요' })
+  @ArrayMaxSize(100, { message: '계획 id는 100개까지 보낼 수 있어요' })
+  @IsInt({ each: true, message: '계획 id는 정수여야 해요' })
+  @Min(1, { each: true, message: '계획 id는 1 이상이어야 해요' })
+  productionPlanIds!: number[];
 }

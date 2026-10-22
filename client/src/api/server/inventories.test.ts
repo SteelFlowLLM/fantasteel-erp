@@ -1,4 +1,4 @@
-// 재고 서버 어댑터: 제품(합격 = 서버 onHandQty, 재고 매수 = AVAILABLE LOT 수), LOT 목록(상세로 히트·배정·처리), 원료(입고·발주로 채움), 여재(서버 재고 응답의 surplus).
+// 재고 서버 어댑터: 제품(합격 = 서버 onHandQty, 재고 매수 = AVAILABLE LOT 수), LOT 목록(withLinks로 히트·배정·처리), 원료(입고·발주로 채움), 여재(서버 재고 응답의 surplus).
 import { afterEach, describe, expect, it } from 'vitest';
 import { inventoryApi } from '@/api/inventories';
 import { fail, ok, page, stopFakeServer, useFakeServer, type ServerCall } from '@/api/server/serverTestKit';
@@ -64,12 +64,27 @@ const details: Record<string, unknown> = {
 
 const allLots = [heat, failedHeat, slabPass, slabShipped, slabHeatFailed, slabFailed, slabPending, ore1, ore2];
 
+/** withLinks=true면 서버가 줄마다 상위 히트(판정 포함)·불합격 처리·마지막 배정·원료 종류를 함께 준다 */
+function withLinks(row: (typeof allLots)[number]) {
+  const d = details[`/lots/${row.id}`] as ReturnType<typeof detail>;
+  const upper = allLots.find((l) => l.id === (d.heat as { id: number } | null)?.id);
+  const lastAllocation = [...(d.allocations as { id: number }[])].sort((a, b) => b.id - a.id)[0];
+  const isProduct = row.lotType === 'SLAB' || row.lotType === 'COIL';
+  return {
+    ...row,
+    rawMaterialType: d.rawMaterialType,
+    heat: d.heat && upper ? { ...(d.heat as object), inspectionResult: upper.inspectionResult } : null,
+    disposition: d.disposition,
+    allocation: isProduct && lastAllocation ? lastAllocation : null,
+  };
+}
+
 /** GET /lots: lotType·lotStatus·itemId 필터 */
 function listLots(call: ServerCall) {
   const rows = allLots.filter(
     (l) => (!call.query.lotType || l.lotType === call.query.lotType) && (!call.query.lotStatus || l.lotStatus === call.query.lotStatus) && (!call.query.itemId || String(l.itemId) === call.query.itemId),
   );
-  return ok(page(rows));
+  return ok(page(call.query.withLinks === 'true' ? rows.map(withLinks) : rows));
 }
 
 const overview = {
@@ -106,7 +121,6 @@ function respond(call: ServerCall, over: Partial<Record<string, () => Response>>
   if (custom) return custom();
   if (call.path === '/inventories') return ok(overview);
   if (call.path === '/lots') return listLots(call);
-  if (call.path in details) return ok(details[call.path]);
   if (call.path === '/items') return ok([{ id: 5, itemCode: 'SL-1', thicknessMm: '250.00', widthMm: '1200.00', lengthMm: '10000.00', theoreticalWeightTon: '23.550' }]);
   if (call.path === '/goods-receipts') return ok(page(receipts));
   if (call.path === '/purchase-orders') return ok(page(purchaseOrders));
@@ -142,7 +156,7 @@ describe('재고 서버 어댑터 (api/server/inventories.ts)', () => {
     expect(row).toMatchObject({ theoreticalWeightTon: '23.550', onHandTon: '94.200', thicknessMm: null, widthMm: null, lengthMm: null });
   });
 
-  it('LOT 목록: 제품·히트는 상세로 히트 번호·히트 불합격·배정·불합격 처리를 채우고, 원료 날짜는 입고일, 순서는 최근 생산 → 번호', async () => {
+  it('LOT 목록: 제품·히트는 서버가 준 히트 번호·히트 불합격·배정·불합격 처리를 쓰고, 원료 날짜는 입고일, 순서는 최근 생산 → 번호', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.logistics, (c) => respond(c));
     const rows = await inventoryApi.listLots();
     const byNo = new Map(rows.map((r) => [r.lotNo, r]));
@@ -154,11 +168,12 @@ describe('재고 서버 어댑터 (api/server/inventories.ts)', () => {
     expect(byNo.get('HT-002')).toMatchObject({ inspectionResult: 'FAIL', quality: 'FAIL', heatNo: null, allocationPurpose: null });
     expect(byNo.get('RM-ORE01-2')).toMatchObject({ producedDate: '2026-10-04', inspectionResult: null, quality: null });
     expect(rows.map((r) => r.lotNo)).toEqual(['HT-001', 'HT-001-01', 'HT-002', 'HT-002-01', 'HT-002-02', 'HT-002-03', 'HT-001-02', 'RM-ORE01-2', 'RM-ORE01-1']);
-    // 원료 LOT은 상세를 읽지 않는다
-    expect(calls.some((c) => c.path === '/lots/1' || c.path === '/lots/2')).toBe(false);
+    // 줄마다 LOT 상세를 따로 부르지 않는다: /lots 한 번(withLinks)에 모두 받는다 (이슈 #498)
+    expect(calls.filter((c) => c.path.startsWith('/lots/'))).toEqual([]);
+    expect(calls.filter((c) => c.path === '/lots').map((c) => c.query.withLinks)).toEqual(['true']);
   });
 
-  it('LOT 목록 필터: 서버 쿼리로 넘기고, 목록에 없는 상위 히트 판정은 히트 상세에서 읽는다. 원료가 아니면 입고 목록을 읽지 않는다', async () => {
+  it('LOT 목록 필터: 서버 쿼리로 넘기고, 목록에 없는 상위 히트의 판정도 서버가 함께 준다. 원료가 아니면 입고 목록을 읽지 않는다', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.productionHead, (c) => respond(c));
     const rows = await inventoryApi.listLots({ lotType: 'SLAB', lotStatus: 'AVAILABLE', itemId: 5 });
     expect(calls.find((c) => c.path === '/lots')?.query).toMatchObject({ lotType: 'SLAB', lotStatus: 'AVAILABLE', itemId: '5' });
@@ -168,11 +183,11 @@ describe('재고 서버 어댑터 (api/server/inventories.ts)', () => {
       ['HT-002-02', 'FAIL'],
       ['HT-002-03', 'PENDING'],
     ]);
-    expect(calls.filter((c) => c.path === '/lots/20')).toHaveLength(1);
+    expect(calls.filter((c) => c.path.startsWith('/lots/'))).toEqual([]);
     expect(calls.some((c) => c.path === '/goods-receipts')).toBe(false);
   });
 
-  it('원료: 잔량·LOT 수는 서버 합계, LOT은 입고일 순, 원료 종류는 LOT 상세, 입고예정은 입고 전 발주의 미입고량 합계', async () => {
+  it('원료: 잔량·LOT 수는 서버 합계, LOT은 입고일 순, 원료 종류는 LOT 목록, 입고예정은 입고 전 발주의 미입고량 합계', async () => {
     useFakeServer(SEED_EMPLOYEE_NO.purchase, (c) => respond(c));
     const [row] = await inventoryApi.listRawMaterials();
     expect(row).toMatchObject({ itemCode: 'ORE01', rawMaterialType: 'IRON_ORE', remainingTon: '1200.000', availableLotCount: 1, scheduledReceiptTon: '500.000', defaultYardName: null });

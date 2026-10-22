@@ -68,13 +68,6 @@ function groupByHeat(list: readonly RejectedLotListRow[]): ListEntry[] {
 }
 const failedNames = (row: RejectedLotListRow): string => row.failedItems.map((f) => f.inspectionItemName).join(' · ');
 const rejectedHref = (lotId: number): string => `/quality/rejected?lot=${lotId}`;
-/** 서버 응답에 불합격 상태 지정 시각이 없어 이 LOT의 작업 로그(DISPOSITION_SET) 중 가장 최근 기록 시각을 쓴다 */
-const latestDispositionAt = (history: RejectedLotDetail['history']): string | null =>
-  history
-    .filter((e) => e.businessEventType === 'DISPOSITION_SET')
-    .map((e) => e.occurredAt)
-    .sort()
-    .at(-1) ?? null;
 const REJECTED_GUIDE = '검사 기준을 충족하지 못한 LOT과 불합격 히트의 하위 LOT이에요. 예약·배정·출고 대상에서 빠져 있고, 여기서는 불합격 상태와 사유만 기록해요.';
 
 const TILES: readonly { key: Exclude<StatusFilter, 'ALL'>; label: string; className: string; onClassName: string }[] = [
@@ -507,7 +500,7 @@ function DetailBody({ detail }: { detail: RejectedLotDetail }) {
               </div>
             ) : null}
           </Card>
-          <DispositionForm key={`${row.lotId}-${row.updatedAt}`} row={row} canEdit={canEdit} dispositionAt={row.dispositionAt ?? latestDispositionAt(detail.history)} />
+          <DispositionForm key={`${row.lotId}-${row.updatedAt}`} row={row} canEdit={canEdit} />
         </div>
         <div className="flex min-w-0 flex-col gap-4">
           <ImpactCard detail={detail} />
