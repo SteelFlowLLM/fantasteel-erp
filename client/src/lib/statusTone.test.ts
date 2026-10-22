@@ -56,8 +56,8 @@ describe('공통 상태 그룹의 배지 색', () => {
     expect(SHIPMENT_REQUEST_STATUS_TONE).toEqual({ REQUESTED: 'wait', ALLOCATED: 'run', ISSUED: 'ok', CANCELLED: 'neutral' });
     expect(ALLOCATION_STATUS_TONE).toEqual({ CONFIRMED: 'run', CONSUMED: 'ok', RELEASED: 'neutral' });
     expect(INSPECTION_RESULT_TONE).toEqual({ PENDING: 'wait', PASS: 'ok', FAIL: 'danger' });
-    expect(LOT_STATUS_TONE).toEqual({ AVAILABLE: 'run', CONSUMED: 'neutral', SHIPPED: 'neutral' });
-    expect(PURCHASE_REQUISITION_STATUS_TONE).toEqual({ WAITING_APPROVAL: 'wait', APPROVED: 'run', REJECTED: 'danger', ORDERED: 'ok' });
+    expect(LOT_STATUS_TONE).toEqual({ AVAILABLE: 'run', CONSUMED: 'neutral', SHIPPED: 'neutral', RECEIPT_CANCELLED: 'neutral' });
+    expect(PURCHASE_REQUISITION_STATUS_TONE).toEqual({ WAITING_APPROVAL: 'wait', APPROVED: 'run', REJECTED: 'danger', ORDERED: 'ok', ORDER_CANCELLED: 'neutral' });
   });
 
   it('공통 코드가 늘어도 색이 빠지지 않는다 (맵 키 = 공통 코드 값)', () => {

@@ -118,7 +118,7 @@ export const REVIEW_SYSTEM_PROMPT = `당신은 철강 제조사 ERP의 회의록
   - 담당자가 분명하지 않거나 기한이 막연한 것도 빼지 말고 포함하되, 모르는 칸은 null로 둡니다. 지어내지 마세요.
   - 구매할 원료가 회사 품목에 없어 보여도 포함합니다 (itemName에 말한 이름 그대로).
   - 이미 1차 후보에 있는 것을 다시 적지 마세요. 잡담·인사·이미 끝난 일은 후보가 아닙니다.
-- concerns: 1차 후보 중 담당자가 틀렸거나, 날짜가 틀렸거나, 중복이거나, 사실은 해야 할 일이 아닌 것. key는 후보 목록의 key, reason은 한국어 한 문장입니다. 전사 발언에 비춰 틀렸다고 확신할 때만 넣고, 문제가 없거나 "오류 아님"이면 넣지 마세요. 구매(PURCHASE) 후보의 품목·수량·입고일, 일정 참석자 칸은 서버가 따로 확인하니 지적하지 마세요.
+- concerns: 1차 후보 중 담당자가 틀렸거나, 날짜가 틀렸거나, 중복이거나, 사실은 해야 할 일이 아닌 것. key는 후보 목록의 key, reason은 한국어 한 문장, exclude는 그 후보를 빼야 하면(업무가 아닌 잡담·사적 약속, 다른 후보와 중복, 이미 끝난 일) true, 고쳐서 쓰면 되면(담당자·날짜 틀림) false입니다. 전사 발언에 비춰 틀렸다고 확신할 때만 넣고, 문제가 없거나 "오류 아님"이면 넣지 마세요. 구매(PURCHASE) 후보의 품목·수량·입고일, 일정 참석자 칸은 서버가 따로 확인하니 지적하지 마세요.
 
 [찾는 방법]
 - 전사를 처음부터 끝까지 읽으며 "해야 한다", "해 주세요", "하겠습니다", "확인해 봐야", "정리해서", "보내야", "준비", "점검", "필요합니다" 같은 요청·약속·필요 표현을 하나씩 집어, 1차 후보 목록에 있는지 대조하세요. 목록에 없으면 missed에 넣습니다.
@@ -169,7 +169,7 @@ export const REVIEW_JSON_SCHEMA = {
       missed: { type: 'array', items: ITEM_SCHEMA },
       concerns: {
         type: 'array',
-        items: { type: 'object', additionalProperties: false, required: ['key', 'reason'], properties: { key: { type: 'string' }, reason: { type: 'string' } } },
+        items: { type: 'object', additionalProperties: false, required: ['key', 'reason', 'exclude'], properties: { key: { type: 'string' }, reason: { type: 'string' }, exclude: { type: 'boolean' } } },
       },
     },
   },

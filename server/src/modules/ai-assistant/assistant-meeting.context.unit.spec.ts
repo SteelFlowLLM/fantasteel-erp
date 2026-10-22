@@ -1,5 +1,5 @@
 import { MEETING_MINUTES_STATUS, ROLE, type MeetingCandidate, type MeetingMinutesView } from '@fantasteel/shared';
-import { buildMeetingContext } from './assistant-meeting.context';
+import { buildMeetingContext, MEETING_CONTEXT_MAX_CHARS, meetingContextChars } from './assistant-meeting.context';
 import { buildAssistantMessages, MEETING_QUESTION_RULES } from './assistant.prompt';
 
 const candidate = (over: Partial<MeetingCandidate>): MeetingCandidate => ({
@@ -48,6 +48,7 @@ const meeting = (over: Partial<MeetingMinutesView> = {}): MeetingMinutesView => 
     analyzedAt: '2026-10-14T00:00:00Z',
   },
   analysisProgress: null,
+  transcriptionProgress: null,
   failureReason: null,
   creator: { id: 7, name: '박서영' },
   attendees: [{ employeeId: 7, employeeName: '박서영', departmentName: '영업부', roleCode: ROLE.SALES }],
@@ -84,14 +85,41 @@ describe('회의 질문 맥락 (Voice2ERP 묶음 3)', () => {
     expect(text).toContain('전사가 아직 없어요');
   });
 
-  it('너무 길면 요약·후보는 그대로 두고 전사를 앞에서부터 잘라 잘렸다고 알린다', () => {
+  it('너무 길면 요약·후보는 그대로 두고 전사 앞부분과 끝부분을 넣고 가운데가 빠졌다고 알린다 (이슈 #522)', () => {
     const segments = Array.from({ length: 200 }, (_, i) => ({ start: null, end: null, text: `발언 내용 ${i + 1} ${'가'.repeat(50)}` }));
     const text = buildMeetingContext(meeting({ transcriptSegments: segments }), 4000);
     expect(text.length).toBeLessThanOrEqual(4000);
     expect(text).toContain('- c1 [업무]');
     expect(text).toContain('[1] 발언 내용 1 ');
-    expect(text).not.toContain('[200]');
-    expect(text).toMatch(/전사가 길어 #1~#\d+까지만 보여요/);
+    // 마지막 결론 발언도 보인다
+    expect(text).toContain('[200] 발언 내용 200 ');
+    expect(text).not.toContain('[100] ');
+    const gap = /#(\d+)~#(\d+) 발언 (\d+)개는 길어서 빠졌어요/.exec(text);
+    expect(gap).not.toBeNull();
+    const [from, to, count] = (gap ?? []).slice(1).map(Number);
+    expect(text).toContain(`[${from - 1}] `);
+    expect(text).not.toContain(`[${from}] `);
+    expect(text).not.toContain(`[${to}] `);
+    expect(text).toContain(`[${to + 1}] `);
+    expect(count).toBe(to - from + 1);
+    // 앞부분에 더 많이 준다
+    expect(from - 1).toBeGreaterThan(200 - to);
+    expect(text).toContain('AI 요약·결정사항·후보로만 답하고');
+  });
+
+  it('다 들어가면 빠졌다는 안내가 없다', () => {
+    const segments = Array.from({ length: 10 }, (_, i) => ({ start: null, end: null, text: `발언 ${i + 1}` }));
+    const text = buildMeetingContext(meeting({ transcriptSegments: segments }), 30_000);
+    expect(text).toContain('[10] 발언 10');
+    expect(text).not.toContain('빠졌어요');
+  });
+
+  it('회의 내용 글자 수는 모델 문맥 길이의 35%(1자=1토큰)이고, 모르면 3만 자, 커도 첫 글자 제한에 맞춰 8만 자 (이슈 #522)', () => {
+    expect(meetingContextChars(null)).toBe(MEETING_CONTEXT_MAX_CHARS);
+    expect(meetingContextChars(32_768)).toBe(11_468);
+    expect(meetingContextChars(131_072)).toBe(45_875);
+    expect(meetingContextChars(262_144)).toBe(80_000);
+    expect(meetingContextChars(2_048)).toBe(6_000);
   });
 
   it('전사 안의 지시 문장은 번호 붙은 데이터로 남고, 지시가 아니라는 규칙이 시스템 지시에 들어간다', () => {

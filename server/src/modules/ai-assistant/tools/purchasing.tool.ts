@@ -58,7 +58,8 @@ export function purchaseOrderTool(purchasing: PurchasingService): AssistantTool 
     access: { checkedBy: 'TOOLBOX', permissions: [PERMISSION.PURCHASE_ORDER_CONFIRM] },
     definition: {
       name: 'get_purchase_orders',
-      description: '발주와 입고예정을 조회한다. 발주 품목별 발주 톤·입고예정일·입고 톤·미입고 톤(= 입고예정)을 준다. "입고예정"을 물으면 쓴다.',
+      description:
+        '발주와 입고예정을 조회한다. 발주 품목별 발주 톤·입고예정일·입고 톤·미입고 톤(= 입고예정)을 준다. "입고예정"을 물으면 쓴다. 발주 취소·잔량 마감한 발주는 미입고 톤이 0이고 닫은 양은 마감 톤에 있다.',
       parameters: {
         type: 'object',
         properties: {
@@ -96,7 +97,7 @@ export function goodsReceiptTool(purchasing: PurchasingService): AssistantTool {
     access: { checkedBy: 'TOOLBOX', permissions: [PERMISSION.GOODS_RECEIPT_CONFIRM] },
     definition: {
       name: 'get_goods_receipts',
-      description: '입고 확정된 원료 입고(입고일·발주 번호·원료·입고 톤·원료 LOT·야드)를 조회한다.',
+      description: '입고 확정된 원료 입고(입고일·발주 번호·원료·입고 톤·원료 LOT·야드)를 조회한다. 입고 취소는 음수 입고 톤의 입고 취소 줄로 남고, 취소된 입고에는 취소 번호가 있다.',
       parameters: {
         type: 'object',
         properties: { keyword: { type: 'string', description: '입고 번호·발주 번호·원료 코드·원료 이름 일부' } },
@@ -146,13 +147,20 @@ function orderRow(o: PurchaseOrderView) {
     '발주 톤': o.totalOrderedTon,
     '입고 톤': o.totalReceivedTon,
     '미입고 톤': o.totalRemainingTon,
-    품목: o.items.map((i) => ({ 원료: i.itemCode, '원료 이름': i.itemName, '발주 톤': i.orderedTon, 입고예정일: i.expectedReceiptDate, '입고 톤': i.receivedTon, '미입고 톤': i.remainingTon })),
+    '마감 톤': o.totalClosedTon,
+    '취소·마감 사유': o.statusChange?.reason ?? null,
+    품목: o.items.map((i) => ({ 원료: i.itemCode, '원료 이름': i.itemName, '발주 톤': i.orderedTon, 입고예정일: i.expectedReceiptDate, '입고 톤': i.receivedTon, '미입고 톤': i.remainingTon, '마감 톤': i.closedTon })),
   };
 }
 
 function receiptRow(g: GoodsReceiptView) {
   return {
     '입고 번호': g.goodsReceiptNo,
+    // 취소 행은 입고일이 취소한 날이다
+    구분: g.reversedGoodsReceiptId === null ? '입고' : '입고 취소',
+    '취소한 입고 번호': g.reversedGoodsReceiptNo,
+    '취소 번호': g.reversalGoodsReceiptNo,
+    '취소 사유': g.cancelReason,
     입고일: g.receivedDate,
     '발주 번호': g.purchaseOrderNo,
     원료: g.itemCode,

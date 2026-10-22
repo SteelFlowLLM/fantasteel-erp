@@ -1,4 +1,4 @@
-import { IsIn, IsInt, IsOptional, Matches, Min } from 'class-validator';
+import { IsDateString, IsIn, IsInt, IsOptional, Matches, Min } from 'class-validator';
 import { ITEM_TYPE, PROCESS_TYPE, type ProcessType } from '@fantasteel/shared';
 
 /** 계획 수율 decimal(5,4): 0~1, 소수 4자리까지 (범위 0 < 수율 ≤ 1은 service가 본다) */
@@ -32,4 +32,9 @@ export class UpdateRoutingDto {
   @IsOptional()
   @Matches(YIELD_RATE, { message: '계획 수율은 소수 4자리까지의 0~1 값으로 입력해 주세요 (예: 0.98)' })
   plannedYieldRate?: string | null;
+
+  /** 불러온 시각. 그 사이 다른 사람이 고쳤으면 COM-001 (이슈 #498). 보내지 않으면 비교하지 않는다 */
+  @IsOptional()
+  @IsDateString({ strict: true }, { message: 'expectedUpdatedAt은 시각(ISO 8601)으로 보내 주세요' })
+  expectedUpdatedAt?: string | null;
 }

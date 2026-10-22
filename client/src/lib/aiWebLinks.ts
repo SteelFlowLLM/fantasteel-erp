@@ -65,6 +65,30 @@ export function openableWebSources(sources: readonly AiWebSource[] | undefined):
   return result;
 }
 
+/** 답 아래 출처 묶음: 회사 Drive·Notion에서 읽은 것은 웹 검색 출처와 따로 보인다 (이슈 #530) */
+export type AnswerSourceGroup = 'drive' | 'notion' | 'web';
+
+export const ANSWER_SOURCE_GROUP_LABEL: Record<AnswerSourceGroup, string> = { drive: '회사 Drive', notion: 'Notion', web: '웹 출처' };
+
+export function answerSourceGroupOf(href: string): AnswerSourceGroup {
+  let host: string;
+  try {
+    host = new URL(href).hostname.toLowerCase();
+  } catch {
+    return 'web';
+  }
+  if (host === 'drive.google.com' || host === 'docs.google.com') return 'drive';
+  if (host === 'notion.so' || host.endsWith('.notion.so') || host.endsWith('.notion.site')) return 'notion';
+  return 'web';
+}
+
+/** 출처를 묶음별로 (회사 Drive → Notion → 웹 순, 빈 묶음은 뺀다). 묶음 안 순서는 그대로 */
+export function groupAnswerSources<T extends { href: string }>(items: readonly T[]): { group: AnswerSourceGroup; items: T[] }[] {
+  return (['drive', 'notion', 'web'] as const)
+    .map((group) => ({ group, items: items.filter((item) => answerSourceGroupOf(item.href) === group) }))
+    .filter((entry) => entry.items.length > 0);
+}
+
 export type AnswerToken = { kind: 'text'; text: string } | { kind: 'link'; text: string; href: string };
 
 interface Parsed {

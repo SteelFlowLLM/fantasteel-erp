@@ -31,7 +31,7 @@ import type { AssistantToolbox, ToolRunResult } from './tools/assistant-toolbox'
 import { AssistantWebToolbox } from './web/assistant-web-toolbox';
 import { KakaoPlaceClient, WebSearchClient } from './web/web-search.client';
 import { EMPTY_ANSWER, EMPTY_ANSWER_NUDGE, parseAssistantAnswer } from './assistant.answer';
-import { buildAssistantMessages, MAX_HISTORY_TURNS } from './assistant.prompt';
+import { buildAssistantMessages, MAX_HISTORY_TURNS, missingImageNote } from './assistant.prompt';
 import { historyBudget, type HistorySearchSource } from './history/chat-memory';
 import { AgentControlDto, AskAiAssistantDto } from './dto/ai-assistant.dto';
 import { GLOSSARY_TERMS } from './knowledge/glossary.generated';
@@ -630,6 +630,20 @@ describe('AiAssistantService', () => {
       }
       expect(streamed.calls[0].streamed).toBe(true);
       expect(plain.calls[0].streamed).toBe(false);
+    });
+
+    it('사진을 붙이지 않았는데 "이 사진"을 물으면 사진이 없다고 안내하게 한다 (이슈 #530)', async () => {
+      const missing = setup({}, async () => answer('사진이 붙어 있지 않아요'));
+      await missing.service.ask(user, { question: '이 사진에 나온 흐름을 단계별로 요약해줘' });
+      const last = missing.calls[0].messages.at(-1);
+      expect(last?.content).toContain('이 사진에 나온 흐름을 단계별로 요약해줘');
+      expect(last?.content).toContain('사진이 붙어 있지 않아요');
+      // 사진을 붙였거나 사진을 가리키지 않으면 안내를 넣지 않는다
+      const withImage = setup({}, async () => answer('네'));
+      await withImage.service.ask(user, { question: '이 사진 뭐야?', images: [IMAGE] });
+      expect(withImage.calls[0].messages.at(-1)?.content).toBe('이 사진 뭐야?');
+      expect(missingImageNote('사진 대지 정리 방법 알려줘', 0)).toBeNull();
+      expect(missingImageNote('첨부한 이미지 설명해 줘', 0)).not.toBeNull();
     });
 
     it('설정된 모델 이름으로 모델 정보를 묻는다', async () => {

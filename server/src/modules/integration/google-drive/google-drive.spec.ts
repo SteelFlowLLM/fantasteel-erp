@@ -7,13 +7,14 @@ import { Test } from '@nestjs/testing';
 import { createHash, randomBytes } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import type { DriveFilePage, IntegrationConnectResult, IntegrationConnectionView, IntegrationTestResult, MeetingMinutesView } from '@fantasteel/shared';
+import { NOTIFICATION_TYPE, PERMISSION, PERMISSION_LEVEL, type DriveFilePage, type IntegrationConnectResult, type IntegrationConnectionView, type IntegrationTestResult, type MeetingMinutesView } from '@fantasteel/shared';
 import { AppModule } from '../../../app.module';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { SttClient, type SttTranscript } from '../../stt/stt.client';
 import { SttSettingsStore } from '../../stt/stt-settings.store';
 import { MeetingTranscriptionRunner } from '../../meeting-minutes/meeting-transcription.runner';
 import { IntegrationCrypto } from '../integration-crypto';
+import { IntegrationHealthMonitor } from '../integration-health.monitor';
 import { AiAssistantService } from '../../ai-assistant/ai-assistant.service';
 import { AssistantDriveToolbox } from '../../ai-assistant/drive/assistant-drive-toolbox';
 import { tinyPdf } from '../../ai-assistant/web/fixtures/tiny-pdf';
@@ -298,6 +299,22 @@ async function driveView(): Promise<IntegrationConnectionView> {
   return view;
 }
 
+/** 연동 관리 권한자(ORG_MANAGE 사용)인 재직 사원 수: 장애·복구 알림은 이 사람마다 한 행이다 (이슈 #518) */
+let managerCount = 0;
+
+async function clearFaultState(): Promise<void> {
+  await prisma.integrationFault.deleteMany();
+  await prisma.notification.deleteMany({ where: { notificationType: { in: [NOTIFICATION_TYPE.INTEGRATION_FAULT, NOTIFICATION_TYPE.INTEGRATION_RECOVERED] } } });
+}
+
+function alertsOf(type: typeof NOTIFICATION_TYPE.INTEGRATION_FAULT | typeof NOTIFICATION_TYPE.INTEGRATION_RECOVERED) {
+  return prisma.notification.findMany({ where: { notificationType: type }, orderBy: { id: 'asc' } });
+}
+
+function driveFaults() {
+  return prisma.integrationFault.findMany({ where: { providerKey: 'google-drive' }, orderBy: { id: 'asc' } });
+}
+
 async function driveRow() {
   return prisma.integrationConnection.findUniqueOrThrow({ where: { providerKey: 'google-drive' } });
 }
@@ -353,6 +370,9 @@ beforeAll(async () => {
   salesCookie = await login('2103003');
   adminId = (await prisma.employee.findUniqueOrThrow({ where: { employeeNo: '1503001' } })).id;
   purchaseId = (await prisma.employee.findUniqueOrThrow({ where: { employeeNo: '2207005' } })).id;
+  managerCount = await prisma.employee.count({
+    where: { isActive: true, role: { rolePermissions: { some: { permission: PERMISSION.ORG_MANAGE, permissionLevel: PERMISSION_LEVEL.USE } } } },
+  });
 
   addFile({ id: 'audioNewest001', name: '주간 회의.m4a', mimeType: 'audio/mp4', parents: [FOLDER], modifiedTime: '2026-10-15T09:00:00.000Z', content: Buffer.from('fake-m4a-bytes') });
   addFile({ id: 'audioWebm00002', name: '브라우저 녹음.webm', mimeType: 'video/webm', parents: [FOLDER], modifiedTime: '2026-10-14T09:00:00.000Z', content: Buffer.from('fake-webm') });
@@ -380,6 +400,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await runner?.drain();
+  // 같은 묶음 DB를 쓰는 다른 시험이 이 시험의 장애·알림을 보지 않게 치운다
+  await clearFaultState();
   await app?.close();
   await new Promise<void>((resolve) => fakeServer?.close(() => resolve()));
   delete process.env.GOOGLE_API_TEST_ORIGIN;
@@ -403,6 +425,7 @@ describe('연결 전', () => {
       serviceAccountEmail: null,
       driveFolderFromEnv: false,
       notionWorkspace: null,
+      health: { level: 'NORMAL', lastErrorAt: null, faults: [] },
     });
   });
 
@@ -758,9 +781,9 @@ describe('POST meeting-minutes/audio/from-drive', () => {
     expect(status).toBe(201);
     expect(res.data).toMatchObject({ meetingMinutesTitle: 'Drive 녹음 회의', meetingMinutesStatus: 'TRANSCRIBING', transcript: null, creator: { id: purchaseId } });
     await runner.drain();
-    const [, input] = sttClient.transcribe.mock.calls[0] as [unknown, { audio: Buffer; fileName: string; mimeType: string; speakerCount: number }];
+    const [, input] = sttClient.transcribe.mock.calls[0] as [unknown, { audio: Buffer; fileName: string; mimeType: string; maxSpeakers: number }];
     expect(input.audio.toString()).toBe('fake-m4a-bytes');
-    expect(input).toMatchObject({ fileName: '주간 회의.m4a', mimeType: 'audio/mp4', speakerCount: 2 });
+    expect(input).toMatchObject({ fileName: '주간 회의.m4a', mimeType: 'audio/mp4', maxSpeakers: 2 });
     const detail = await call<MeetingMinutesView>('GET', `/meeting-minutes/${res.data.id}`, purchaseCookie);
     expect(detail.body.data).toMatchObject({ meetingMinutesStatus: 'TRANSCRIBED', transcript: '다음 주 출하 일정 확인' });
   });
@@ -950,6 +973,7 @@ describe('토큰 갱신', () => {
   });
 
   it('리프레시 토큰이 거절되면(invalid_grant) 토큰을 지우고 RECONNECT_REQUIRED·INT-003', async () => {
+    await clearFaultState();
     await expireStoredToken();
     fake.refreshTokens.clear();
     const { status, body } = await call('GET', '/integrations/google-drive/files?kind=audio', salesCookie);
@@ -958,10 +982,21 @@ describe('토큰 갱신', () => {
     const view = await driveView();
     expect(view.status).toBe('RECONNECT_REQUIRED');
     expect(view.lastError).toContain('다시 연결');
-    // 다음 호출도 같은 이유로 막힌다
+    // 관리 화면: 끊김, 마지막 오류 시각, 다시 연결이 필요한 장애
+    expect(view.health.level).toBe('DOWN');
+    expect(view.health.lastErrorAt).not.toBeNull();
+    expect(view.health.faults).toMatchObject([{ faultKind: 'RECONNECT_REQUIRED', failureCount: 1, notifiedAt: expect.any(String) }]);
+    // 연동 관리 권한자에게 알림이 한 번 간다 (7일 만료 같은 연결 만료)
+    const alerts = await alertsOf(NOTIFICATION_TYPE.INTEGRATION_FAULT);
+    expect(alerts).toHaveLength(managerCount);
+    expect(alerts[0]).toMatchObject({ linkPath: '/admin/integrations' });
+    expect(alerts[0].notificationContent).toContain('Google Drive 연결이 끊겼어요');
+    // 다음 호출도 같은 이유로 막힌다. 같은 장애라 알림은 다시 가지 않는다
     expect((await call('POST', '/meeting-minutes/audio/from-drive', purchaseCookie, { meetingMinutesTitle: 'x', meetingDate: '2026-10-15', attendeeIds: [purchaseId], driveFileId: 'audioNewest001' })).body.error?.code).toBe('INT-003');
     const test = await call<IntegrationTestResult>('POST', '/integrations/google-drive/test', adminCookie);
     expect(test.body.data).toMatchObject({ ok: false, driveFolder: null });
+    expect(await alertsOf(NOTIFICATION_TYPE.INTEGRATION_FAULT)).toHaveLength(managerCount);
+    expect(await driveFaults()).toMatchObject([{ faultKind: 'RECONNECT_REQUIRED' }]);
   });
 });
 
@@ -986,9 +1021,13 @@ describe('다시 연결·끊기', () => {
     expect((await driveView()).status).toBe('RECONNECT_REQUIRED');
   });
 
-  it('다시 연결하면 CONNECTED로 돌아온다', async () => {
+  it('다시 연결하면 CONNECTED로 돌아온다. 끊겼던 장애는 풀리고 복구 알림이 한 번 간다', async () => {
     expect(await connectFlow()).toBe('http://client.test/admin/integrations?integration=google-drive&result=connected');
-    expect(await driveView()).toMatchObject({ status: 'CONNECTED', lastError: null });
+    expect(await driveView()).toMatchObject({ status: 'CONNECTED', lastError: null, health: { level: 'NORMAL', lastErrorAt: null, faults: [] } });
+    expect(await driveFaults()).toEqual([]);
+    const recovered = await alertsOf(NOTIFICATION_TYPE.INTEGRATION_RECOVERED);
+    expect(recovered).toHaveLength(managerCount);
+    expect(recovered[0].notificationContent).toBe('Google Drive 연결이 다시 정상이에요');
     expect((await call('GET', '/integrations/google-drive/files?kind=audio', salesCookie)).status).toBe(200);
     expect((await storedTokens()).accountId).toBe('acct-1');
   });
@@ -1058,5 +1097,104 @@ describe('다시 연결·끊기', () => {
     const test = await call<IntegrationTestResult>('POST', '/integrations/google-drive/test', adminCookie);
     expect(test.body.data).toMatchObject({ ok: false });
     expect(test.body.data.error).toContain('폴더');
+  });
+});
+
+describe('주기 확인과 장애 알림 (이슈 #518)', () => {
+  const monitor = () => app.get(IntegrationHealthMonitor);
+
+  beforeAll(async () => {
+    // 앞 시험이 폴더를 비웠다. 연결·폴더를 갖춘 정상 상태에서 시작한다
+    await call('PUT', '/integrations/google-drive/settings', adminCookie, { folder: FOLDER });
+    expect(await connectFlow()).toContain('result=connected');
+    await clearFaultState();
+  });
+
+  it('정상이면 주기 확인은 아무것도 남기지 않는다 (Drive about 요청만 한다)', async () => {
+    await monitor().runNow();
+    expect(await driveFaults()).toEqual([]);
+    expect(await alertsOf(NOTIFICATION_TYPE.INTEGRATION_FAULT)).toHaveLength(0);
+    expect((await driveView()).health.level).toBe('NORMAL');
+  });
+
+  it('아무도 Drive를 쓰지 않아도 주기 확인이 만료된 허용(7일 만료 같은)을 찾아 한 번 알리고, 다시 연결하면 복구를 알린다', async () => {
+    await expireStoredToken();
+    fake.refreshTokens.clear();
+    await monitor().runNow();
+    expect((await driveView()).status).toBe('RECONNECT_REQUIRED');
+    expect(await driveFaults()).toMatchObject([{ faultKind: 'RECONNECT_REQUIRED', failureCount: 1 }]);
+    expect(await alertsOf(NOTIFICATION_TYPE.INTEGRATION_FAULT)).toHaveLength(managerCount);
+
+    // 토큰이 없는 채로 다음 확인이 와도 같은 장애: 횟수만 오르고 알림은 늘지 않는다
+    await monitor().runNow();
+    expect((await driveFaults())[0].failureCount).toBe(2);
+    expect(await alertsOf(NOTIFICATION_TYPE.INTEGRATION_FAULT)).toHaveLength(managerCount);
+
+    expect(await connectFlow()).toContain('result=connected');
+    expect(await driveFaults()).toEqual([]);
+    expect(await alertsOf(NOTIFICATION_TYPE.INTEGRATION_RECOVERED)).toHaveLength(managerCount);
+    await monitor().runNow();
+    expect(await alertsOf(NOTIFICATION_TYPE.INTEGRATION_RECOVERED)).toHaveLength(managerCount);
+  });
+
+  it('OAuth 클라이언트를 Google이 거절하면(invalid_client) 서버 관리자가 고칠 키·설정 오류로 알리고, 고치면 복구를 알린다', async () => {
+    await clearFaultState();
+    await call('PUT', '/integrations/google-drive/settings', adminCookie, { clientSecret: 'GOCSPX-wrong-secret' });
+    await expireStoredToken();
+    const { status, body } = await call('GET', '/integrations/google-drive/files?kind=audio', salesCookie);
+    expect([status, body.error?.code]).toEqual([502, 'INT-004']);
+    expect(await driveFaults()).toMatchObject([{ faultKind: 'CREDENTIAL_ERROR', failureCount: 1 }]);
+    const alerts = await alertsOf(NOTIFICATION_TYPE.INTEGRATION_FAULT);
+    expect(alerts).toHaveLength(managerCount);
+    expect(alerts[0].notificationContent).toContain('키·설정에 문제가 있어요');
+    expect((await driveView()).health.level).toBe('DOWN');
+
+    await call('PUT', '/integrations/google-drive/settings', adminCookie, { clientSecret: CLIENT_SECRET });
+    expect((await call('GET', '/integrations/google-drive/files?kind=audio', salesCookie)).status).toBe(200);
+    expect(await driveFaults()).toEqual([]);
+    const recovered = await alertsOf(NOTIFICATION_TYPE.INTEGRATION_RECOVERED);
+    expect(recovered).toHaveLength(managerCount);
+    expect(recovered[0].notificationContent).toBe('Google Drive 키·설정 오류가 해결됐어요');
+  });
+
+  it('일시적인 요청 실패(5xx)는 3번 이어질 때 알린다. 한두 번 흔들리고 회복하면 알림도 복구 알림도 없다', async () => {
+    await clearFaultState();
+    fake.refreshFails = true;
+    try {
+      for (let i = 1; i <= 2; i += 1) {
+        await expireStoredToken();
+        expect((await call('GET', '/integrations/google-drive/files?kind=audio', salesCookie)).body.error?.code).toBe('INT-004');
+      }
+      expect(await alertsOf(NOTIFICATION_TYPE.INTEGRATION_FAULT)).toHaveLength(0);
+      expect((await driveView()).health).toMatchObject({ level: 'WARNING', faults: [{ faultKind: 'REQUEST_FAILED', failureCount: 2, notifiedAt: null }] });
+    } finally {
+      fake.refreshFails = false;
+    }
+    expect((await call('GET', '/integrations/google-drive/files?kind=audio', salesCookie)).status).toBe(200);
+    expect(await driveFaults()).toEqual([]);
+    expect(await alertsOf(NOTIFICATION_TYPE.INTEGRATION_RECOVERED)).toHaveLength(0);
+
+    fake.refreshFails = true;
+    try {
+      for (let i = 1; i <= 3; i += 1) {
+        await expireStoredToken();
+        await call('GET', '/integrations/google-drive/files?kind=audio', salesCookie);
+      }
+    } finally {
+      fake.refreshFails = false;
+    }
+    const alerts = await alertsOf(NOTIFICATION_TYPE.INTEGRATION_FAULT);
+    expect(alerts).toHaveLength(managerCount);
+    expect(alerts[0].notificationContent).toContain('Google Drive 요청이 3번 이어서 실패했어요');
+    expect((await call('GET', '/integrations/google-drive/files?kind=audio', salesCookie)).status).toBe(200);
+    expect(await alertsOf(NOTIFICATION_TYPE.INTEGRATION_RECOVERED)).toHaveLength(managerCount);
+  });
+
+  it('연결을 끊으면 장애를 알림 없이 지운다', async () => {
+    await clearFaultState();
+    await prisma.integrationFault.create({ data: { providerKey: 'google-drive', faultKind: 'REQUEST_FAILED', failureCount: 4, lastMessage: '시간 초과', notifiedAt: new Date() } });
+    expect((await call('POST', '/integrations/google-drive/disconnect', adminCookie)).status).toBe(200);
+    expect(await driveFaults()).toEqual([]);
+    expect(await alertsOf(NOTIFICATION_TYPE.INTEGRATION_RECOVERED)).toHaveLength(0);
   });
 });

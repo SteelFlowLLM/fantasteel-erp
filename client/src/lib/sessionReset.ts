@@ -2,6 +2,7 @@
 // 같은 탭에서 사원이 바뀌어도 조회 캐시(사원 id가 키에 없는 결재함·구매요청 폼·처분·검사 대기 등)와
 // 메모리에만 있는 보내기 실패 메시지가 다음 사원에게 보이거나 그 이름으로 다시 보내지는 일이 없게 한다.
 import type { QueryClient } from '@tanstack/react-query';
+import { clearAiChipPreferences } from '@/lib/aiChipPreferences';
 import { useAiChatStore } from '@/stores/useAiChatStore';
 import { useMessageComposeStore } from '@/stores/useMessageComposeStore';
 import { useMessengerLiveStore } from '@/stores/useMessengerLiveStore';
@@ -15,6 +16,8 @@ export function clearSessionData(queryClient: QueryClient): void {
   useMessageComposeStore.setState({ replyTo: null, editing: null, deleting: null, tasking: null });
   useMessengerLiveStore.getState().reset();
   useAiChatStore.getState().clear();
+  // 철강맨AI 칩 설정(Drive·브라우저 등)은 이 브라우저에 저장돼 있어 다음 사원에게 켜진 채 시작하지 않게 지운다
+  clearAiChipPreferences();
 }
 
 /**

@@ -1,5 +1,9 @@
-import { lookup as dnsLookup, type LookupAddress, type LookupOptions } from 'node:dns';
+import type { LookupAddress } from 'node:dns';
 import ipaddr from 'ipaddr.js';
+import { BLOCKED_LOOKUP_CODE, firstBlockedAddress as firstBlockedAddressOf, guardedLookup as guardedLookupOf, systemLookup, type LookupFunction } from '../../../common/net/guarded-lookup';
+
+// lookup 본체는 LLM·음성 서버 연결도 같이 쓰도록 common/net/guarded-lookup.ts로 옮겼다(이슈 #510). 이 파일은 웹 페이지 읽기 규칙(FetchPolicy)을 넣어 부르고, 옛 import 경로를 위해 다시 내보낸다
+export { BLOCKED_LOOKUP_CODE, type LookupFunction };
 
 /**
  * 웹 페이지 읽기의 SSRF 막기 (이슈 #367). 모델이 고른 주소로 서버가 요청을 보내므로, 사내망·클라우드 메타데이터·
@@ -102,36 +106,16 @@ export function assertFetchableUrl(raw: string, policy: FetchPolicy = DEFAULT_FE
   return url;
 }
 
-type LookupCallback = (error: NodeJS.ErrnoException | null, address: string | LookupAddress[], family?: number) => void;
-export type LookupFunction = (hostname: string, options: LookupOptions, callback: LookupCallback) => void;
-
-/** 실제 DNS 조회. 시험은 이름을 정해진 주소로 푸는 함수를 넣는다 */
-const systemLookup: LookupFunction = (hostname, options, callback) => {
-  dnsLookup(hostname, { ...options, all: true }, (error, addresses) => callback(error, addresses));
-};
-
 /**
- * 연결에 쓰는 lookup (net·tls의 lookup 옵션). 푼 주소가 하나라도 내부 주소면 연결하지 않는다.
- * Node는 autoSelectFamily(기본 켜짐)일 때 all: true로 묻고 배열을 기대하고, 아니면 주소 하나를 기대한다. 둘 다 맞춰 돌려준다.
+ * 연결에 쓰는 lookup (net·tls의 lookup 옵션). 푼 주소가 하나라도 내부 주소면 연결하지 않는다 (common/net/guarded-lookup.ts).
  */
 export function guardedLookup(policy: FetchPolicy = DEFAULT_FETCH_POLICY, resolve: LookupFunction = systemLookup): LookupFunction {
-  return (hostname, options, callback) => {
-    resolve(hostname, { ...options, all: true }, (error, result) => {
-      if (error) return callback(error, options.all ? [] : '');
-      const addresses: LookupAddress[] = typeof result === 'string' ? [{ address: result, family: result.includes(':') ? 6 : 4 }] : result;
-      if (!addresses.length) return callback(dnsError(hostname, 'ENOTFOUND', '주소를 찾지 못했어요'), options.all ? [] : '');
-      if (firstBlockedAddress(addresses.map((entry) => entry.address), policy) !== null) return callback(dnsError(hostname, 'EBLOCKED', '사내망·내부 주소는 읽을 수 없어요'), options.all ? [] : '');
-      if (options.all) return callback(null, addresses);
-      const wanted = options.family === 6 ? 6 : options.family === 4 ? 4 : null;
-      const first = addresses.find((entry) => wanted === null || entry.family === wanted) ?? addresses[0];
-      return callback(null, first.address, first.family);
-    });
-  };
+  return guardedLookupOf(policy, resolve);
 }
 
 /** 푼 주소 중 연결하면 안 되는 첫 주소. 모두 괜찮으면 null. 페이지 읽기(guardedLookup)와 브라우저(이슈 #373)가 함께 쓴다 */
 export function firstBlockedAddress(addresses: readonly string[], policy: FetchPolicy = DEFAULT_FETCH_POLICY): string | null {
-  return addresses.find((address) => !policy.isAllowedAddress(address)) ?? null;
+  return firstBlockedAddressOf(addresses, policy);
 }
 
 /** 연결해도 되는 주소 하나, 또는 막을 이유 */
@@ -162,13 +146,4 @@ const INTERNAL_ADDRESS = '사내망·내부 주소는 열 수 없어요';
 export async function checkHostAddresses(hostname: string, policy: FetchPolicy = DEFAULT_FETCH_POLICY, resolve: LookupFunction = systemLookup): Promise<string | null> {
   const checked = await resolvePublicAddress(hostname, policy, resolve);
   return 'blocked' in checked ? checked.blocked : null;
-}
-
-/** lookup이 내부 주소라 막았을 때의 오류 코드 */
-export const BLOCKED_LOOKUP_CODE = 'EBLOCKED';
-
-function dnsError(hostname: string, code: string, message: string): NodeJS.ErrnoException {
-  const error: NodeJS.ErrnoException = new Error(`${message} (${hostname})`);
-  error.code = code;
-  return error;
 }

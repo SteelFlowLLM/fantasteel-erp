@@ -9,6 +9,7 @@ import {
   type HeatFormation,
   type ItemType,
   type PageResult,
+  type PlanReproductionCheck,
   type ProductionPlanDetail,
   type ProductionPlanStatus,
   type ProductionPlanSummary,
@@ -84,35 +85,66 @@ export class ProductionService {
 
   /** 히트 편성 기준정보 (4.4). 수율·매핑·히트 용량이 없으면 MST-001 (BP-PRD-01 "수율·배합·기준 단위가 없으면 확정하지 않는다") */
   async heatPlanBasisOf(tx: Tx, itemId: number): Promise<HeatPlanBasis> {
-    const item = await this.repository.findItemForPlan(tx, itemId);
-    if (!item?.theoreticalWeightTon) throw new AppException('MST-001', '규격의 이론중량이 없어요');
-    const itemType = item.itemType as ItemType;
-    const routings = await this.repository.findRoutings(tx, itemType);
-    const yieldOf = (processType: string) => routings.find((r) => r.processType === processType)?.plannedYieldRate ?? null;
-    const castingYieldRate = yieldOf(PROCESS_TYPE.CONTINUOUS_CASTING);
-    const steelmakingYieldRate = yieldOf(PROCESS_TYPE.STEELMAKING);
-    if (!castingYieldRate || !steelmakingYieldRate) throw new AppException('MST-001', '제강·연주 계획 수율이 없어요');
-    let hotRollingYieldRate: Prisma.Decimal | null = null;
-    let slabItem = { id: item.id, itemCode: item.itemCode, itemName: item.itemName, theoreticalWeightTon: item.theoreticalWeightTon };
-    if (itemType === ITEM_TYPE.COIL) {
-      const mapped = item.specMappingAsCoilItem?.slabItem;
-      if (!mapped?.theoreticalWeightTon) throw new AppException('MST-001', '코일 규격에 대응하는 슬래브 규격 매핑이 없어요');
-      hotRollingYieldRate = hotRollingYieldRateOf(item.theoreticalWeightTon, mapped.theoreticalWeightTon);
-      slabItem = { id: mapped.id, itemCode: mapped.itemCode, itemName: mapped.itemName, theoreticalWeightTon: mapped.theoreticalWeightTon };
-    }
+    const found = (await this.heatPlanBasesOf(tx, [itemId])).get(itemId);
+    if (found instanceof AppException) throw found;
+    if (!found) throw new AppException('MST-001', '규격의 이론중량이 없어요');
+    return found;
+  }
+
+  /**
+   * 규격 여러 개의 히트 편성 기준정보를 한 번에 읽는다(규격마다 쿼리 4~5개를 반복하지 않고, 라우팅·설정값은 한 번만, 규격은 `in`으로, 이슈 #498).
+   * 기준정보가 모자란 규격은 heatPlanBasisOf가 던졌을 MST-001을 값으로 담는다(던지지 않는다)
+   */
+  async heatPlanBasesOf(tx: Tx, itemIds: readonly number[]): Promise<Map<number, HeatPlanBasis | AppException>> {
+    const ids = [...new Set(itemIds)];
+    const bases = new Map<number, HeatPlanBasis | AppException>();
+    if (ids.length === 0) return bases;
+    // 한 연결에 쿼리를 겹쳐 보내지 않고 차례로 읽는다 (#478)
+    const items = new Map((await this.repository.findItemsForPlan(tx, ids)).map((i) => [i.id, i]));
+    const routings = await this.repository.findRoutingsOfTypes(tx, [...new Set([...items.values()].map((i) => i.itemType as ItemType))]);
     const setting = await this.repository.findProductionSetting(tx);
-    if (!setting) throw new AppException('MST-001', '히트 용량 설정값이 없어요');
-    return {
-      itemId: item.id,
-      itemType,
-      steelGradeId: item.steelGradeId,
-      theoreticalWeightTon: item.theoreticalWeightTon,
-      castingYieldRate,
-      steelmakingYieldRate,
-      hotRollingYieldRate,
-      heatCapacityTon: setting.heatCapacityTon,
-      slabItem,
-    };
+    for (const id of ids) {
+      const item = items.get(id);
+      if (!item?.theoreticalWeightTon) {
+        bases.set(id, new AppException('MST-001', '규격의 이론중량이 없어요'));
+        continue;
+      }
+      const itemType = item.itemType as ItemType;
+      const yieldOf = (processType: string) => routings.find((r) => r.itemType === itemType && r.processType === processType)?.plannedYieldRate ?? null;
+      const castingYieldRate = yieldOf(PROCESS_TYPE.CONTINUOUS_CASTING);
+      const steelmakingYieldRate = yieldOf(PROCESS_TYPE.STEELMAKING);
+      if (!castingYieldRate || !steelmakingYieldRate) {
+        bases.set(id, new AppException('MST-001', '제강·연주 계획 수율이 없어요'));
+        continue;
+      }
+      let hotRollingYieldRate: Prisma.Decimal | null = null;
+      let slabItem = { id: item.id, itemCode: item.itemCode, itemName: item.itemName, theoreticalWeightTon: item.theoreticalWeightTon };
+      if (itemType === ITEM_TYPE.COIL) {
+        const mapped = item.specMappingAsCoilItem?.slabItem;
+        if (!mapped?.theoreticalWeightTon) {
+          bases.set(id, new AppException('MST-001', '코일 규격에 대응하는 슬래브 규격 매핑이 없어요'));
+          continue;
+        }
+        hotRollingYieldRate = hotRollingYieldRateOf(item.theoreticalWeightTon, mapped.theoreticalWeightTon);
+        slabItem = { id: mapped.id, itemCode: mapped.itemCode, itemName: mapped.itemName, theoreticalWeightTon: mapped.theoreticalWeightTon };
+      }
+      if (!setting) {
+        bases.set(id, new AppException('MST-001', '히트 용량 설정값이 없어요'));
+        continue;
+      }
+      bases.set(id, {
+        itemId: item.id,
+        itemType,
+        steelGradeId: item.steelGradeId,
+        theoreticalWeightTon: item.theoreticalWeightTon,
+        castingYieldRate,
+        steelmakingYieldRate,
+        hotRollingYieldRate,
+        heatCapacityTon: setting.heatCapacityTon,
+        slabItem,
+      });
+    }
+    return bases;
   }
 
   /** 계획 없이 등록하는 제선의 히트 1개 몫 기준: 히트 용량과 슬래브·코일 중 낮은 제강 수율 (몫이 가장 큰 쪽) */
@@ -266,11 +298,11 @@ export class ProductionService {
     // 진행 값은 이 쪽 계획들의 LOT·열연 배정을 한 번에 읽어 계산한다
     const ids = rows.map((r) => r.id);
     const [lots, rolling] = await Promise.all([this.repository.findLotsOfPlans(this.prisma, ids), this.repository.countConfirmedRollingByPlans(this.prisma, ids)]);
-    const basisByItem = new Map<number, HeatPlanBasis | null>();
+    const bases = await this.heatPlanBasesOf(this.prisma, rows.map((r) => r.itemId));
     const items: ProductionPlanSummary[] = [];
     for (const row of rows) {
-      if (!basisByItem.has(row.itemId)) basisByItem.set(row.itemId, await this.heatPlanBasisOf(this.prisma, row.itemId).catch(() => null));
-      const basis = basisByItem.get(row.itemId);
+      const found = bases.get(row.itemId);
+      const basis = found instanceof AppException ? null : found;
       const progress = planProgressOf(
         { ...row, itemType: row.item.itemType as ItemType, productionPlanStatus: row.productionPlanStatus as ProductionPlanStatus },
         lots.filter((l: PlanLotRow) => l.productionResult?.productionPlanId === row.id),
@@ -458,43 +490,82 @@ export class ProductionService {
 
   /** 수주 품목의 재생산 판단값. 연결 계획마다 합격·판정 대기 매수를 세어 진행 계획 잔여 목표를 구한다 */
   async reproductionCheck(tx: Tx, salesOrderItemId: number): Promise<ReproductionCheck | null> {
-    const soItem = await this.repository.findSalesOrderItemForReproduction(tx, salesOrderItemId);
-    if (!soItem) return null;
-    const lots = soItem.productionPlans.length > 0 ? await this.repository.findLotsOfPlans(tx, soItem.productionPlans.map((p) => p.id)) : [];
-    const plans = soItem.productionPlans.map((p) => {
-      const progress = planProgressOf(
-        { itemId: p.itemId, itemType: p.item.itemType as ItemType, heatCount: 0, shortageQty: p.shortageQty, productionPlanStatus: p.productionPlanStatus as ProductionPlanStatus, salesOrderItemId },
-        lots.filter((l: PlanLotRow) => l.productionResult?.productionPlanId === p.id),
-        [],
-      );
-      return { plan: p, input: { productionPlanStatus: p.productionPlanStatus as ProductionPlanStatus, shortageQty: p.shortageQty, passedQty: progress.passedQty, pendingQty: progress.pendingQty }, remainingTargetQty: progress.remainingTargetQty };
+    return (await this.reproductionChecks(tx, [salesOrderItemId])).get(salesOrderItemId) ?? null;
+  }
+
+  /** 수주 품목 여러 개의 재생산 판단값을 한 번에 구한다 (없는 품목은 빠진다). 품목마다 따로 읽던 연결 계획·LOT·재고를 모아 읽는다 */
+  async reproductionChecks(tx: Tx, salesOrderItemIds: number[]): Promise<Map<number, ReproductionCheck>> {
+    const ids = [...new Set(salesOrderItemIds)];
+    if (ids.length === 0) return new Map();
+    // 트랜잭션 안에서도 불리므로 한 연결에 쿼리를 겹쳐 보내지 않고 차례로 읽는다 (#478)
+    const soItems = await this.repository.findSalesOrderItemsForReproduction(tx, ids);
+    const planIds = soItems.flatMap((i) => i.productionPlans.map((p) => p.id));
+    const lots = planIds.length > 0 ? await this.repository.findLotsOfPlans(tx, planIds) : [];
+    const inventories = await this.repository.findInventories(tx, [...new Set(soItems.map((i) => i.itemId))]);
+    const inventoryByItem = new Map(inventories.map((i) => [i.itemId, i]));
+    return new Map(
+      soItems.map((soItem): [number, ReproductionCheck] => {
+        const plans = soItem.productionPlans.map((p) => {
+          const progress = planProgressOf(
+            { itemId: p.itemId, itemType: p.item.itemType as ItemType, heatCount: 0, shortageQty: p.shortageQty, productionPlanStatus: p.productionPlanStatus as ProductionPlanStatus, salesOrderItemId: soItem.id },
+            lots.filter((l: PlanLotRow) => l.productionResult?.productionPlanId === p.id),
+            [],
+          );
+          return { plan: p, input: { productionPlanStatus: p.productionPlanStatus as ProductionPlanStatus, shortageQty: p.shortageQty, passedQty: progress.passedQty, pendingQty: progress.pendingQty }, remainingTargetQty: progress.remainingTargetQty };
+        });
+        const inventory = inventoryByItem.get(soItem.itemId);
+        const check = reproductionCheckOf({
+          salesOrderItemId: soItem.id,
+          orderedQty: soItem.orderedQty,
+          salesOrderItemStatus: soItem.salesOrderItemStatus as SalesOrderItemStatus,
+          reservations: soItem.reservations,
+          plans: plans.map((p) => p.input),
+          reservationAvailableQty: inventory ? inventory.onHandQty - inventory.reservedQty - inventory.rollingAllocatedQty : 0,
+        });
+        return [
+          soItem.id,
+          {
+            ...check,
+            salesOrderId: soItem.salesOrderId,
+            salesOrderNo: soItem.salesOrder.salesOrderNo,
+            lineNo: soItem.salesOrder.salesOrderItems.findIndex((i) => i.id === soItem.id) + 1,
+            salesOrderItemStatus: soItem.salesOrderItemStatus as SalesOrderItemStatus,
+            unshippedQty: Math.max(0, check.orderedQty - check.shippedQty),
+            openPlans: plans
+              .filter((p) => p.plan.productionPlanStatus !== PRODUCTION_PLAN_STATUS.CANCELLED)
+              .map((p) => ({
+                id: p.plan.id,
+                productionPlanNo: p.plan.productionPlanNo,
+                productionPlanStatus: p.plan.productionPlanStatus as ProductionPlanStatus,
+                isReproduction: p.plan.isReproduction,
+                shortageQty: p.plan.shortageQty,
+                remainingTargetQty: p.remainingTargetQty,
+              })),
+          },
+        ];
+      }),
+    );
+  }
+
+  /**
+   * 생산계획 여러 개의 연결 수주 품목 정보와 재생산 판단 (이슈 #498). 계획 상세(GET :id)의 같은 값을 계획마다 따로 읽던 것을 모은다.
+   * 없는 계획은 빠지고, 수주 연결이 없는 계획은 reproduction이 null이다.
+   */
+  async reproductionChecksOfPlans(productionPlanIds: number[], tx: Tx = this.prisma): Promise<PlanReproductionCheck[]> {
+    const ids = [...new Set(productionPlanIds)];
+    if (ids.length === 0) return [];
+    const plans = await this.repository.findPlansByIds(tx, ids);
+    const checks = await this.reproductionChecks(tx, plans.flatMap((p) => (p.salesOrderItemId === null ? [] : [p.salesOrderItemId])));
+    return plans.map((plan) => {
+      const summary = toPlanSummary(plan);
+      return {
+        productionPlanId: plan.id,
+        customerName: summary.customerName,
+        itemCode: summary.itemCode,
+        itemType: summary.itemType,
+        dueDate: summary.dueDate,
+        reproduction: plan.salesOrderItemId === null ? null : (checks.get(plan.salesOrderItemId) ?? null),
+      };
     });
-    const inventory = await this.repository.findInventory(tx, soItem.itemId);
-    const check = reproductionCheckOf({
-      salesOrderItemId: soItem.id,
-      orderedQty: soItem.orderedQty,
-      salesOrderItemStatus: soItem.salesOrderItemStatus as SalesOrderItemStatus,
-      reservations: soItem.reservations,
-      plans: plans.map((p) => p.input),
-      reservationAvailableQty: inventory ? inventory.onHandQty - inventory.reservedQty - inventory.rollingAllocatedQty : 0,
-    });
-    return {
-      ...check,
-      salesOrderId: soItem.salesOrderId,
-      salesOrderNo: soItem.salesOrder.salesOrderNo,
-      lineNo: soItem.salesOrder.salesOrderItems.findIndex((i) => i.id === soItem.id) + 1,
-      salesOrderItemStatus: soItem.salesOrderItemStatus as SalesOrderItemStatus,
-      unshippedQty: Math.max(0, check.orderedQty - check.shippedQty),
-      openPlans: plans
-        .filter((p) => p.plan.productionPlanStatus !== PRODUCTION_PLAN_STATUS.CANCELLED)
-        .map((p) => ({
-          id: p.plan.id,
-          productionPlanNo: p.plan.productionPlanNo,
-          productionPlanStatus: p.plan.productionPlanStatus as ProductionPlanStatus,
-          isReproduction: p.plan.isReproduction,
-          shortageQty: p.plan.shortageQty,
-          remainingTargetQty: p.remainingTargetQty,
-        })),
-    };
   }
 }

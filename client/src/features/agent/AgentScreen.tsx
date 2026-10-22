@@ -28,7 +28,10 @@ import {
   isConfirmable,
   isOpenCandidate,
   recommendationsOf,
+  ALERT_ONLY_NOTE,
+  scanOutcomeText,
   scanSummary,
+  staleCandidateLabel,
   sortCandidates,
 } from '@/features/agent/lib/agentDisplay';
 import { useShellTitle } from '@/features/shell/useShellTitle';
@@ -36,7 +39,7 @@ import { useAction } from '@/hooks/useAction';
 import { useAgentCandidates } from '@/hooks/useAgentCandidates';
 import { useMe } from '@/hooks/useMe';
 import { useCanUse } from '@/hooks/usePermission';
-import { fmtMDHM } from '@/lib/format';
+import { fmtHM, fmtMDHM } from '@/lib/format';
 
 const REASON_MAX = 500;
 
@@ -84,6 +87,8 @@ function CandidateList({
   onSelect: (id: number) => void;
 }) {
   const openCount = candidates.filter(isOpenCandidate).length;
+  const now = new Date();
+  const staleLabelOf = (c: AgentCandidateView) => staleCandidateLabel(c, now);
   // 관리자만: 24시간 스케줄을 기다리지 않고 지금 감지를 돌린다 (같은 대상의 처리 전 후보는 새로 만들지 않는다)
   const isAdmin = useMe().roleCode === 'ADMIN';
   const scan = useAction(agentCandidateApi.scan, { invalidate: [agentCandidateKeys.all], success: scanSummary });
@@ -100,6 +105,11 @@ function CandidateList({
             </Button>
           ) : null}
         </div>
+        {scan.data ? (
+          <p role="status" className="rounded-xs bg-surface-2 px-2 py-1 text-cap text-ink-2">
+            {fmtHM(scan.data.ranAt)} 지금 감지 · {scanOutcomeText(scan.data)}
+          </p>
+        ) : null}
         <div className="flex flex-wrap gap-1.5">
           <Chip on={risk === null} onClick={() => onRisk(null)}>
             전체 <b>{candidates.length}</b>
@@ -110,6 +120,7 @@ function CandidateList({
             </Chip>
           ))}
         </div>
+        <p className="text-cap text-ink-3">{ALERT_ONLY_NOTE}</p>
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
         {visible.length === 0 ? (
@@ -126,8 +137,13 @@ function CandidateList({
                   <span className="ml-auto text-cap text-ink-3 tabular-nums">{fmtMDHM(c.createdAt)}</span>
                 </div>
                 <span className="text-xs text-ink-2">{c.summary}</span>
-                <div>
+                <div className="flex flex-wrap items-center gap-1.5">
                   <Badge tone={STATUS_TONE[c.draftStatus]}>{DRAFT_STATUS_LABEL[c.draftStatus]}</Badge>
+                  {staleLabelOf(c) ? (
+                    <Tag size="sm" tone="outline" className="text-danger" title="오래 확인하지 않았어요. 아직 필요하면 확정하고, 이미 처리했거나 필요 없으면 반려해 주세요">
+                      {staleLabelOf(c)}
+                    </Tag>
+                  ) : null}
                 </div>
               </MasterItem>
             </button>

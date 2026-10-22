@@ -1,6 +1,6 @@
 import type { MeetingCandidate, MeetingMinutesView } from '@fantasteel/shared';
 import { describe, expect, it } from 'vitest';
-import { analysisProgressText, analyzeAvailability, approvalBlocker, contextLinesOf, decisionCounts, evidenceLabel, formatDuration, formatSchedule, groupCandidates, purchaseApprovalBlocker, registerPreview, reviewSummaryText, traceChunkText, traceSummaryText } from '@/lib/meetingAnalysis';
+import { analysisProgressText, transcriptionProgressText, analyzeAvailability, approvalBlocker, contextLinesOf, decisionCounts, evidenceLabel, formatDuration, formatSchedule, groupCandidates, purchaseApprovalBlocker, registerPreview, reviewSummaryText, traceChunkText, traceSummaryText } from '@/lib/meetingAnalysis';
 
 const minutes = (over: Partial<MeetingMinutesView> = {}): MeetingMinutesView => ({
   id: 1,
@@ -13,6 +13,7 @@ const minutes = (over: Partial<MeetingMinutesView> = {}): MeetingMinutesView => 
   summary: null,
   analysisResult: null,
   analysisProgress: null,
+  transcriptionProgress: null,
   failureReason: null,
   creator: { id: 5, name: '정다은' },
   attendees: [],
@@ -84,9 +85,12 @@ describe('허가·제외 계산', () => {
     const staff = { permissions: { PURCHASE_REQUISITION_CREATE: 'USE' as const }, departmentId: 3, headDepartmentIds: [] };
     expect(purchaseApprovalBlocker(purchase, staff)).toBeNull();
     expect(purchaseApprovalBlocker(purchase, { ...staff, headDepartmentIds: [5] })).toBeNull();
-    expect(purchaseApprovalBlocker(purchase, { ...staff, permissions: { PURCHASE_REQUISITION_CREATE: 'VIEW' } })).toContain('구매 담당자가 확정해 주세요');
+    expect(purchaseApprovalBlocker(purchase, { ...staff, permissions: { PURCHASE_REQUISITION_CREATE: 'VIEW' } })).toContain('요청자를 구매요청 권한이 있는 사원');
     expect(purchaseApprovalBlocker(purchase, { ...staff, headDepartmentIds: [3] })).toContain('부서장 본인');
     expect(purchaseApprovalBlocker(task(), { ...staff, permissions: {} })).toBeNull();
+    // 요청자를 따로 정했으면(#530) 작성자의 권한·부서장 여부로 막지 않는다
+    expect(purchaseApprovalBlocker({ ...purchase, purchaseRequesterId: 9 }, { ...staff, permissions: {} })).toBeNull();
+    expect(purchaseApprovalBlocker({ ...purchase, purchaseRequesterId: 9 }, { ...staff, headDepartmentIds: [3] })).toBeNull();
   });
 
   it('확정 확인창에는 허가한 후보만 종류별로 보인다', () => {
@@ -159,6 +163,13 @@ describe('긴 전사 조각 분석 표시', () => {
     expect(analysisProgressText({ phase: 'ANALYSIS', current: 2, total: 5 })).toBe('1차 분석 중 (조각 2/5)');
     expect(analysisProgressText({ phase: 'MERGE', current: 1, total: 1 })).toBe('조각 결과를 합치는 중');
     expect(analysisProgressText({ phase: 'REVIEW', current: 5, total: 5 })).toBe('2차 검토 중 (조각 5/5)');
+  });
+
+  it('음성 전사 진행: 화자 나누는 중 → 받아쓰는 중 n/m, 진행 칸이 없으면 null (이슈 #522)', () => {
+    expect(transcriptionProgressText(null)).toBeNull();
+    expect(transcriptionProgressText({ phase: 'DIARIZE', current: 1, total: 1 })).toBe('화자를 나누는 중');
+    expect(transcriptionProgressText({ phase: 'TRANSCRIBE', current: 3, total: 7 })).toBe('받아쓰는 중 3/7');
+    expect(transcriptionProgressText({ phase: 'TRANSCRIBE', current: 1, total: 1 })).toBe('받아쓰는 중');
   });
 
   it('실행 기록의 조각 표시는 나눈 분석에만 붙는다', () => {

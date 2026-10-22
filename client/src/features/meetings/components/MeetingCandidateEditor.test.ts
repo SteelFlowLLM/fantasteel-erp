@@ -10,7 +10,7 @@ const base: MeetingCandidate = {
 };
 
 const same = {
-  title: '방문', description: '', assigneeId: '', dueDate: '', startAt: '2026-10-20T14:00', endAt: '2026-10-20T15:00', attendeeIds: [1, 2], notionSync: true, itemId: '', requestedTon: '', desiredReceiptDate: '',
+  title: '방문', description: '', assigneeId: '', dueDate: '', startAt: '2026-10-20T14:00', endAt: '2026-10-20T15:00', attendeeIds: [1, 2], notionSync: true, itemId: '', requestedTon: '', desiredReceiptDate: '', requesterId: '',
 };
 
 describe('changesOf', () => {
@@ -39,5 +39,13 @@ describe('changesOf', () => {
     expect(changesOf(task, { ...same, assigneeId: '9', dueDate: '2026-10-23' })).toEqual({ assigneeId: 9, dueDate: '2026-10-23' });
     const purchase: MeetingCandidate = { ...base, kind: 'PURCHASE', purchase: { itemId: null, requestedTon: '20.000', desiredReceiptDate: null, requestReason: null, sourceText: null } };
     expect(changesOf(purchase, { ...same, itemId: '41', requestedTon: '20.000', desiredReceiptDate: '2026-11-05' })).toEqual({ purchase: { itemId: 41, desiredReceiptDate: '2026-11-05' } });
+  });
+
+  it('구매요청 후보의 요청자는 바꿨을 때만 담고, 비우면 null(작성자로 되돌림) (이슈 #530)', () => {
+    const purchase: MeetingCandidate = { ...base, kind: 'PURCHASE', purchase: { itemId: 3, requestedTon: '20.000', desiredReceiptDate: '2026-10-30', requestReason: null, sourceText: null } };
+    const draft = { ...same, itemId: '3', requestedTon: '20.000', desiredReceiptDate: '2026-10-30' };
+    expect(changesOf(purchase, draft)).toEqual({});
+    expect(changesOf(purchase, { ...draft, requesterId: '7' })).toEqual({ purchaseRequesterId: 7 });
+    expect(changesOf({ ...purchase, purchaseRequesterId: 7 }, draft)).toEqual({ purchaseRequesterId: null });
   });
 });

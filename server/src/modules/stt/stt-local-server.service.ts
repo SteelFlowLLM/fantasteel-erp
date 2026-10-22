@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import type { SttLocalServerView } from '@fantasteel/shared';
+import type { SttLocalServerActionInput, SttLocalServerActionView, SttLocalServerView } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
 
 /** tools/voice-sidecar/start.sh --install이 등록하는 LaunchAgent와 같은 이름 */
@@ -22,6 +22,17 @@ const defaultRun: RunCommand = (file, args) => execFileAsync(file, args, { timeo
 export function sidecarPortOf(plist: string): number {
   const port = Number(/<key>SIDECAR_PORT<\/key>\s*<string>(\d{1,5})<\/string>/.exec(plist)?.[1]);
   return Number.isInteger(port) && port > 0 && port < 65536 ? port : DEFAULT_SIDECAR_PORT;
+}
+
+/** 음성 서버 /health의 받아쓰는 중인 긴 녹음 수. 옛 음성 서버는 이 칸이 없어 null */
+export function transcribingOf(body: unknown): number | null {
+  const value = typeof body === 'object' && body !== null ? (body as { transcribing?: unknown }).transcribing : undefined;
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null;
+}
+
+/** 다시 켜기·끄기 전에 보이는 경고 (이슈 #522) */
+export function busyWarning(transcribing: number, action: 'restart' | 'stop'): string {
+  return `음성 서버가 회의 녹음 ${transcribing}건을 받아쓰는 중이에요. 지금 ${action === 'restart' ? '다시 켜면' : '끄면'} 그 전사는 실패하고 녹음을 다시 올려야 해요`;
 }
 
 /** 화면에 보일 경로: 홈 폴더를 ~로 줄인다 */
@@ -53,7 +64,7 @@ export class SttLocalServerService {
   private queue: Promise<unknown> = Promise.resolve();
 
   async status(): Promise<SttLocalServerView> {
-    const base = { logPath: tildePath(join(homedir(), 'Library', 'Logs', 'fantasteel-voice.log')) };
+    const base = { logPath: tildePath(join(homedir(), 'Library', 'Logs', 'fantasteel-voice.log')), transcribing: null };
     if (this.platform !== 'darwin') {
       return { supported: false, installed: false, running: false, healthy: false, pid: null, ...base, message: 'ERP 서버가 macOS가 아니라 이 화면에서 켤 수 없어요. 음성 서버 컴퓨터에서 자동 켜기를 써요' };
     }
@@ -62,28 +73,41 @@ export class SttLocalServerService {
       return { supported: true, installed: false, running: false, healthy: false, pid: null, ...base, message: '자동 켜기가 등록되지 않았어요. 터미널에서 tools/voice-sidecar/start.sh --install을 한 번 실행해 주세요' };
     }
     const { running, pid } = await this.print();
-    const healthy = running && (await this.healthy(sidecarPortOf(plist)));
-    return { supported: true, installed: true, running, healthy, pid, ...base, message: running && !healthy ? '켜는 중이에요. 모델을 올리는 데 몇 초 걸려요' : null };
+    const health = running ? await this.health(sidecarPortOf(plist)) : { ok: false, transcribing: null };
+    const healthy = running && health.ok;
+    return { supported: true, installed: true, running, healthy, pid, ...base, transcribing: health.transcribing, message: running && !healthy ? '켜는 중이에요. 모델을 올리는 데 몇 초 걸려요' : null };
   }
 
-  start(): Promise<SttLocalServerView> {
+  /**
+   * 켜져 있으면 다시 켠다(kickstart -k). 받아쓰는 중인 녹음이 있으면 confirmBusy 없이는 다시 켜지 않고 경고를 돌려준다:
+   * 다시 켜면 그 전사가 끊기고 원본 녹음은 저장하지 않아 다시 올려야 한다 (이슈 #522)
+   */
+  start(input: SttLocalServerActionInput = {}): Promise<SttLocalServerActionView> {
     return this.serial(async () => {
-      await this.requireInstalled();
-      const { running } = await this.print();
+      const current = await this.requireInstalled();
+      const busy = current.running ? this.busy(current, input, 'restart') : null;
+      if (busy) return busy;
       // 끈 뒤(bootout)에는 등록이 내려가 있어 다시 올리고, 올라가 있으면 다시 시작만 한다
-      if (running) await this.run(LAUNCHCTL, ['kickstart', '-k', this.target()]);
+      if (current.running) await this.run(LAUNCHCTL, ['kickstart', '-k', this.target()]);
       else await this.bootstrap();
-      return this.status();
+      return done(await this.status());
     });
   }
 
-  /** 지금만 끈다. 등록 파일은 남아 다음 로그인 때 다시 켜진다 */
-  stop(): Promise<SttLocalServerView> {
+  /** 지금만 끈다. 등록 파일은 남아 다음 로그인 때 다시 켜진다. 받아쓰는 중이면 다시 켜기와 같이 확인을 받는다 */
+  stop(input: SttLocalServerActionInput = {}): Promise<SttLocalServerActionView> {
     return this.serial(async () => {
-      await this.requireInstalled();
+      const current = await this.requireInstalled();
+      const busy = this.busy(current, input, 'stop');
+      if (busy) return busy;
       await this.run(LAUNCHCTL, ['bootout', this.target()]).catch(() => undefined);
-      return this.status();
+      return done(await this.status());
     });
+  }
+
+  private busy(current: SttLocalServerView, input: SttLocalServerActionInput, action: 'restart' | 'stop'): SttLocalServerActionView | null {
+    if (input.confirmBusy === true || !current.transcribing) return null;
+    return { ...current, needsConfirm: true, warning: busyWarning(current.transcribing, action) };
   }
 
   private serial<T>(task: () => Promise<T>): Promise<T> {
@@ -92,9 +116,10 @@ export class SttLocalServerService {
     return next;
   }
 
-  private async requireInstalled(): Promise<void> {
+  private async requireInstalled(): Promise<SttLocalServerView> {
     const current = await this.status();
     if (!current.supported || !current.installed) throw new AppException('COM-004', current.message ?? '이 화면에서 켤 수 없어요');
+    return current;
   }
 
   private async bootstrap(): Promise<void> {
@@ -115,12 +140,13 @@ export class SttLocalServerService {
     }
   }
 
-  private async healthy(port: number): Promise<boolean> {
+  private async health(port: number): Promise<{ ok: boolean; transcribing: number | null }> {
     try {
       const res = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(2_000) });
-      return res.ok;
+      if (!res.ok) return { ok: false, transcribing: null };
+      return { ok: true, transcribing: transcribingOf(await res.json().catch(() => null)) };
     } catch {
-      return false;
+      return { ok: false, transcribing: null };
     }
   }
 
@@ -132,3 +158,5 @@ export class SttLocalServerService {
     return `gui/${this.uid()}/${VOICE_AGENT_LABEL}`;
   }
 }
+
+const done = (view: SttLocalServerView): SttLocalServerActionView => ({ ...view, needsConfirm: false, warning: null });

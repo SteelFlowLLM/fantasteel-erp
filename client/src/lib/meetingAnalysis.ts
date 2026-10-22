@@ -1,7 +1,7 @@
 // 회의록 AI 분석 화면 계산: 정리 가능 여부, 후보 묶기, 일정 시각 글. 서버가 이미 검증한 값을 보이기만 한다.
 import { PERMISSION } from '@/codes';
 import { canUse, permissionNeedText, type WithPermissions } from '@/lib/permissions';
-import { MEETING_ANALYSIS_MAX_CHARS, MEETING_MINUTES_STATUS, missingFieldsOf, notionSyncOf, type MeetingAnalysis, type MeetingAnalysisProgress, type MeetingAnalysisTrace, type MeetingTraceStage, type MeetingTraceStep, type MeetingCandidate, type MeetingCandidateContextLine, type MeetingCandidateKind, type MeetingMinutesView } from '@fantasteel/shared';
+import { MEETING_ANALYSIS_MAX_CHARS, MEETING_MINUTES_STATUS, missingFieldsOf, notionSyncOf, type MeetingAnalysis, type MeetingAnalysisProgress, type MeetingAnalysisTrace, type MeetingTraceStage, type MeetingTraceStep, type MeetingCandidate, type MeetingCandidateContextLine, type MeetingCandidateKind, type MeetingMinutesView, type MeetingTranscriptionProgress } from '@fantasteel/shared';
 
 export const CANDIDATE_KIND_LABEL: Record<MeetingCandidateKind, string> = {
   TASK: '할 일',
@@ -65,20 +65,20 @@ export function approvalBlocker(c: MeetingCandidate): string | null {
   return missing.length > 0 ? `${missing.join(', ')}을(를) 채워야 허가할 수 있어요` : null;
 }
 
-/** 구매요청 후보를 허가할 작성자 (구매요청 초안의 요청자가 된다) */
+/** 구매요청 후보를 허가할 작성자 (요청자를 따로 정하지 않으면 구매요청 초안의 요청자가 된다) */
 export interface PurchaseApprover extends WithPermissions {
   departmentId: number;
   headDepartmentIds: readonly number[];
 }
 
 /**
- * 구매요청 후보를 이 작성자가 허가할 수 없는 이유 (서버 assertCanRequestFromMeeting과 같은 규칙). 칸을 채워도 풀리지 않아 따로 보인다.
- * 누른 뒤에야 서버가 거절(COM-002·PUR-001)하지 않게 미리 막는다 (#519)
+ * 구매요청 후보를 이 작성자가 허가할 수 없는 이유 (서버 assertPurchaseRequester와 같은 규칙). 칸을 채워도 풀리지 않아 따로 보인다.
+ * 누른 뒤에야 서버가 거절(COM-002·PUR-001)하지 않게 미리 막는다 (#519). 요청자를 따로 정했으면(#530) 서버가 정할 때 그 사원을 이미 확인했다
  */
 export function purchaseApprovalBlocker(c: MeetingCandidate, approver: PurchaseApprover): string | null {
-  if (c.kind !== 'PURCHASE') return null;
-  if (!canUse(approver, PERMISSION.PURCHASE_REQUISITION_CREATE)) return `${permissionNeedText([PERMISSION.PURCHASE_REQUISITION_CREATE])}. 구매요청 후보는 제외하거나 구매 담당자가 확정해 주세요`;
-  if (approver.headDepartmentIds.includes(approver.departmentId)) return '부서장 본인 요청은 승인할 사람이 없어 허가할 수 없어요. 구매요청 후보는 제외하거나 부서원이 확정해 주세요';
+  if (c.kind !== 'PURCHASE' || c.purchaseRequesterId != null) return null;
+  if (!canUse(approver, PERMISSION.PURCHASE_REQUISITION_CREATE)) return `${permissionNeedText([PERMISSION.PURCHASE_REQUISITION_CREATE])}. 수정에서 요청자를 구매요청 권한이 있는 사원(예: 구매 담당 참석자)으로 고르거나 후보를 제외해 주세요`;
+  if (approver.headDepartmentIds.includes(approver.departmentId)) return '부서장 본인 요청은 승인할 사람이 없어 허가할 수 없어요. 수정에서 요청자를 부서원으로 고르거나 후보를 제외해 주세요';
   return null;
 }
 
@@ -119,6 +119,13 @@ export function analysisProgressText(progress: MeetingAnalysisProgress | null | 
   const chunk = progress.total > 1 ? ` (조각 ${progress.current}/${progress.total})` : '';
   if (progress.phase === 'MERGE') return '조각 결과를 합치는 중';
   return progress.phase === 'ANALYSIS' ? `1차 분석 중${chunk}` : `2차 검토 중${chunk}`;
+}
+
+/** 음성 전사 중 진행 안내 (이슈 #522): "화자를 나누는 중" → "받아쓰는 중 3/7". 음성 서버가 진행을 알려 주지 않으면(whisper.cpp·OpenAI) null */
+export function transcriptionProgressText(progress: MeetingTranscriptionProgress | null | undefined): string | null {
+  if (!progress) return null;
+  if (progress.phase === 'DIARIZE') return '화자를 나누는 중';
+  return progress.total > 1 ? `받아쓰는 중 ${progress.current}/${progress.total}` : '받아쓰는 중';
 }
 
 /** 걸린 시간: 1분이 넘으면 "1분 12초", 아니면 "8.4초" */

@@ -56,7 +56,7 @@ export class MrpService {
       });
       if (!rates.some((r) => !r.isFerroalloy)) throw new AppException('MST-001', '용선 1t당 원단위가 없어요');
       const heatTon = setting.heatCapacityTon.mul(remainingHeatCount);
-      const required = planRequirements(heatTon, yieldRate, rates);
+      const required = planRequirements(setting.heatCapacityTon, remainingHeatCount, yieldRate, rates);
       const requiredDate = plan.salesOrderItem ? dateOnly(plan.salesOrderItem.dueDate) : seoulToday(plan.createdAt);
       return [{ plan, remainingHeatCount, heatTon, requiredDate, ...required }];
     });

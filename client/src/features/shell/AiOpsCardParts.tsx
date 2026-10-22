@@ -2,7 +2,7 @@
 
 // 철강맨AI 실행 카드 중 수주 등록·열연 배정·히트 편성·과거 사례 카드의 내용과 편집기 (REQ-AST-005).
 // 업무·일정·구매요청 카드는 회의록 후보 카드와 같은 부품(MeetingAnalysisPanel·CandidateEditor)을 쓴다.
-import { ITEM_TYPE, PAST_CASE_CATEGORY_LABEL, type AiHeatPlanCard, type AiHotRollingCard, type AiPastCaseCard, type AiSalesOrderCard, type AiSalesOrderCardLine } from '@fantasteel/shared';
+import { isOrderableQty, ITEM_TYPE, PAST_CASE_CATEGORY_LABEL, type AiHeatPlanCard, type AiHotRollingCard, type AiPastCaseCard, type AiSalesOrderCard, type AiSalesOrderCardLine } from '@fantasteel/shared';
 import { useMemo, useState } from 'react';
 import { Button } from '@/components/Button';
 import { DateInput } from '@/components/DateInput';
@@ -85,6 +85,7 @@ export function SalesOrderEditor({ card, onCancel, onSave }: { card: AiSalesOrde
               suffix="매"
               inputMode="numeric"
               value={line.orderedQty === null ? '' : String(line.orderedQty)}
+              invalid={line.orderedQty !== null && !isOrderableQty(line.orderedQty)}
               onChange={(e) => setLine(index, { orderedQty: /^\d+$/.test(e.target.value) ? Number(e.target.value) : null })}
             />
           </Field>

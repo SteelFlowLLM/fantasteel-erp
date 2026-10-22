@@ -128,6 +128,8 @@ export interface MeetingMinutesView {
   analysisResult: MeetingAnalysis | null;
   /** AI 정리 중(ANALYZING)일 때만 값이 있다 */
   analysisProgress: MeetingAnalysisProgress | null;
+  /** 음성 전사 중(TRANSCRIBING)이고 음성 서버가 진행을 알려 줄 때만 값이 있다 (이슈 #522) */
+  transcriptionProgress: MeetingTranscriptionProgress | null;
   failureReason: string | null;
   creator: { id: number; name: string };
   attendees: MeetingAttendeeView[];
@@ -158,6 +160,17 @@ export type MeetingAnalysisPhase = 'ANALYSIS' | 'MERGE' | 'REVIEW';
 /** AI 정리 중인 회의록의 진행 상황. 긴 전사는 몇 번째 조각을 보는지 알 수 있다 */
 export interface MeetingAnalysisProgress {
   phase: MeetingAnalysisPhase;
+  /** 1부터 */
+  current: number;
+  total: number;
+}
+
+/** 음성 전사 단계 (이슈 #522): 화자 나누기(회의 전체 한 번) → 받아쓰기(말 없는 곳에서 나눈 조각마다) */
+export type MeetingTranscriptionPhase = 'DIARIZE' | 'TRANSCRIBE';
+
+/** 음성 전사 중인 회의록의 진행 상황. 긴 녹음은 몇 번째 조각을 받아쓰는지 알 수 있다 */
+export interface MeetingTranscriptionProgress {
+  phase: MeetingTranscriptionPhase;
   /** 1부터 */
   current: number;
   total: number;
@@ -201,6 +214,12 @@ export interface MeetingCandidate {
   notionSync?: boolean;
   /** PURCHASE 구매요청 초안 값 */
   purchase: PurchaseRequisitionDraftPayload | null;
+  /**
+   * PURCHASE 초안의 요청자(확정 주체, 이슈 #530). 없으면 회의록 작성자. 작성자에게 구매요청 등록 권한이 없으면(예: 영업) 구매 담당 사원을 골라 넘긴다.
+   * 확정하면 이 사원이 요청자인 구매요청 초안이 만들어지고, 이 사원이 초안을 확인해 구매요청으로 확정한다
+   */
+  purchaseRequesterId?: number | null;
+  purchaseRequesterName?: string | null;
   /** 말한 품목 이름 그대로 */
   itemName: string | null;
   relatedSalesOrderNo: string | null;
@@ -293,6 +312,8 @@ export interface MeetingCandidateUpdateInput {
   attendeeIds?: number[];
   /** EVENT를 Notion에도 넣을지 */
   notionSync?: boolean;
+  /** PURCHASE 초안의 요청자 (구매요청 등록 권한이 있는 사원). null이면 작성자로 되돌린다 */
+  purchaseRequesterId?: number | null;
   purchase?: {
     itemId?: number;
     requestedTon?: string;

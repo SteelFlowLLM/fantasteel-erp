@@ -14,10 +14,12 @@ import {
 } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
 import { PrismaService } from '../../prisma/prisma.service';
-import type { Prisma } from '../../generated/prisma/client';
+import type { IntegrationFault, Prisma } from '../../generated/prisma/client';
 import type { UpdateIntegrationSettingsDto, UpdateNotionCalendarDto, OAuthCallbackQuery } from './dto/integration.dto';
 import { IntegrationConnectionRepository, type IntegrationConnectionRow } from './integration-connection.repository';
 import { IntegrationCrypto } from './integration-crypto';
+import { healthOf } from './integration-fault.rules';
+import { IntegrationFaultService } from './integration-fault.service';
 import { isProviderKey, mcpServerUrlOf, providerPreset, providerPresets, type IntegrationProviderPreset } from './integration-providers';
 import { readSettings } from './integration-settings';
 import { IntegrationTokenStore } from './integration-token.store';
@@ -59,20 +61,24 @@ function toView(
   oauthClient: IntegrationOAuthClientView | null,
   serviceAccount: ServiceAccountView | null,
   notionWorkspace: NotionWorkspaceView | null,
+  faults: readonly IntegrationFault[],
 ): IntegrationConnectionView {
   const settings = readSettings(row?.settings ?? null);
   const folder = preset.key === INTEGRATION_PROVIDER.GOOGLE_DRIVE ? effectiveDriveFolder(settings.folderId) : null;
+  const status: IntegrationConnectionStatus = serviceAccount ? (serviceAccount.email ? 'CONNECTED' : 'NOT_CONNECTED') : statusOf(row);
+  // .env를 잘못 넣은 것이 지난 호출의 실패보다 먼저 고칠 일이다
+  const configError = serviceAccount?.error ?? folder?.error ?? null;
+  const lastError = configError ?? row?.lastError ?? null;
   return {
     providerKey: preset.key,
     displayName: preset.displayName,
     protocol: preset.protocol,
     serverUrl: preset.serverUrl,
     // 서비스 계정은 로그인한 사람이 없다: 키를 읽을 수 있으면 연결됨
-    status: serviceAccount ? (serviceAccount.email ? 'CONNECTED' : 'NOT_CONNECTED') : statusOf(row),
+    status,
     connectedAt: serviceAccount ? null : (row?.connectedAt?.toISOString() ?? null),
     connectedBy: !serviceAccount && row?.connectedBy ? { id: row.connectedBy.id, name: row.connectedBy.employeeName } : null,
-    // .env를 잘못 넣은 것이 지난 호출의 실패보다 먼저 고칠 일이다
-    lastError: serviceAccount?.error ?? folder?.error ?? row?.lastError ?? null,
+    lastError,
     settings: settingsView(preset, settings),
     // 관리자가 OAuth 클라이언트에 등록할 주소. MCP는 동적 등록이 알아서 넣는다
     redirectUri: preset.protocol === 'OAUTH2' ? oauthCallbackUrl() : null,
@@ -81,6 +87,15 @@ function toView(
     serviceAccountEmail: serviceAccount?.email ?? null,
     driveFolderFromEnv: folder?.fromEnv ?? false,
     notionWorkspace,
+    health: healthOf({
+      status,
+      lastError,
+      lastErrorAt: configError ? null : (row?.lastErrorAt ?? null),
+      configError,
+      faults,
+      syncFailedCount: notionWorkspace?.failedCount ?? 0,
+      setupWarning: notionWorkspace?.setupWarning ?? null,
+    }),
   };
 }
 
@@ -118,6 +133,7 @@ export class IntegrationService {
     private readonly driveService: GoogleDriveService,
     private readonly serviceAccount: GoogleServiceAccount,
     private readonly notionWorkspace: NotionWorkspaceService,
+    private readonly faults: IntegrationFaultService,
   ) {}
 
   /**
@@ -135,10 +151,10 @@ export class IntegrationService {
     }
   }
 
-  private async view(preset: IntegrationProviderPreset, row: IntegrationConnectionRow | null): Promise<IntegrationConnectionView> {
+  private async view(preset: IntegrationProviderPreset, row: IntegrationConnectionRow | null, faults: readonly IntegrationFault[]): Promise<IntegrationConnectionView> {
     const serviceAccount = this.usesServiceAccount(preset) ? { email: this.serviceAccount.email(), error: this.serviceAccount.configError() } : null;
     const workspace = preset.key === INTEGRATION_PROVIDER.NOTION ? await this.notionWorkspace.view(readSettings(row?.settings ?? null)) : null;
-    return toView(preset, row, this.oauthClientView(preset, row), serviceAccount, workspace);
+    return toView(preset, row, this.oauthClientView(preset, row), serviceAccount, workspace, faults);
   }
 
   /** Google Drive이고 .env에 서비스 계정 키가 있으면 OAuth 연결 대신 그것을 쓴다 */
@@ -154,12 +170,19 @@ export class IntegrationService {
   /** 연결할 수 있는 대상 전부. 아직 행이 없으면 연결하지 않은 상태로 보인다 */
   async list(): Promise<IntegrationConnectionView[]> {
     const rows = new Map((await this.repository.findAll(this.prisma)).map((row) => [row.providerKey, row]));
-    return Promise.all(Object.values(providerPresets()).map((preset) => this.view(preset, rows.get(preset.key) ?? null)));
+    const faults = await this.faults.list();
+    return Promise.all(Object.values(providerPresets()).map((preset) => this.view(preset, rows.get(preset.key) ?? null, faults.filter((fault) => fault.providerKey === preset.key))));
   }
 
   async get(providerKey: string): Promise<IntegrationConnectionView> {
     const preset = providerPreset(providerKey);
-    return this.view(preset, await this.repository.findByProviderKey(this.prisma, preset.key));
+    return this.viewOf(preset, await this.repository.findByProviderKey(this.prisma, preset.key));
+  }
+
+  /** 연결 한 줄의 화면 모양 (그 연결 대상의 해결되지 않은 장애를 읽어 붙인다) */
+  private async viewOf(preset: IntegrationProviderPreset, row: IntegrationConnectionRow | null): Promise<IntegrationConnectionView> {
+    const faults = (await this.faults.list()).filter((fault) => fault.providerKey === preset.key);
+    return this.view(preset, row, faults);
   }
 
   async updateSettings(providerKey: string, dto: UpdateIntegrationSettingsDto): Promise<IntegrationConnectionView> {
@@ -179,7 +202,7 @@ export class IntegrationService {
     if (dto.parentPage !== undefined) next.parentPageId = pageId;
     if (dto.folder !== undefined) next.folderId = folderId;
     if (dto.clientId !== undefined || dto.clientSecret !== undefined) await this.drive.updateClient({ clientId: dto.clientId, clientSecret: dto.clientSecret });
-    return this.view(preset, await this.repository.update(this.prisma, preset.key, { settings: next as Prisma.InputJsonObject }));
+    return this.viewOf(preset, await this.repository.update(this.prisma, preset.key, { settings: next as Prisma.InputJsonObject }));
   }
 
   /**
@@ -200,6 +223,7 @@ export class IntegrationService {
       oauthStateExpiresAt: new Date(Date.now() + OAUTH_STATE_TTL_MS),
       connectedById: user.employeeId,
       lastError: null,
+      lastErrorAt: null,
     });
     try {
       const url = await this.store.exclusive(preset.key, async () =>
@@ -207,7 +231,7 @@ export class IntegrationService {
       );
       return { authorizationUrl: url };
     } catch (error) {
-      await this.repository.update(this.prisma, preset.key, { oauthState: null, oauthStateExpiresAt: null, lastError: messageOf(error).slice(0, 500) });
+      await this.repository.update(this.prisma, preset.key, { oauthState: null, oauthStateExpiresAt: null, lastError: messageOf(error).slice(0, 500), lastErrorAt: new Date() });
       throw error;
     }
   }
@@ -244,12 +268,14 @@ export class IntegrationService {
       await this.store.exclusive(providerKey, async () => {
         if (preset.protocol === 'MCP') await this.mcp.finishAuthorization(providerKey, code);
         else await this.drive.finishAuthorization(code);
-        await this.repository.update(this.prisma, providerKey, { connectedAt: new Date(), lastError: null });
+        await this.repository.update(this.prisma, providerKey, { connectedAt: new Date(), lastError: null, lastErrorAt: null });
       });
     } catch (error) {
       if (!(error instanceof AppException)) this.logger.error(`${providerKey} 콜백 처리 실패`, error instanceof Error ? error.stack : undefined);
       return fail(messageOf(error));
     }
+    // 다시 연결했다: 다시 연결이 필요했던 장애 같은 연결 장애가 풀렸다고 알린다 (이슈 #518)
+    await this.faults.resolveConnection(providerKey);
     return clientReturnUrl(providerKey, 'connected');
   }
 
@@ -274,9 +300,12 @@ export class IntegrationService {
         connectedAt: null,
         connectedById: null,
         lastError: null,
+        lastErrorAt: null,
       });
     });
-    return this.view(preset, row);
+    // 일부러 끊은 것이라 장애를 알림 없이 지운다 (이슈 #518)
+    await this.faults.clear(preset.key);
+    return this.viewOf(preset, row);
   }
 
   /**

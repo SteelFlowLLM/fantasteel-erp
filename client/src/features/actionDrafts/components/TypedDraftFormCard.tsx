@@ -4,6 +4,7 @@
 // 확정 주체는 초안을 만든 사원이고 그 유형의 사용 권한이 있어야 고치고 확정·반려한다. AI가 채운 칸도 사람이 확인하고 확정한다.
 // 서버가 준 미확정 칸(unresolvedFields)을 칸 옆에 '미확정'으로 보인다. 칸 검증·실행은 서버가 한다.
 import { useState, type ReactNode } from 'react';
+import { MAX_ORDERED_QTY } from '@fantasteel/shared';
 import { DRAFT_STATUS_LABEL, SALES_ORDER_ITEM_STATUS, SHIPMENT_REQUEST_STATUS } from '@/codes';
 import { actionDraftApi, type DraftConfirmResult, type DraftDetailView } from '@/api/actionDrafts';
 import { ApiError, InputError } from '@/api/errors';
@@ -41,6 +42,7 @@ import { useCanUse } from '@/hooks/usePermission';
 import { useSalesOrderDetail, useSalesOrderList } from '@/hooks/useSalesOrders';
 import { useShipmentRequestDetail, useShipmentRequestList, useShippableItems } from '@/hooks/useShipmentRequests';
 import { cn } from '@/lib/cn';
+import { createSubmitLock } from '@/lib/submitLock';
 import { fmtMDHM } from '@/lib/format';
 import { withEulReul } from '@/lib/josa';
 import { toast } from '@/stores/useToastStore';
@@ -114,9 +116,19 @@ export function TypedDraftFormCard({ draft, actionType, failure, onConfirmFailur
     },
   });
   const pending = update.isPending || confirm.isPending || execute.isPending || reject.isPending;
+  // 확정·다시 실행·반려를 렌더를 기다리지 않고 잠근다: 더블클릭한 두 번째 요청을 보내지 않는다 (#531)
+  const [lock] = useState(createSubmitLock);
+  const once = (run: () => Promise<unknown>) => () => {
+    if (!lock.tryEnter()) return;
+    void run()
+      .catch(() => {
+        // 안내는 useAction(토스트)과 onError가 한다
+      })
+      .finally(() => lock.release());
+  };
 
   const save = () => update.mutate({ actionDraftId: draft.id, fields: buildTypedPatch(form), expectedUpdatedAt: draft.updatedAt });
-  const doConfirm = async () => {
+  const doConfirm = once(async () => {
     onConfirmFailure(null);
     try {
       let expectedUpdatedAt = draft.updatedAt;
@@ -125,7 +137,7 @@ export function TypedDraftFormCard({ draft, actionType, failure, onConfirmFailur
     } catch {
       // 안내는 useAction(토스트)과 onError(위 배너)가 한다
     }
-  };
+  });
 
   const ctx: FieldContext = {
     draft,
@@ -171,7 +183,7 @@ export function TypedDraftFormCard({ draft, actionType, failure, onConfirmFailur
             <Button
               variant="danger-outline"
               disabled={rejectReason.trim() === '' || pending}
-              onClick={() => reject.mutate({ actionDraftId: draft.id, rejectReason: rejectReason.trim(), expectedUpdatedAt: draft.updatedAt })}
+              onClick={once(() => reject.mutateAsync({ actionDraftId: draft.id, rejectReason: rejectReason.trim(), expectedUpdatedAt: draft.updatedAt }))}
             >
               반려 확정
             </Button>
@@ -185,7 +197,7 @@ export function TypedDraftFormCard({ draft, actionType, failure, onConfirmFailur
             <Button icon="check" className="ml-auto" disabled={!dirty || pending} onClick={save}>
               저장
             </Button>
-            <Button variant="primary" icon="send" disabled={pending} onClick={() => void doConfirm()}>
+            <Button variant="primary" icon="send" disabled={pending} onClick={doConfirm}>
               {guide?.confirmLabel ?? '확정'}
             </Button>
           </>
@@ -196,7 +208,7 @@ export function TypedDraftFormCard({ draft, actionType, failure, onConfirmFailur
               반려
             </Button>
             <span className="text-cap text-ink-3">확정된 값은 바꿀 수 없어요</span>
-            <Button variant="primary" icon="refresh" className="ml-auto" disabled={pending} onClick={() => execute.mutate({ actionDraftId: draft.id })}>
+            <Button variant="primary" icon="refresh" className="ml-auto" disabled={pending} onClick={once(() => execute.mutateAsync({ actionDraftId: draft.id }))}>
               {typeLabel} 다시 실행
             </Button>
           </>
@@ -358,7 +370,7 @@ function SalesOrderFields({ ctx, form, onChange }: { ctx: FieldContext; form: Sa
       <span className="flex items-center text-sm font-semibold">
         품목
         <UnresolvedMark show={isUnresolved('품목', form.items.length !== saved.items.length)} />
-        <span className="ml-2 text-cap font-normal text-ink-3">매수는 1 이상 정수 · 톤은 매수 × 이론중량으로 계산해요</span>
+        <span className="ml-2 text-cap font-normal text-ink-3">매수는 1~{MAX_ORDERED_QTY.toLocaleString('en-US')} 정수 · 톤은 매수 × 이론중량으로 계산해요</span>
       </span>
       <LineTable
         headers={['규격', '매수', '납기']}

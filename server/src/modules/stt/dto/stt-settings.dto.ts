@@ -64,6 +64,13 @@ export class UpdateSteelmanWakeSettingsDto {
   voiceApproval!: boolean;
 }
 
+/** POST stt/local-server/start·stop 본문 (이슈 #522). 받아쓰는 중인 녹음이 있어도 하려면 true */
+export class LocalServerActionDto {
+  @IsOptional()
+  @IsBoolean({ message: 'confirmBusy는 true·false 중 하나예요' })
+  confirmBusy?: boolean;
+}
+
 /** POST stt/wake-clip의 multipart 글 칸 (이슈 #494). 보내지 않으면 부르는 말 조각(wake) */
 export class WakeClipDto {
   @IsOptional()

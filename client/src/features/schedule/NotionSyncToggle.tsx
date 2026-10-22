@@ -6,16 +6,6 @@ import { useScheduleNotionStatus } from '@/hooks/useScheduleEvents';
 
 export const NOTION_REMOVAL_HINT = '이미 Notion에 올라간 일정이에요. 저장하면 다음 반영 때 Notion 페이지는 휴지통으로 옮기고 Notion 캘린더 일정은 취소해요';
 
-/**
- * 후보·카드 본문의 'Notion 캘린더' 값. 켜 두었어도 Notion이 준비 전이면 아직 올라가지 않으므로 고르는 칸의 안내와 같은 뜻으로 보인다 (#519)
- */
-export function NotionSyncValue({ on }: { on: boolean }) {
-  const status = useScheduleNotionStatus();
-  if (!on) return <span className="text-ink-3">넣지 않음 (ERP 일정만)</span>;
-  if (status.data && !status.data.ready) return <span title={status.data.reason ?? undefined}>켜 둠 · Notion 준비 전이라 준비되면 올라가요</span>;
-  return <>함께 넣음</>;
-}
-
 /** published: 이미 Notion에 올라간 일정. 이때 끄면 무엇이 일어나는지 알린다 */
 export function NotionSyncToggle({ id, checked, published = false, disabled = false, onChange }: { id: string; checked: boolean; published?: boolean; disabled?: boolean; onChange: (checked: boolean) => void }) {
   const status = useScheduleNotionStatus();

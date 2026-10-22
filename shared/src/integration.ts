@@ -92,6 +92,96 @@ export interface IntegrationSettings {
  */
 export type IntegrationAuthMode = 'OAUTH' | 'SERVICE_ACCOUNT';
 
+/**
+ * 외부 연결 장애 종류 (이슈 #518). 연결 대상마다 해결되기 전까지 종류별로 한 건만 있다. 공통 코드가 아니다.
+ * RECONNECT_REQUIRED: 허용이 만료·취소돼 관리자가 다시 연결해야 한다 (Google Drive 외부+테스트 앱은 7일마다, Notion 토큰 갱신 거절).
+ * CREDENTIAL_ERROR: 서버 설정·키 문제라 서버 관리자가 고쳐야 한다 (서비스 계정 키, OAuth 클라이언트, Drive API 꺼짐).
+ * REQUEST_FAILED: 요청이 계속 실패한다 (일시적일 수 있어 3번 이어질 때 알린다).
+ * SYNC_FAILED: Notion 업무 공간 반영이 계속 실패한다 (같은 기준).
+ */
+export const INTEGRATION_FAULT_KIND = {
+  RECONNECT_REQUIRED: 'RECONNECT_REQUIRED',
+  CREDENTIAL_ERROR: 'CREDENTIAL_ERROR',
+  REQUEST_FAILED: 'REQUEST_FAILED',
+  SYNC_FAILED: 'SYNC_FAILED',
+} as const;
+export type IntegrationFaultKind = (typeof INTEGRATION_FAULT_KIND)[keyof typeof INTEGRATION_FAULT_KIND];
+export const INTEGRATION_FAULT_KIND_LABEL: Record<IntegrationFaultKind, string> = {
+  RECONNECT_REQUIRED: '연결 만료',
+  CREDENTIAL_ERROR: '키·설정 오류',
+  REQUEST_FAILED: '요청 실패',
+  SYNC_FAILED: '반영 실패',
+};
+
+/** 해결되지 않은 연결 장애 한 건 (알림 여부 포함) */
+export interface IntegrationFaultView {
+  faultKind: IntegrationFaultKind;
+  /** 마지막 실패 이유 */
+  message: string;
+  /** 해결되기 전까지 이어진 실패 횟수 */
+  failureCount: number;
+  firstFailedAt: string;
+  lastFailedAt: string;
+  /** 관리자에게 장애 알림을 마지막으로 보낸 시각. 아직 알리지 않았으면 null */
+  notifiedAt: string | null;
+}
+
+/** 연결 상태 신호등: 정상 · 주의(일시 실패·반영 실패) · 끊김(다시 연결하거나 서버 설정을 고쳐야 함) */
+export type IntegrationHealthLevel = 'NORMAL' | 'WARNING' | 'DOWN';
+
+/** 연결 상태와 마지막 오류. 연결한 적 없고 문제도 없으면 level은 NORMAL이다 (화면은 연결 안 됨으로 보인다) */
+export interface IntegrationHealthView {
+  level: IntegrationHealthLevel;
+  /** last_error를 남긴 시각. 오류가 없으면 null */
+  lastErrorAt: string | null;
+  faults: IntegrationFaultView[];
+}
+
+/** Notion 반영에 실패한 행의 종류 = ERP 표 이름 (notion_sync_failure.target_type) */
+export const NOTION_SYNC_TARGET = {
+  SCHEDULE_EVENT: 'schedule_event',
+  MEETING_MINUTES: 'meeting_minutes',
+  TASK: 'task',
+} as const;
+export type NotionSyncTargetType = (typeof NOTION_SYNC_TARGET)[keyof typeof NOTION_SYNC_TARGET];
+export const NOTION_SYNC_TARGET_LABEL: Record<NotionSyncTargetType, string> = {
+  schedule_event: '일정',
+  meeting_minutes: '회의록',
+  task: '할 일',
+};
+
+/** GET integrations/notion/sync-failures 한 줄: 반영에 실패해 남아 있는 행 */
+export interface NotionSyncFailureView {
+  id: number;
+  targetType: NotionSyncTargetType;
+  targetId: number;
+  /** 그 행의 제목 (일정·회의록·할 일 제목). 행이 지워졌으면 목록에서 치운다 */
+  title: string;
+  failureCount: number;
+  lastError: string;
+  /** Notion에 만들어졌는지 알 수 없는 실패: 다시 시도하면 같은 페이지가 둘 생길 수 있어 Notion을 먼저 확인해야 한다 */
+  isResultUnknown: boolean;
+  /** 자동 반영이 이 시각 전에는 건너뛴다. 지났으면 다음 반영(1분 안)에 다시 한다 */
+  retryAfter: string;
+  firstFailedAt: string;
+  lastFailedAt: string;
+}
+
+/** POST integrations/notion/sync-failures/retry·…/:id/retry 결과: 다시 시도한 건수와 아직 남은 목록 */
+export interface NotionSyncRetryResult {
+  /** 다시 시도하려고 한 건수 */
+  requested: number;
+  succeeded: number;
+  failed: number;
+  /**
+   * 전체 다시 시도가 건너뛴 '결과 모름' 건수. 만들어졌는지 모르는 건을 경고 없이 다시 만들면 Notion 페이지가 중복될 수 있어
+   * 전체 다시 시도는 이 건들을 빼고, 사람이 Notion을 확인한 뒤 한 건씩 다시 시도해야 한다. 한 건 다시 시도에서는 늘 0
+   */
+  skipped: number;
+  /** 지금 남은 실패 목록 전체 */
+  failures: NotionSyncFailureView[];
+}
+
 /** 관리 화면에 보이는 Notion 업무 공간 상태 (이슈 #391). ERP → Notion 한 방향으로만 반영한다 */
 export interface NotionWorkspaceView {
   /** 세 데이터베이스를 모두 만들었는지. 만든 뒤부터 자동 반영한다 */
@@ -100,7 +190,7 @@ export interface NotionWorkspaceView {
   databases: { key: NotionWorkspaceDatabaseKey; title: string; url: string | null }[];
   /** 마지막으로 반영을 끝낸 시각 (서버를 다시 띄우면 비어 있다) */
   lastSyncedAt: string | null;
-  /** 반영에 실패해 잠시 뒤 다시 할 행 수 */
+  /** 반영에 실패해 DB 목록(notion_sync_failure)에 남은 행 수. 서버를 다시 띄워도 남는다 */
   failedCount: number;
   /** 반영을 기다리는 행 수 (실패한 행 포함) */
   pendingCount: number;
@@ -143,6 +233,8 @@ export interface IntegrationConnectionView {
   driveFolderFromEnv: boolean;
   /** Notion: 업무 공간 상태. 만든 적이 없거나 Notion이 아니면 null */
   notionWorkspace: NotionWorkspaceView | null;
+  /** 연결 상태(정상·주의·끊김)와 마지막 오류 시각, 해결되지 않은 장애 (이슈 #518) */
+  health: IntegrationHealthView;
 }
 
 /** PUT integrations/:providerKey/settings */

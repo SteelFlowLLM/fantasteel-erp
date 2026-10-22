@@ -111,7 +111,7 @@ function SteelGradeModal({ onClose, editing }: { onClose: () => void; editing?: 
   const [name, setName] = useState(editing?.steelGradeName ?? '');
   const [standardNo, setStandardNo] = useState(editing?.standardNo ?? '');
   const create = useAction(masterDataApi.createSteelGrade, { onSuccess: onClose, onError: fieldErrors.takeFrom, success: '강종을 추가했어요' });
-  const update = useAction(masterDataApi.updateSteelGrade, { onSuccess: onClose, onError: fieldErrors.takeFrom, success: '강종을 고쳤어요' });
+  const update = useAction(masterDataApi.updateSteelGrade, { onSuccess: onClose, onError: fieldErrors.takeFrom, refreshOnStale: true, onStale: onClose, success: '강종을 고쳤어요' });
   const pending = create.isPending || update.isPending;
   // 서버가 내려 준 쓰는 곳(품목·배합 원단위·검사 기준·LOT)이 하나라도 있으면 서버와 같은 기준으로 코드를 잠근다
   const lockedBy = editing?.codeLockedBy ?? [];

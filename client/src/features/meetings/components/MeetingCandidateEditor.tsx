@@ -28,10 +28,12 @@ interface Draft {
   itemId: string;
   requestedTon: string;
   desiredReceiptDate: string;
+  /** 구매요청 초안의 요청자 (회의록 후보만, 이슈 #530). ''이면 작성자 */
+  requesterId: string;
 }
 
 /** 고칠 수 있는 칸. 회의록 후보와 AI 어시스턴트 실행 카드가 같이 쓴다 */
-export type EditableCandidate = Pick<MeetingCandidate, 'key' | 'kind' | 'title' | 'description' | 'assigneeId' | 'dueDate' | 'startAt' | 'endAt' | 'attendeeIds' | 'notionSync' | 'purchase'>;
+export type EditableCandidate = Pick<MeetingCandidate, 'key' | 'kind' | 'title' | 'description' | 'assigneeId' | 'dueDate' | 'startAt' | 'endAt' | 'attendeeIds' | 'notionSync' | 'purchase' | 'purchaseRequesterId'>;
 
 const draftOf = (c: EditableCandidate): Draft => ({
   title: c.title,
@@ -45,6 +47,7 @@ const draftOf = (c: EditableCandidate): Draft => ({
   itemId: c.purchase?.itemId == null ? '' : String(c.purchase.itemId),
   requestedTon: c.purchase?.requestedTon ?? '',
   desiredReceiptDate: c.purchase?.desiredReceiptDate ?? '',
+  requesterId: c.purchaseRequesterId == null ? '' : String(c.purchaseRequesterId),
 });
 
 /** 처음 값과 다른 칸만 모은다. 비어 있는 칸은 "아직 정하지 않음"이라 보내지 않는다 */
@@ -68,6 +71,7 @@ export function changesOf(c: EditableCandidate, next: Draft): MeetingCandidateUp
     if (next.requestedTon.trim() !== '' && next.requestedTon.trim() !== before.requestedTon) purchase.requestedTon = next.requestedTon.trim();
     if (next.desiredReceiptDate !== '' && next.desiredReceiptDate !== before.desiredReceiptDate) purchase.desiredReceiptDate = next.desiredReceiptDate;
     if (Object.keys(purchase).length > 0) input.purchase = purchase;
+    if (next.requesterId !== before.requesterId) input.purchaseRequesterId = next.requesterId === '' ? null : Number(next.requesterId);
   }
   return input;
 }
@@ -77,6 +81,7 @@ export function CandidateEditor({
   myId,
   pending,
   assigneeHint = '회의 참석자가 아니어도 고를 수 있어요',
+  requesterPicker = false,
   onCancel,
   onSave,
 }: {
@@ -84,6 +89,8 @@ export function CandidateEditor({
   myId: number;
   pending: boolean;
   assigneeHint?: string;
+  /** 구매요청 후보의 요청자를 고른다 (회의록 후보만. 실행 카드는 실행한 사람이 요청자) */
+  requesterPicker?: boolean;
   onCancel: () => void;
   onSave: (input: MeetingCandidateUpdateInput) => void;
 }) {
@@ -164,6 +171,24 @@ export function CandidateEditor({
           <Field label="희망 입고일" htmlFor={`cand-${candidate.key}-receipt`}>
             <DateInput id={`cand-${candidate.key}-receipt`} value={draft.desiredReceiptDate} onChange={(value) => set('desiredReceiptDate', value)} />
           </Field>
+          {requesterPicker ? (
+            <Field label="요청자" htmlFor={`cand-${candidate.key}-requester`} hint="구매요청 권한이 있는 사원이 초안을 확인해 구매요청으로 확정해요. 비우면 작성자" className="sm:col-span-3">
+              <Select id={`cand-${candidate.key}-requester`} value={draft.requesterId} onChange={(e) => set('requesterId', e.target.value)}>
+                <option value="">작성자(나)</option>
+                {groups.map((group) => (
+                  <optgroup key={group.departmentName} label={group.departmentName}>
+                    {group.members
+                      .filter((member) => member.id !== myId)
+                      .map((member) => (
+                        <option key={member.id} value={member.id}>
+                          {member.employeeName} {member.jobGradeName}
+                        </option>
+                      ))}
+                  </optgroup>
+                ))}
+              </Select>
+            </Field>
+          ) : null}
         </div>
       ) : null}
       <div className="flex justify-end gap-1.5">

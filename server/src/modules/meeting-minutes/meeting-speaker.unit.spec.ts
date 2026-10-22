@@ -3,7 +3,7 @@ import type { TranscriptSegment } from '@fantasteel/shared';
 import { buildAnalysisUserMessage, segmentPromptText } from './meeting-analysis.prompt';
 import { isMeetingAudio } from './meeting-audio';
 import { readSegments, summarizeSpeakers } from './meeting-minutes.json';
-import { buildSpeakerUserMessage, pickSpeakerSuggestions, SUGGEST_TRANSCRIPT_MAX } from './meeting-speaker-suggest';
+import { buildSpeakerUserMessage, pickSpeakerSuggestions, speakerTranscriptChars, SUGGEST_TRANSCRIPT_MAX } from './meeting-speaker-suggest';
 
 describe('readSegments (화자 칸)', () => {
   it('speaker가 문자열이면 화자 칸을 모두 읽고, 없으면 칸 자체를 만들지 않는다', () => {
@@ -113,6 +113,34 @@ describe('AI 화자 추정 (이슈 #406)', () => {
     const transcript = text.slice(text.indexOf('<transcript>'));
     expect(transcript.length).toBeLessThan(SUGGEST_TRANSCRIPT_MAX + 100);
     expect(transcript).not.toContain('[2000]');
+  });
+
+  it('전사가 넘치면 앞부분 뒤에 회의 중간에 처음 말한 화자의 첫 발언도 넣고 번호는 그대로 둔다 (이슈 #522)', () => {
+    const segments: TranscriptSegment[] = Array.from({ length: 2000 }, (_, i) => ({ start: i, end: i + 1, text: `${'가'.repeat(50)} ${i + 1}`, speaker: 'SPEAKER_1' }));
+    segments[1500] = { start: 1500, end: 1501, text: '늦게 온 구매부 정다은입니다', speaker: 'SPEAKER_2' };
+    segments[1700] = { start: 1700, end: 1701, text: '두 번째 말', speaker: 'SPEAKER_2' };
+    const text = buildSpeakerUserMessage({ attendees, labels: ['SPEAKER_1', 'SPEAKER_2'], segments }, 10_000);
+    const transcript = text.slice(text.indexOf('<transcript>'));
+    expect(transcript.length).toBeLessThan(10_000 + 100);
+    expect(transcript).toContain('[1] 화자1: ');
+    expect(transcript).toContain('[1501] 화자2: 늦게 온 구매부 정다은입니다');
+    expect(transcript).toContain('[1701] 화자2: 두 번째 말');
+    expect(text).toContain('화자마다 처음 발언 몇 개만 보여요');
+    // 원래 순서대로
+    expect(transcript.indexOf('[1501]')).toBeLessThan(transcript.indexOf('[1701]'));
+  });
+
+  it('다 들어가면 전부 넣고 빠졌다는 안내가 없다', () => {
+    const segments: TranscriptSegment[] = [{ start: 0, end: 1, text: '안녕하세요', speaker: 'SPEAKER_1' }];
+    const text = buildSpeakerUserMessage({ attendees, labels: ['SPEAKER_1'], segments });
+    expect(text).toContain('[1] 화자1: 안녕하세요');
+    expect(text).not.toContain('처음 발언 몇 개만');
+  });
+
+  it('전사 글자 수는 모델 문맥 길이의 절반(1자=1토큰)이고, 모르면 2.4만 자, 2분 안에 답하게 8만 자까지 (이슈 #522)', () => {
+    expect(speakerTranscriptChars(null)).toBe(SUGGEST_TRANSCRIPT_MAX);
+    expect(speakerTranscriptChars(32_768)).toBe(16_384);
+    expect(speakerTranscriptChars(262_144)).toBe(80_000);
   });
 
   it('번호를 사원 id로 바꾸고, 답에서 빠진 화자는 모름으로 채운다', () => {

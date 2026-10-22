@@ -48,4 +48,35 @@ describe('심층 조사 api (api/aiResearch.ts)', () => {
     expect(calls[0].body).toEqual({ instruction: '3장 보강', search: false });
     expect((await aiResearchApi.getVersion(3, 2)).report).toBe('# 2판');
   });
+
+  it('반복 걸기는 규칙을 PUT, 끄기는 DELETE, 목록은 GET (이슈 #521)', async () => {
+    const schedule = { id: 1, runId: 3, title: '제목', frequency: 'DAILY', weekdays: [], time: '09:00', enabled: true, nextRunAt: '2026-10-23T00:00:00.000Z', lastRunAt: null, lastRunId: null, lastSkipReason: null };
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.admin, (c) => {
+      if (c.method === 'PUT' && c.path === '/ai-research/runs/3/schedule') return ok(schedule);
+      if (c.method === 'DELETE' && c.path === '/ai-research/runs/3/schedule') return ok({ ...schedule, enabled: false, nextRunAt: null });
+      if (c.method === 'GET' && c.path === '/ai-research/schedules') return ok([schedule]);
+      return undefined;
+    });
+    expect((await aiResearchApi.setSchedule(3, { frequency: 'DAILY', weekdays: [], time: '09:00' })).nextRunAt).toBe(schedule.nextRunAt);
+    expect(calls[0].body).toEqual({ frequency: 'DAILY', weekdays: [], time: '09:00' });
+    expect((await aiResearchApi.disableSchedule(3)).enabled).toBe(false);
+    expect(await aiResearchApi.schedules()).toHaveLength(1);
+    expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual(['PUT /ai-research/runs/3/schedule', 'DELETE /ai-research/runs/3/schedule', 'GET /ai-research/schedules']);
+  });
+
+  it('Notion 내보내기는 고른 판을 본문으로, PDF는 판을 쿼리로 보낸다 (이슈 #521)', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.admin, (c) => {
+      if (c.method === 'POST' && c.path === '/ai-research/runs/3/notion-export') return ok({ notionPageUrl: 'https://www.notion.so/x', run: view({ status: 'COMPLETED' }) });
+      if (c.method === 'GET' && c.path === '/ai-research/runs/3/pdf') return new Response(new Uint8Array([37, 80, 68, 70]), { status: 200, headers: { 'content-type': 'application/pdf' } });
+      return undefined;
+    });
+    await aiResearchApi.exportToNotion(3, 2);
+    await aiResearchApi.exportToNotion(3);
+    expect(calls.map((c) => c.body)).toEqual([{ version: 2 }, {}]);
+    const blob = await aiResearchApi.pdf(3, 1);
+    expect(blob.size).toBe(4);
+    expect(calls[2].query).toEqual({ version: '1' });
+    await aiResearchApi.pdf(3);
+    expect(calls[3].query).toEqual({});
+  });
 });

@@ -539,3 +539,91 @@ describe('강종 수정·규격 매핑 수정·삭제 (API-280·281·282, 이슈
     expect((await get<SpecMappingView[]>('/spec-mappings')).body.data.some((m) => m.id === mapA.id)).toBe(true);
   });
 });
+
+describe('불러온 시각으로 동시 수정 막기 (고객사·공급업체·야드·품목·라우팅·생산 설정값, 이슈 #498)', () => {
+  const patch = <T>(path: string, payload: unknown) => send<T>('PATCH', path, payload);
+  /** 불러온 시각이 틀리면 COM-001로 막히고 값은 그대로, 맞으면 저장되고 updatedAt이 바뀐다. 시각을 보내지 않으면 기존대로 저장된다 */
+  async function expectGuarded<T extends { updatedAt: string }>(path: string, created: T, change: (expectedUpdatedAt?: string) => unknown, read: () => Promise<T>) {
+    expect(created.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    const stale = new Date(new Date(created.updatedAt).getTime() - 1000).toISOString();
+    expect((await patch(path, change(stale))).body.error?.code).toBe('COM-001');
+    expect((await read()).updatedAt).toBe(created.updatedAt);
+
+    const saved = await patch<T>(path, change(created.updatedAt));
+    expect(saved.status).toBe(200);
+    expect(saved.body.data.updatedAt).not.toBe(created.updatedAt);
+    expect((await read()).updatedAt).toBe(saved.body.data.updatedAt);
+
+    // 이미 바뀐 시각으로 다시 보내면 막힌다 (다른 곳에서 먼저 저장한 경우)
+    expect((await patch(path, change(created.updatedAt))).body.error?.code).toBe('COM-001');
+    // 시각을 보내지 않으면 비교하지 않는다
+    expect((await patch<T>(path, change())).status).toBe(200);
+    expect((await patch(path, change('시각 아님'))).body.error?.code).toBe('COM-004');
+  }
+
+  it('고객사·공급업체·야드', async () => {
+    const customer = (await send<CustomerView>('POST', '/customers', { customerCode: 'CUS-X1', customerName: '동시 고객' })).body.data;
+    let n = 0;
+    await expectGuarded(`/customers/${customer.id}`, customer, (expectedUpdatedAt) => ({ customerName: `동시 고객 ${(n += 1)}`, expectedUpdatedAt }), async () => {
+      const found = (await get<CustomerView[]>('/customers')).body.data.find((c) => c.id === customer.id);
+      if (!found) throw new Error('고객사 없음');
+      return found;
+    });
+
+    const supplier = (await send<SupplierView>('POST', '/suppliers', { supplierCode: 'SUP-X1', supplierName: '동시 공급' })).body.data;
+    await expectGuarded(`/suppliers/${supplier.id}`, supplier, (expectedUpdatedAt) => ({ supplierName: `동시 공급 ${(n += 1)}`, expectedUpdatedAt }), async () => {
+      const found = (await get<SupplierView[]>('/suppliers')).body.data.find((s) => s.id === supplier.id);
+      if (!found) throw new Error('공급업체 없음');
+      return found;
+    });
+
+    const yard = (await send<YardView>('POST', '/yards', { yardCode: 'YD-CL-X1', yardName: '동시 야드', yardType: 'COIL' })).body.data;
+    await expectGuarded(`/yards/${yard.id}`, yard, (expectedUpdatedAt) => ({ yardName: `동시 야드 ${(n += 1)}`, expectedUpdatedAt }), async () => {
+      const found = (await get<YardView[]>('/yards')).body.data.find((y) => y.id === yard.id);
+      if (!found) throw new Error('야드 없음');
+      return found;
+    });
+  });
+
+  it('품목: 원료 수정, 규격은 기본 야드를 바꾸는 갈래와 치수를 고치는 갈래 모두', async () => {
+    const yards = (await get<YardView[]>('/yards')).body.data;
+    const rawYard = yards.find((y) => y.yardType === 'RAW_MATERIAL');
+    const slabYard = yards.find((y) => y.yardType === 'SLAB');
+    const grade = (await get<SteelGradeView[]>('/steel-grades')).body.data.find((g) => g.steelGradeCode === 'SM355C');
+    if (!rawYard || !slabYard || !grade) throw new Error('시드 기준정보 없음');
+    const readItem = (id: number) => async () => {
+      const found = (await get<ItemView[]>('/items')).body.data.find((i) => i.id === id);
+      if (!found) throw new Error('품목 없음');
+      return found;
+    };
+
+    const raw = (await send<ItemView>('POST', '/items', { itemType: 'RAW_MATERIAL', itemCode: 'XCC01', itemName: '동시 원료', rawMaterialType: 'COAL', defaultYardId: rawYard.id })).body.data;
+    let n = 0;
+    await expectGuarded(`/items/${raw.id}`, raw, (expectedUpdatedAt) => ({ itemName: `동시 원료 ${(n += 1)}`, expectedUpdatedAt }), readItem(raw.id));
+
+    const spec = (await send<ItemView>('POST', '/items', { itemType: 'SLAB', steelGradeId: grade.id, thicknessMm: '251', widthMm: '1201', lengthMm: '10001', defaultYardId: slabYard.id })).body.data;
+    // 치수를 고치는 갈래(안 쓰인 규격)
+    await expectGuarded(`/items/${spec.id}`, spec, (expectedUpdatedAt) => ({ thicknessMm: `${252 + (n += 1)}`, expectedUpdatedAt }), readItem(spec.id));
+    // 기본 야드만 바꾸는 갈래(치수는 그대로)
+    const current = await readItem(spec.id)();
+    const stale = new Date(new Date(current.updatedAt).getTime() - 1000).toISOString();
+    expect((await patch(`/items/${spec.id}`, { defaultYardId: slabYard.id, expectedUpdatedAt: stale })).body.error?.code).toBe('COM-001');
+    expect((await patch(`/items/${spec.id}`, { defaultYardId: slabYard.id, expectedUpdatedAt: current.updatedAt })).status).toBe(200);
+  });
+
+  it('라우팅·생산 설정값', async () => {
+    const routing = (await get<RoutingView[]>('/routings')).body.data.find((r) => r.itemType === 'COIL' && r.processType === 'STEELMAKING');
+    if (!routing) throw new Error('라우팅 없음');
+    expect(routing.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    let n = 0;
+    await expectGuarded(`/routings/${routing.id}`, routing, (expectedUpdatedAt) => ({ plannedYieldRate: `0.9${(n += 1)}`, expectedUpdatedAt }), async () => {
+      const found = (await get<RoutingView[]>('/routings')).body.data.find((r) => r.id === routing.id);
+      if (!found) throw new Error('라우팅 없음');
+      return found;
+    });
+
+    const setting = (await get<ProductionSettingView>('/production-settings')).body.data;
+    await expectGuarded('/production-settings', setting, (expectedUpdatedAt) => ({ deliveryRiskDays: 3 + (n += 1), expectedUpdatedAt }), async () => (await get<ProductionSettingView>('/production-settings')).body.data);
+    await patch('/production-settings', { heatCapacityTon: '250', deliveryRiskDays: 3 });
+  });
+});

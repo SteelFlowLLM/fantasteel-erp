@@ -1,16 +1,21 @@
 import { Injectable, Logger, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
-import { MEETING_MINUTES_STATUS } from '@fantasteel/shared';
+import { MEETING_MINUTES_STATUS, type MeetingTranscriptionProgress } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
 import { PrismaService } from '../../prisma/prisma.service';
-import type { Prisma } from '../../generated/prisma/client';
-import { SttClient, SttRequestError } from '../stt/stt.client';
+import { Prisma } from '../../generated/prisma/client';
+import { SttClient, SttRequestError, type SttProgress } from '../stt/stt.client';
 import { SttSettingsStore } from '../stt/stt-settings.store';
 import { MeetingJobLease } from './meeting-job.lease';
 import { MeetingMinutesRepository } from './meeting-minutes.repository';
+import { buildSttPrompt } from './meeting-stt-prompt';
 
 export const TRANSCRIPTION_INTERRUPTED_REASON = '전사하던 서버가 멈춰 전사가 중단됐어요. 음성을 다시 올려 주세요';
 const TRANSCRIPTION_ERROR_REASON = '전사 중 오류가 났어요';
 const AUDIO_LOAD_ERROR_REASON = 'Drive에서 녹음을 받지 못했어요';
+/** 받아쓴 글이 없으면 빈 회의록으로 두지 않고 실패로 끝낸다 (이슈 #522) */
+export const NO_SPEECH_REASON = '말소리를 찾지 못했어요. 녹음에 목소리가 담겼는지 확인하고 다시 올려 주세요';
+
+const PHASE_OF: Record<SttProgress['stage'], MeetingTranscriptionProgress['phase']> = { diarize: 'DIARIZE', transcribe: 'TRANSCRIBE' };
 
 export interface TranscriptionJob {
   meetingMinutesId: number;
@@ -23,7 +28,7 @@ export interface TranscriptionJob {
   loadAudio?: () => Promise<Buffer>;
   fileName: string;
   mimeType: string;
-  /** 참석자 수. 화자 분리 엔진에 화자 수로 알려 준다 */
+  /** 참석자 수. 화자 분리 엔진에 최대 화자 수로 알려 준다 (말하지 않은 참석자가 있을 수 있다) */
   speakerCount?: number;
 }
 
@@ -85,14 +90,31 @@ export class MeetingTranscriptionRunner implements OnApplicationBootstrap, OnMod
       }
       if (!audio) return;
       const settings = await this.sttSettings.read();
-      const result = await this.sttClient.transcribe(settings, { audio, fileName: job.fileName, mimeType: job.mimeType, model: settings.model, speakerCount: job.speakerCount });
+      const progress = new ProgressWriter((value) => this.repository.setTranscriptionProgress(this.prisma, job.meetingMinutesId, { ...value }), this.logger, job.meetingMinutesId);
+      const result = await this.sttClient
+        .transcribe(settings, {
+          audio,
+          fileName: job.fileName,
+          mimeType: job.mimeType,
+          model: settings.model,
+          maxSpeakers: job.speakerCount,
+          prompt: (await this.promptFor(job.meetingMinutesId)) ?? undefined,
+          onProgress: (p) => progress.push({ phase: PHASE_OF[p.stage], current: p.current, total: p.total }),
+        })
+        .finally(() => progress.settled());
       const segments = result.segments.filter((s) => s.text.trim() !== '');
       const transcript = segments.length > 0 ? segments.map((s) => s.text.trim()).join('\n') : result.text.trim();
+      if (transcript === '') {
+        this.logger.warn(`회의록 ${job.meetingMinutesId} 전사 결과가 비어 실패로 끝내요`);
+        await this.finish(job.meetingMinutesId, { meetingMinutesStatus: MEETING_MINUTES_STATUS.FAILED, failureReason: NO_SPEECH_REASON, transcriptionProgress: Prisma.DbNull });
+        return;
+      }
       const data: Prisma.MeetingMinutesUncheckedUpdateManyInput = {
         meetingMinutesStatus: MEETING_MINUTES_STATUS.TRANSCRIBED,
         transcript,
         transcriptSegments: segments.map((s) => ({ start: s.start, end: s.end, text: s.text.trim(), ...(s.speaker ? { speaker: s.speaker } : {}) })),
         failureReason: null,
+        transcriptionProgress: Prisma.DbNull,
       };
       await this.finish(job.meetingMinutesId, data);
     } catch (error) {
@@ -105,7 +127,7 @@ export class MeetingTranscriptionRunner implements OnApplicationBootstrap, OnMod
           : loading
             ? `${AUDIO_LOAD_ERROR_REASON}: ${error instanceof AppException ? (error.getResponse() as { message: string }).message : '알 수 없는 오류'}`.slice(0, 500)
             : TRANSCRIPTION_ERROR_REASON;
-      await this.finish(job.meetingMinutesId, { meetingMinutesStatus: MEETING_MINUTES_STATUS.FAILED, failureReason: reason }).catch((e: unknown) =>
+      await this.finish(job.meetingMinutesId, { meetingMinutesStatus: MEETING_MINUTES_STATUS.FAILED, failureReason: reason, transcriptionProgress: Prisma.DbNull }).catch((e: unknown) =>
         this.logger.error(`회의록 ${job.meetingMinutesId} 실패 상태를 저장하지 못했어요: ${e instanceof Error ? e.name : 'unknown'}`),
       );
     } finally {
@@ -115,8 +137,62 @@ export class MeetingTranscriptionRunner implements OnApplicationBootstrap, OnMod
     }
   }
 
+  /** 용어 힌트는 덤이다: 읽지 못하면 힌트 없이 받아쓴다 */
+  private async promptFor(id: number): Promise<string | null> {
+    try {
+      return buildSttPrompt(await this.repository.findSttHints(this.prisma, id));
+    } catch (error) {
+      this.logger.warn(`회의록 ${id} 용어 힌트를 만들지 못했어요: ${error instanceof Error ? error.name : 'unknown'}`);
+      return null;
+    }
+  }
+
   private async finish(id: number, data: Prisma.MeetingMinutesUncheckedUpdateManyInput): Promise<void> {
     const { count } = await this.repository.finishTranscription(this.prisma, id, data);
     if (count === 0) this.logger.warn(`회의록 ${id}는 더 이상 전사 중이 아니라 결과를 버렸어요`);
+  }
+}
+
+/**
+ * 음성 서버가 알려 준 진행을 차례로 DB에 적는다. 앞의 쓰기가 끝나기 전에 온 값은 마지막 것만 남겨 늦게 끝난 옛 값이 새 값을 덮지 않게 하고,
+ * 같은 값은 다시 쓰지 않는다. 쓰기 실패는 전사를 멈추지 않는다 (진행 표시는 덤이다)
+ */
+export class ProgressWriter {
+  private pending: MeetingTranscriptionProgress | null = null;
+  private last = '';
+  private running: Promise<void> = Promise.resolve();
+  private busy = false;
+
+  constructor(
+    private readonly write: (value: MeetingTranscriptionProgress) => Promise<unknown>,
+    private readonly logger: Logger,
+    private readonly id: number,
+  ) {}
+
+  push(value: MeetingTranscriptionProgress): void {
+    if (JSON.stringify(value) === this.last) return;
+    this.pending = value;
+    if (!this.busy) this.running = this.drain();
+  }
+
+  /** 남은 쓰기가 끝날 때까지 (결과를 적기 전에 기다려 진행 칸이 결과 뒤에 남지 않게 한다) */
+  settled(): Promise<void> {
+    return this.running;
+  }
+
+  private async drain(): Promise<void> {
+    this.busy = true;
+    try {
+      while (this.pending) {
+        const value = this.pending;
+        this.pending = null;
+        const key = JSON.stringify(value);
+        if (key === this.last) continue;
+        this.last = key;
+        await this.write(value).catch((e: unknown) => this.logger.warn(`회의록 ${this.id} 전사 진행을 남기지 못했어요: ${e instanceof Error ? e.name : 'unknown'}`));
+      }
+    } finally {
+      this.busy = false;
+    }
   }
 }

@@ -359,7 +359,8 @@ function purchaseProgressOf(requisitions: readonly RequisitionView[] | null, pur
     : null;
   if (!purchaseOrders) return { requisitionsByStatus, openPurchaseOrders: null };
   const open = purchaseOrders
-    .filter((po) => po.purchaseOrderStatus !== 'RECEIVED')
+    // 발주 취소·잔량 마감한 발주는 더 들어올 양이 없다
+    .filter((po) => po.purchaseOrderStatus === 'CONFIRMED' || po.purchaseOrderStatus === 'PARTIALLY_RECEIVED')
     .map((po) => ({
       purchaseOrderId: po.id,
       purchaseOrderNo: po.purchaseOrderNo,

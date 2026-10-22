@@ -10,13 +10,14 @@ import { createServer, type IncomingMessage, type Server as HttpServer, type Ser
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { DriveFilePage, IntegrationConnectionView, IntegrationTestResult, MeetingMinutesView } from '@fantasteel/shared';
+import { NOTIFICATION_TYPE, PERMISSION, PERMISSION_LEVEL, type DriveFilePage, type IntegrationConnectionView, type IntegrationTestResult, type MeetingMinutesView } from '@fantasteel/shared';
 import { AppModule } from '../../../app.module';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { SttClient, type SttTranscript } from '../../stt/stt.client';
 import { SttSettingsStore } from '../../stt/stt-settings.store';
 import { MeetingTranscriptionRunner } from '../../meeting-minutes/meeting-transcription.runner';
 import { IntegrationCrypto } from '../integration-crypto';
+import { IntegrationHealthMonitor } from '../integration-health.monitor';
 import { GoogleDriveService } from './google-drive.service';
 
 const SA_EMAIL = 'erp-drive@fantasteel-erp.iam.gserviceaccount.com';
@@ -109,6 +110,8 @@ async function handleDrive(req: IncomingMessage, res: ServerResponse, url: URL):
   const token = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1] ?? '';
   if (!fake.accessTokens.has(token)) return json(res, 401, { error: { code: 401, message: 'Request had invalid authentication credentials.' } });
   fake.bearers.push(token);
+  // 주기 확인(이슈 #518)이 토큰과 Drive API를 보려고 부른다
+  if (url.pathname === '/drive/v3/about') return json(res, 200, { user: { permissionId: 'service-account-1' } });
   if (url.pathname === '/drive/v3/files') {
     const parent = /'([^']+)' in parents/.exec(url.searchParams.get('q') ?? '')?.[1] ?? '';
     // 공유하지 않은 폴더의 목록은 Drive도 빈 목록을 준다
@@ -188,6 +191,22 @@ async function driveView(): Promise<IntegrationConnectionView> {
   return view;
 }
 
+/** 연동 관리 권한자(ORG_MANAGE 사용)인 재직 사원 수: 장애·복구 알림은 이 사람마다 한 행이다 (이슈 #518) */
+let managerCount = 0;
+
+async function clearFaultState(): Promise<void> {
+  await prisma.integrationFault.deleteMany();
+  await prisma.notification.deleteMany({ where: { notificationType: { in: [NOTIFICATION_TYPE.INTEGRATION_FAULT, NOTIFICATION_TYPE.INTEGRATION_RECOVERED] } } });
+}
+
+function alertsOf(type: typeof NOTIFICATION_TYPE.INTEGRATION_FAULT | typeof NOTIFICATION_TYPE.INTEGRATION_RECOVERED) {
+  return prisma.notification.findMany({ where: { notificationType: type }, orderBy: { id: 'asc' } });
+}
+
+function driveFaults() {
+  return prisma.integrationFault.findMany({ where: { providerKey: 'google-drive' }, orderBy: { id: 'asc' } });
+}
+
 function addFile(file: Omit<FakeFile, 'modifiedTime'> & { modifiedTime?: string }): void {
   fake.files.set(file.id, { modifiedTime: '2026-10-01T00:00:00.000Z', ...file });
 }
@@ -232,6 +251,9 @@ beforeAll(async () => {
   adminCookie = await login('1503001');
   salesCookie = await login('2103003');
   purchaseId = (await prisma.employee.findUniqueOrThrow({ where: { employeeNo: '2207005' } })).id;
+  managerCount = await prisma.employee.count({
+    where: { isActive: true, role: { rolePermissions: { some: { permission: PERMISSION.ORG_MANAGE, permissionLevel: PERMISSION_LEVEL.USE } } } },
+  });
 
   addFile({ id: SHARED, name: '공유한 폴더', mimeType: 'application/vnd.google-apps.folder', parents: ['root0000000'], content: Buffer.alloc(0) });
   addFile({ id: OTHER_SHARED, name: '.env 폴더', mimeType: 'application/vnd.google-apps.folder', parents: ['root0000000'], content: Buffer.alloc(0) });
@@ -249,6 +271,8 @@ afterEach(() => {
 afterAll(async () => {
   await runner?.drain();
   await prisma?.integrationConnection.deleteMany({ where: { providerKey: 'google-drive' } });
+  // 같은 묶음 DB를 쓰는 다른 시험이 이 시험의 장애·알림을 보지 않게 치운다
+  if (prisma) await clearFaultState();
   await app?.close();
   await new Promise<void>((resolve) => fakeServer?.close(() => resolve()));
   if (keyDir) rmSync(keyDir, { recursive: true, force: true });
@@ -424,8 +448,35 @@ describe('키 문제', () => {
     const view = await driveView();
     expect(view).toMatchObject({ status: 'NOT_CONNECTED', authMode: 'SERVICE_ACCOUNT', serviceAccountEmail: null });
     expect(view.lastError).toContain('GOOGLE_SERVICE_ACCOUNT_KEY_FILE');
+    // 부르지 않아도 이미 쓸 수 없는 상태라 관리 화면은 끊김으로 보인다
+    expect(view.health.level).toBe('DOWN');
     const { status, body } = await call('GET', '/integrations/google-drive/files?kind=audio', salesCookie);
     expect([status, body.error?.code]).toEqual([500, 'INT-015']);
+  });
+
+  it('서비스 계정 키 오류(키 파일 없음)는 서버 관리자가 고칠 키·설정 오류로 한 번 알리고, 고치면 복구를 알린다 (주기 확인이 아무도 쓰지 않아도 찾는다)', async () => {
+    await clearFaultState();
+    process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE = join(keyDir, 'missing.json');
+    await app.get(IntegrationHealthMonitor).runNow();
+    expect(await driveFaults()).toMatchObject([{ faultKind: 'CREDENTIAL_ERROR', failureCount: 1 }]);
+    const alerts = await alertsOf(NOTIFICATION_TYPE.INTEGRATION_FAULT);
+    expect(alerts).toHaveLength(managerCount);
+    expect(alerts[0].notificationContent).toContain('Google Drive 키·설정에 문제가 있어요');
+    expect(alerts[0].notificationContent).toContain('GOOGLE_SERVICE_ACCOUNT_KEY_FILE');
+    expect((await driveView()).health).toMatchObject({ level: 'DOWN', faults: [{ faultKind: 'CREDENTIAL_ERROR', notifiedAt: expect.any(String) }] });
+
+    // 같은 오류가 되풀이돼도(다음 확인, 사용자의 요청) 알림은 늘지 않는다
+    await app.get(IntegrationHealthMonitor).runNow();
+    expect((await call('GET', '/integrations/google-drive/files?kind=audio', salesCookie)).body.error?.code).toBe('INT-015');
+    expect((await driveFaults())[0].failureCount).toBe(2);
+    expect(await alertsOf(NOTIFICATION_TYPE.INTEGRATION_FAULT)).toHaveLength(managerCount);
+
+    baselineEnv();
+    await app.get(IntegrationHealthMonitor).runNow();
+    expect(await driveFaults()).toEqual([]);
+    const recovered = await alertsOf(NOTIFICATION_TYPE.INTEGRATION_RECOVERED);
+    expect(recovered).toHaveLength(managerCount);
+    expect(recovered[0].notificationContent).toBe('Google Drive 키·설정 오류가 해결됐어요');
   });
 
   it('키 값(base64)도 받는다. 파일과 둘 다 있으면 파일이 먼저다', async () => {
@@ -449,6 +500,23 @@ describe('키 문제', () => {
     baselineEnv();
     expect((await call('GET', '/integrations/google-drive/files?kind=audio', salesCookie)).status).toBe(200);
     expect((await driveView()).lastError).toBeNull();
+  });
+
+  it('Google이 서비스 계정 키를 거절하면 키 오류로 한 번 알리고, 새 키로 바꿔 Drive가 되면 복구를 알린다', async () => {
+    await clearFaultState();
+    delete process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE;
+    process.env.GOOGLE_SERVICE_ACCOUNT_KEY = keyJson(stranger.privateKey);
+    for (let i = 0; i < 3; i += 1) expect((await call('GET', '/integrations/google-drive/files?kind=audio', salesCookie)).body.error?.code).toBe('INT-004');
+    expect(await driveFaults()).toMatchObject([{ faultKind: 'CREDENTIAL_ERROR', failureCount: 3 }]);
+    const alerts = await alertsOf(NOTIFICATION_TYPE.INTEGRATION_FAULT);
+    expect(alerts).toHaveLength(managerCount);
+    expect(alerts[0].notificationContent).toContain('서비스 계정 키를 거절했어요');
+
+    baselineEnv();
+    expect((await call('GET', '/integrations/google-drive/files?kind=audio', salesCookie)).status).toBe(200);
+    expect(await driveFaults()).toEqual([]);
+    expect(await alertsOf(NOTIFICATION_TYPE.INTEGRATION_RECOVERED)).toHaveLength(managerCount);
+    await clearFaultState();
   });
 
   it('키를 빼면 OAuth 연결로 돌아간다', async () => {

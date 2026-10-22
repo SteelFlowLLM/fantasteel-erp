@@ -10,6 +10,7 @@ import {
   ROLE_LABEL,
   type AuthUser,
   type MeetingAnalysis,
+  type MeetingAttendeeView,
   type MeetingCandidate,
   type MeetingCandidateRegistered,
   type MeetingRegisterResult,
@@ -23,6 +24,7 @@ import {
   type TranscriptSegment,
 } from '@fantasteel/shared';
 import { hasPermission } from '../../common/auth/auth.guard';
+import { AuthUserService } from '../../common/auth/auth-user.service';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
 import { NOTION_EXPORT_STALE_MS } from '../integration/mcp/mcp.client';
@@ -44,10 +46,48 @@ import { readAnalysis, readSegments } from './meeting-minutes.json';
 import { buildMeetingNotionMarkdown, meetingNotionTitle } from './meeting-notion.markdown';
 import { MeetingSpeakerSuggester } from './meeting-speaker-suggest';
 import { MeetingTranscriptionRunner } from './meeting-transcription.runner';
-import { MeetingMinutesRepository, type MeetingMinutesDetailRow, type MeetingMinutesListRow } from './meeting-minutes.repository';
+import { MeetingMinutesRepository, type MeetingMinutesDetailRow, type MeetingMinutesDigestDetailRow, type MeetingMinutesDigestRow, type MeetingMinutesListRow } from './meeting-minutes.repository';
 import { toMeetingMinutesView as toView } from './meeting-minutes.view';
 
 const DEFAULT_PAGE_SIZE = 20;
+
+/** 철강맨AI 회의 검색의 한 줄: 목록 칸 + 요약 + AI가 정리한 결정사항 (전사 글은 담지 않는다) */
+export interface MeetingDigest extends MeetingMinutesListItem {
+  summary: string | null;
+  decisions: string[];
+}
+
+/** 한 회의의 요약·결정사항과 참석자 (전사 글은 담지 않는다) */
+export interface MeetingDigestDetail extends MeetingDigest {
+  attendees: MeetingAttendeeView[];
+}
+
+/** 회의 검색 조건. 날짜는 'YYYY-MM-DD' 양 끝 포함 */
+export interface SearchMeetingDigestsQuery {
+  meetingMinutesStatus?: string;
+  from?: string;
+  to?: string;
+  page: number;
+  size: number;
+}
+
+function toDigest(row: MeetingMinutesDigestRow | MeetingMinutesDigestDetailRow): MeetingDigest {
+  const analysis = readAnalysis(row.analysisResult);
+  return {
+    id: row.id,
+    meetingMinutesTitle: row.meetingMinutesTitle,
+    meetingDate: row.meetingDate.toISOString().slice(0, 10),
+    meetingMinutesStatus: row.meetingMinutesStatus as MeetingMinutesStatus,
+    attendeeCount: row._count.attendees,
+    creatorId: row.creatorId,
+    creatorName: row.creator.employeeName,
+    createdAt: row.createdAt.toISOString(),
+    // 검토에서 고친 요약(summary)이 AI가 처음 쓴 요약보다 우선이다
+    summary: row.summary ?? analysis?.summary ?? null,
+    decisions: analysis?.decisions.map((d) => d.text) ?? [],
+  };
+}
+
 /** 화자를 연결·추정할 수 있는 상태: 전사가 끝났고 확정 전 */
 const SPEAKER_OPEN_STATUSES: readonly string[] = [MEETING_MINUTES_STATUS.TRANSCRIBED, MEETING_MINUTES_STATUS.REVIEW, MEETING_MINUTES_STATUS.FAILED];
 /**
@@ -117,7 +157,7 @@ function toListItem(row: MeetingMinutesListRow): MeetingMinutesListItem {
 
 
 /**
- * 회의록 (REQ-VOC-002·003, BP-VOC-01). 글·음성 전사를 저장하고, 작성자가 AI 정리를 시키면 후보를 만들어 둔다(등록은 다음 단계).
+ * 회의록 (REQ-VOC-002·003, BP-VOC-01). 글·음성 전사를 저장하고, 작성자가 AI 정리를 시키면 후보를 만들어 둔다. 허가한 후보의 등록·확정(register)도 여기서 한다.
  * 작업 로그는 남기지 않는다 (REQ-LOG-002 이벤트에 회의록 생성이 없다). 전 역할이 쓰므로 권한 코드 없이 로그인만 본다.
  */
 @Injectable()
@@ -138,6 +178,7 @@ export class MeetingMinutesService {
     private readonly drive: GoogleDriveService,
     private readonly notionWorkspace: NotionWorkspaceService,
     private readonly speakerSuggester: MeetingSpeakerSuggester,
+    private readonly authUsers: AuthUserService,
   ) {}
 
   /** API-258. 텍스트 입력은 STT를 건너뛰므로 TRANSCRIBED로 시작한다 */
@@ -367,17 +408,55 @@ export class MeetingMinutesService {
 
     // 담당자·날짜·품목을 고치면 ERP 현황과 그에 따른 경고도 달라지므로 고칠 때마다 다시 계산한다
     const edited = await this.contexts.apply(this.prisma, applyCandidateEdit(analysis.candidates[index], dto, dateOnly(row.meetingDate)));
+    if (dto.purchaseRequesterId !== undefined) {
+      if (edited.kind !== 'PURCHASE') throw new AppException('COM-004', '요청자는 구매요청 후보에만 정할 수 있어요');
+      if (dto.purchaseRequesterId === null) {
+        edited.purchaseRequesterId = null;
+        edited.purchaseRequesterName = null;
+      } else {
+        const requester = await this.purchaseRequester(dto.purchaseRequesterId);
+        edited.purchaseRequesterId = requester.employeeId;
+        edited.purchaseRequesterName = requester.employeeName;
+      }
+    }
     if (dto.decision !== undefined) {
       if (dto.decision === 'APPROVED') {
         const missing = missingFieldsOf(edited);
         if (missing.length > 0) throw new AppException('VOC-006', `${missing.join(', ')}을(를) 채워야 허가할 수 있어요`);
-        if (edited.kind === 'PURCHASE') await this.messageActions.assertCanRequestFromMeeting(this.prisma, user);
+        if (edited.kind === 'PURCHASE') await this.assertPurchaseRequester(user, edited);
       }
       edited.decision = dto.decision;
     }
     const candidates = analysis.candidates.map((c, i) => (i === index ? edited : c));
     await this.saveReviewEdit(id, row.updatedAt, { ...analysis, candidates });
     return this.get(id);
+  }
+
+  /**
+   * 구매요청 후보의 요청자 (이슈 #530). 확정 주체가 요청자라(Message → ERP 초안 규칙) 구매요청 등록 권한이 있어야 하고 승인권자(부서장)가 있어야 한다.
+   * 사용 중인 사원이 아니면 VOC-002, 권한·부서장 문제는 그 오류 그대로
+   */
+  private async purchaseRequester(employeeId: number): Promise<AuthUser> {
+    const requester = await this.authUsers.load(employeeId);
+    if (!requester) throw new AppException('VOC-002', '요청자로 고른 사원을 찾을 수 없거나 퇴사했어요');
+    await this.messageActions.assertCanRequestFromMeeting(this.prisma, requester);
+    return requester;
+  }
+
+  /** 구매요청 후보를 허가할 수 있는지: 정한 요청자, 없으면 작성자가 구매요청 초안의 요청자가 될 수 있어야 한다 */
+  private async assertPurchaseRequester(user: AuthUser, candidate: MeetingCandidate): Promise<void> {
+    if (candidate.purchaseRequesterId != null) {
+      await this.purchaseRequester(candidate.purchaseRequesterId);
+      return;
+    }
+    try {
+      await this.messageActions.assertCanRequestFromMeeting(this.prisma, user);
+    } catch (error) {
+      if (error instanceof AppException && error.code === 'COM-002') {
+        throw new AppException('COM-002', '작성자에게 구매요청 등록 권한이 없어요. 요청자를 구매요청 권한이 있는 사원(예: 구매 담당 참석자)으로 고른 뒤 허가해 주세요. 그 사원이 초안을 확인해 구매요청으로 확정해요');
+      }
+      throw error;
+    }
   }
 
   /** 검토 중에 AI 요약을 작성자가 고친다. 요약 칸과 분석 결과 안의 요약을 같이 바꾼다 */
@@ -403,6 +482,11 @@ export class MeetingMinutesService {
     }
     const segments = readSegments(row.transcriptSegments);
     const attendeeIds = row.attendees.map((a) => a.employeeId);
+    // 구매요청 초안의 요청자(확정 주체): 허가한 뒤 퇴사·권한이 바뀌었을 수 있어 확정할 때 다시 본다 (이슈 #530)
+    const requesters = new Map<string, AuthUser>();
+    for (const c of approved.filter((a) => a.kind === 'PURCHASE')) {
+      if (c.purchaseRequesterId != null) requesters.set(c.key, await this.purchaseRequester(c.purchaseRequesterId));
+    }
 
     const created = await this.prisma.$transaction(async (tx) => {
       const { count } = await this.repository.confirm(tx, id, new Date());
@@ -463,18 +547,28 @@ export class MeetingMinutesService {
             },
           );
         } else if (c.kind === 'PURCHASE' && c.purchase !== null) {
+          const requester = requesters.get(c.key) ?? user;
           const draftId = await this.messageActions.createFromMeeting(
             tx,
-            user,
+            requester,
             id,
             {
               ...c.purchase,
               requestReason: c.purchase.requestReason ?? c.title,
             },
             c.salesOrderId,
+            user,
           );
           actionDraftIds.push(draftId);
           registered.set(c.key, { type: 'action_draft', id: draftId });
+          // 작성자가 넘긴 요청자에게 확인할 초안이 생겼다고 알린다 (작성자 본인이면 보내지 않는다)
+          if (requester.employeeId !== user.employeeId) {
+            await this.notifications.notifyEmployees(tx, [requester.employeeId], {
+              notificationType: NOTIFICATION_TYPE.TASK_ASSIGNED,
+              notificationContent: `구매요청 초안 확인 · ${c.title}`,
+              linkPath: '/action-drafts',
+            });
+          }
         }
       }
 
@@ -635,6 +729,29 @@ export class MeetingMinutesService {
     };
     const [total, rows] = await Promise.all([this.repository.count(this.prisma, where), this.repository.findList(this.prisma, where, { skip: (page - 1) * size, take: size })]);
     return { items: rows.map(toListItem), page, size, total };
+  }
+
+  /**
+   * 철강맨AI 회의 검색 (문서에 없는 기능, 이슈 #506). 목록(API-259)과 같은 범위(회의록은 전 역할이 열람)에 요약·결정사항을 더해,
+   * 제목에 없고 요약·결정에만 있는 말로도 찾게 한다. 상태·회의일은 DB에서 좁히고 낱말 거르기는 부르는 쪽이 한다.
+   */
+  async searchDigests(query: SearchMeetingDigestsQuery): Promise<{ items: MeetingDigest[]; page: number; size: number; total: number }> {
+    const where: Prisma.MeetingMinutesWhereInput = {
+      meetingMinutesStatus: query.meetingMinutesStatus,
+      ...(query.from || query.to ? { meetingDate: { ...(query.from ? { gte: parseMeetingDate(query.from) } : {}), ...(query.to ? { lte: parseMeetingDate(query.to) } : {}) } } : {}),
+    };
+    const [total, rows] = await Promise.all([this.repository.count(this.prisma, where), this.repository.findDigests(this.prisma, where, { skip: (query.page - 1) * query.size, take: query.size })]);
+    return { items: rows.map(toDigest), page: query.page, size: query.size, total };
+  }
+
+  /** 철강맨AI가 한 회의를 자세히 볼 때: 상세(API-259)와 같은 범위지만 전사 글(수 MB)을 읽지 않는다. 없으면 `VOC-001` (이슈 #506) */
+  async getDigest(id: number): Promise<MeetingDigestDetail> {
+    const row = await this.repository.findDigestDetail(this.prisma, id);
+    if (!row) throw new AppException('VOC-001');
+    return {
+      ...toDigest(row),
+      attendees: row.attendees.map((a) => ({ employeeId: a.employeeId, employeeName: a.employee.employeeName, departmentName: a.employee.department.departmentName, roleCode: a.employee.role.roleCode as Role })),
+    };
   }
 
   /** API-259 상세 */

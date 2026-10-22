@@ -5,6 +5,7 @@ import { BUSINESS_EVENT_TYPE, type AuthUser } from '@fantasteel/shared';
 import { AppModule } from '../../app.module';
 import { AuthUserService } from '../../common/auth/auth-user.service';
 import { AppException } from '../../common/errors/app.exception';
+import * as seoulDate from '../../common/time/seoul-date';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SalesOrderService } from '../sales-order/sales-order.service';
 import { ProductionResultRepository } from './production-result.repository';
@@ -316,14 +317,20 @@ describe('동시 요청: 같은 실적을 두 번 완료하거나 같은 고로�
 
 describe('작업 일시: 시간대 없는 글은 서울 시각으로 읽는다 (일정과 같음, #496)', () => {
   it('시간대 없는 시작 일시는 +09:00으로, 읽을 수 없는 일시는 COM-004', async () => {
+    // 서울 시간대 PC에서는 new Date(글)도 같은 값이 나와 결과만 보면 고치기 전 코드도 통과한다.
+    // Jest 안에서는 process.env.TZ를 바꿔도 시간대가 바뀌지 않아(복사본), 시간대와 무관한 공통 해석 함수를 거치는지도 본다 (#509)
+    const parse = jest.spyOn(seoulDate, 'seoulDateTimeOf');
     // 고로 BF96과 2017-03은 이 묶음만 쓴다. 서버가 UTC든 서울이든 같은 시각이어야 한다
     const started = await results.register(producer, { processType: 'IRONMAKING', blastFurnaceCode: 'BF96', startedAt: '2017-03-02T09:00' });
     try {
+      expect(parse).toHaveBeenCalledWith('2017-03-02T09:00');
+      parse.mockRestore();
       expect(started.startedAt).toBe('2017-03-02T00:00:00.000Z');
       expect(await codeOf(results.register(producer, { processType: 'IRONMAKING', blastFurnaceCode: 'BF97', startedAt: '2017-W10' }))).toBe('COM-004');
       expect(await codeOf(results.complete(producer, started.id, { completedAt: '2017-W10', hotMetalTon: '1' }))).toBe('COM-004');
       expect(await prisma.productionResult.count({ where: { blastFurnaceCode: 'BF97' } })).toBe(0);
     } finally {
+      parse.mockRestore();
       await prisma.productionResult.delete({ where: { id: started.id } });
     }
   });

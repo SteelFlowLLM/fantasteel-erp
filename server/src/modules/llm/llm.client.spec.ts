@@ -1,6 +1,8 @@
 // chatJson: 가짜 fetch로 형식 강제 요청, <think>·울타리 제거, 400 재시도, 기능별 샘플링·생각 설정을 확인한다.
 import { Logger } from '@nestjs/common';
-import { createThinkSplitter, LlmAbortedError, LlmClient, LlmJsonParseError, LlmModelNotLoadedError, LlmRequestError, parseJsonContent, reasoningEffortFor, splitThinking } from './llm.client';
+import * as guardedAgent from '../../common/net/guarded-agent';
+import { netFetch } from '../../common/net/guarded-agent';
+import { createThinkSplitter, LLM_TRUNCATED_MESSAGE, LlmAbortedError, LlmClient, LlmJsonParseError, LlmModelNotLoadedError, LlmRequestError, LlmTruncatedError, parseJsonContent, reasoningEffortFor, reasoningMaxTokens, splitThinking } from './llm.client';
 import { LLM_PROFILE } from './llm-profiles';
 
 const endpoint = { baseUrl: 'http://llm.test/v1/', apiKey: null };
@@ -25,12 +27,12 @@ beforeEach(() => {
   fetchMock.mockReset();
   modelsMock.mockReset().mockImplementation(async () => new Response('not found', { status: 404 }));
   unslothMock.mockReset().mockImplementation(async () => new Response('not found', { status: 404 }));
-  jest.spyOn(globalThis, 'fetch').mockImplementation(((url: string, init: RequestInit) =>
+  jest.spyOn(netFetch, 'run').mockImplementation(((url: string, init: RequestInit) =>
     url.endsWith('/api/v1/models')
       ? modelsMock(url)
       : url.endsWith('/v1/status') || url.includes('/api/settings/') || url.includes('/api/models/')
         ? unslothMock(url)
-        : fetchMock(url, init)) as unknown as typeof fetch);
+        : fetchMock(url, init)) as unknown as typeof netFetch.run);
 });
 afterEach(() => jest.restoreAllMocks());
 
@@ -108,6 +110,30 @@ describe('LlmClient.chatJson', () => {
     expect(logged).not.toContain('pw');
   });
 
+  it('연결은 메타데이터 주소로 풀리는 이름을 막는 Agent(dispatcher)로 하고, 그 때문에 막힌 연결은 주소 없는 문구로 알린다 (이슈 #497)', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const created = jest.spyOn(guardedAgent, 'createMetadataGuardedAgent');
+    fetchMock.mockResolvedValueOnce(reply('{"a":1}'));
+    fetchMock.mockResolvedValueOnce(reply('{"a":2}'));
+    const client = new LlmClient();
+    await client.chatJson(endpoint, 'm', [], format, options);
+    const madeAfterFirst = created.mock.calls.length;
+    await client.chatJson(endpoint, 'm', [], format, options);
+    // 일반 Agent가 아니라 메타데이터 막는 Agent를 제한 시간마다 한 번 만들어 계속 쓴다 (제한 시간별 Agent는 이슈 #502)
+    expect(madeAfterFirst).toBeGreaterThan(0);
+    expect(created).toHaveBeenCalledTimes(madeAfterFirst);
+    const made = created.mock.results.map((r) => r.value as unknown);
+    for (const [, init] of fetchMock.mock.calls) expect(made).toContain((init as { dispatcher?: unknown }).dispatcher);
+
+    const blocked = Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('사내망·내부 주소는 읽을 수 없어요 (169.254.169.254.nip.io)'), { code: 'EBLOCKED' }) });
+    fetchMock.mockRejectedValueOnce(blocked);
+    const error = await new LlmClient().chatJson({ baseUrl: 'http://169.254.169.254.nip.io:1234/v1', apiKey: null }, 'm', [], format, options).catch((e: unknown) => e);
+    expect(error).toMatchObject({ kind: 'CONNECT' });
+    expect((error as LlmRequestError).message).toContain('링크 로컬·클라우드 메타데이터');
+    expect((error as LlmRequestError).message).not.toMatch(/nip\.io|1234|http/);
+    expect(String(warn.mock.calls.at(-1)?.[0])).toContain('169.254.169.254.nip.io');
+  });
+
   it('리다이렉트는 따라가지 않는다 (메타데이터 같은 다른 곳에 키·질문이 가지 않게, 이슈 #497)', async () => {
     fetchMock.mockResolvedValueOnce(reply('{"a":1}'));
     await new LlmClient().chatJson({ baseUrl: 'http://llm.test/v1', apiKey: 'secret-key' }, 'm', [], format, options);
@@ -124,6 +150,31 @@ describe('LlmClient.chatJson', () => {
     expect(await new LlmClient().listModels({ baseUrl: 'http://169.254.169.254/v1', apiKey: null }).catch((e: unknown) => e)).toBeInstanceOf(LlmRequestError);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(modelsMock).not.toHaveBeenCalled();
+  });
+
+  it('모델 목록 요청은 15초까지 기다리고 서버 종류 탐침은 5초만 기다린다: 바쁜 로컬 LLM의 연결 확인이 5초 만에 끊기지 않고, 멈춘 서버에서 1분 넘게 걸리지도 않는다 (이슈 #510)', async () => {
+    const timeouts: number[] = [];
+    const real = AbortSignal.timeout.bind(AbortSignal);
+    jest.spyOn(AbortSignal, 'timeout').mockImplementation((ms: number) => {
+      timeouts.push(ms);
+      return real(ms);
+    });
+    fetchMock.mockResolvedValueOnce(Response.json({ data: [{ id: 'm' }] }));
+    await new LlmClient().listModels(endpoint);
+    expect(timeouts[0]).toBe(15_000);
+    // 이어지는 서버 종류 탐침(LM Studio·Unsloth 고유 경로)은 모두 5초
+    expect(timeouts.length).toBeGreaterThan(1);
+    expect(timeouts.slice(1).every((ms) => ms === 5_000)).toBe(true);
+  });
+
+  it('모델 목록이 제한 시간 안에 안 오면 15초라고 알린다', async () => {
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    fetchMock.mockImplementationOnce(async () => {
+      throw Object.assign(new Error('timeout'), { name: 'TimeoutError' });
+    });
+    const error = await new LlmClient().listModels(endpoint).catch((e: unknown) => e);
+    expect(error).toMatchObject({ kind: 'TIMEOUT' });
+    expect((error as LlmRequestError).message).toContain('15초 안에 응답이 없어요');
   });
 
   it('parseJsonContent: 울타리 언어 표시가 없어도 읽는다', () => {
@@ -555,6 +606,88 @@ describe('LlmClient Unsloth Studio', () => {
       ['a/think', 'llm', 8192],
       ['b/plain', 'embeddings', null],
     ]);
+  });
+
+  describe('생각 토큰과 길이 상한 (이슈 #502)', () => {
+    const thinkingStatus = { ...idleStatus, supports_reasoning: true, reasoning_effort_levels: ['low', 'medium', 'high'], context_length: 262_144 };
+    const truncatedJson = () =>
+      Response.json({ choices: [{ finish_reason: 'length', message: { content: '{"summary":"회의 요약', reasoning_content: '생각이 길어요'.repeat(100) } }] });
+    const okJson = () => Response.json({ choices: [{ finish_reason: 'stop', message: { content: '{"summary":"요약"}' } }] });
+
+    it('생각을 켠 JSON 요청은 max_tokens에 생각 여유분을 더한다 (보통 +12,000)', async () => {
+      unsloth({ loaded: ['a/think'], status: thinkingStatus, chat: okJson });
+      await new LlmClient().chatJson(unslothEndpoint, 'a/think', [{ role: 'user', content: '회의' }], format, { timeoutMs: 1000, maxTokens: 8000, profile: LLM_PROFILE.MEETING_ANALYSIS });
+      expect(chatBodies()[0]).toMatchObject({ reasoning_effort: 'medium', max_tokens: 20_000 });
+    });
+
+    it('생각을 끈 요청·LM Studio에는 더하지 않고, 문맥 길이를 넘지 않게 줄인다', async () => {
+      unsloth({ loaded: ['a/think'], status: thinkingStatus, chat: okJson });
+      await new LlmClient().chatJson(unslothEndpoint, 'a/think', [], format, { timeoutMs: 1000, maxTokens: 800, profile: LLM_PROFILE.MESSAGE_EXTRACT });
+      expect(chatBodies()[0]).toMatchObject({ reasoning_effort: 'none', max_tokens: 800 });
+
+      unsloth({ loaded: ['a/think'], status: { ...thinkingStatus, context_length: 16_384 }, chat: okJson });
+      const prompt = '가'.repeat(5_000);
+      await new LlmClient().chatJson(unslothEndpoint, 'a/think', [{ role: 'user', content: prompt }], format, { timeoutMs: 1000, maxTokens: 8000, profile: LLM_PROFILE.MEETING_ANALYSIS });
+      // 문맥 16,384 − 프롬프트 5,000자 − 여유 1,024 (원래 8,000보다는 크다)
+      expect(chatBodies().at(-1)?.max_tokens).toBe(16_384 - 5_000 - 1_024);
+
+      fetchMock.mockReset().mockImplementation(async () => okJson());
+      modelsMock.mockResolvedValue(lmStudioModels([{ key: 'm', reasoning: ['off', 'low', 'medium', 'high'] }]));
+      await new LlmClient().chatJson(endpoint, 'm', [], format, { timeoutMs: 1000, maxTokens: 8000, profile: LLM_PROFILE.MEETING_ANALYSIS });
+      expect(bodyOf(fetchMock.mock.calls[0])).toMatchObject({ reasoning_effort: 'medium', max_tokens: 8000 });
+    });
+
+    it('답이 길이 상한에서 잘려 JSON을 못 읽으면 생각을 끄고 한 번 더 부른다', async () => {
+      let calls = 0;
+      unsloth({ loaded: ['a/think'], status: thinkingStatus, chat: () => (++calls === 1 ? truncatedJson() : okJson()) });
+      await expect(
+        new LlmClient().chatJson(unslothEndpoint, 'a/think', [], format, { timeoutMs: 1000, maxTokens: 8000, profile: LLM_PROFILE.MEETING_ANALYSIS }),
+      ).resolves.toEqual({ summary: '요약' });
+      const [first, retry] = chatBodies();
+      expect(first).toMatchObject({ reasoning_effort: 'medium', enable_thinking: true });
+      expect(retry).toMatchObject({ reasoning_effort: 'none', enable_thinking: false, max_tokens: 8000 });
+    });
+
+    it('다시 해도 잘리면 JSON 읽기 오류와 구분되는 LlmTruncatedError (원문·생각 글을 든다)', async () => {
+      unsloth({ loaded: ['a/think'], status: thinkingStatus, chat: truncatedJson });
+      const error = await new LlmClient()
+        .chatJsonWithText(unslothEndpoint, 'a/think', [], format, { timeoutMs: 1000, maxTokens: 8000, profile: LLM_PROFILE.MEETING_ANALYSIS })
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(LlmTruncatedError);
+      expect(error).toBeInstanceOf(LlmJsonParseError);
+      expect((error as LlmTruncatedError).message).toBe(LLM_TRUNCATED_MESSAGE);
+      expect((error as LlmTruncatedError).rawText).toBe('{"summary":"회의 요약');
+      expect(chatBodies()).toHaveLength(2);
+    });
+
+    it('생각을 안 켰는데 잘리면 max_tokens를 두 배로(문맥 안에서) 한 번 더, 잘리지 않은 JSON 오류는 다시 부르지 않는다', async () => {
+      let calls = 0;
+      fetchMock.mockReset().mockImplementation(async () => (++calls === 1 ? truncatedJson() : okJson()));
+      await expect(new LlmClient().chatJson({ ...endpoint, contextLength: 32_768 }, 'm', [], format, options)).resolves.toEqual({ summary: '요약' });
+      expect(fetchMock.mock.calls.map((call) => bodyOf(call).max_tokens)).toEqual([100, 200]);
+
+      fetchMock.mockReset().mockImplementation(async () => reply('죄송합니다'));
+      await expect(new LlmClient().chatJson(endpoint, 'm', [], format, options)).rejects.toThrow('AI 응답을 JSON으로 읽지 못했어요');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('LLM 요청은 제한 시간에 맞춘 전용 Agent로 보낸다 (전역 fetch의 응답 머리 300초 제한에 걸리지 않게)', async () => {
+      fetchMock.mockReset().mockImplementation(async () => reply('{"a":1}'));
+      await new LlmClient().chatJson(endpoint, 'm', [], format, { ...options, timeoutMs: 600_000 });
+      const dispatcher = (fetchMock.mock.calls[0][1] as RequestInit & { dispatcher?: unknown }).dispatcher;
+      expect(dispatcher).toBeDefined();
+      expect(dispatcher?.constructor.name).toBe('Agent');
+    });
+  });
+
+  it('reasoningMaxTokens: 단계별 여유분, 생각 끔·따로 세는 서버는 그대로, 문맥 모르면 32,768까지', () => {
+    expect(reasoningMaxTokens(4000, 'low', true, null, 0)).toBe(8000);
+    expect(reasoningMaxTokens(8000, 'high', true, null, 0)).toBe(32_000);
+    expect(reasoningMaxTokens(16_000, 'xhigh', true, null, 0)).toBe(32_768);
+    expect(reasoningMaxTokens(8000, 'none', true, null, 0)).toBe(8000);
+    expect(reasoningMaxTokens(8000, 'medium', false, null, 0)).toBe(8000);
+    // 문맥이 모자라도 원래 값보다 줄이지는 않는다
+    expect(reasoningMaxTokens(8000, 'medium', true, 4096, 3000)).toBe(8000);
   });
 });
 

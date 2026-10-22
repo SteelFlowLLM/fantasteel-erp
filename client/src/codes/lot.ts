@@ -22,12 +22,14 @@ export const LOT_STATUS = {
   AVAILABLE: 'AVAILABLE',
   CONSUMED: 'CONSUMED',
   SHIPPED: 'SHIPPED',
+  RECEIPT_CANCELLED: 'RECEIPT_CANCELLED',
 } as const;
 export type LotStatus = (typeof LOT_STATUS)[keyof typeof LOT_STATUS];
 export const LOT_STATUS_LABEL: Record<LotStatus, string> = {
   AVAILABLE: '재고',
   CONSUMED: '투입 소진',
   SHIPPED: '출고',
+  RECEIPT_CANCELLED: '입고 취소',
 };
 
 export const LOT_RELATION_EVIDENCE = {

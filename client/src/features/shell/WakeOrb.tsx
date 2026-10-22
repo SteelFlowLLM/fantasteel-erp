@@ -6,6 +6,7 @@
 import { useEffect, useRef } from 'react';
 import { orbTargetScale, smoothOrbScale, wakeLiveLevel, wakeOrbModeOf, type WakeOrbMode } from '@/lib/wakeOrb';
 import { wakeLevelPercent } from '@/lib/steelmanWakeDisplay';
+import { useSteelmanSpeechStore } from '@/lib/steelmanSpeech';
 import { useAiChatStore } from '@/stores/useAiChatStore';
 import { useSteelmanWakeStore } from '@/stores/useSteelmanWakeStore';
 
@@ -19,8 +20,10 @@ export function useWakeOrbMode(): WakeOrbMode {
   const transcribing = useSteelmanWakeStore((state) => state.transcribing);
   const called = useSteelmanWakeStore((state) => state.called !== null);
   const voiceQuestionId = useSteelmanWakeStore((state) => state.voiceQuestionId);
-  const answering = useAiChatStore((state) => voiceQuestionId !== null && state.pendingId === voiceQuestionId);
-  return wakeOrbModeOf({ status, audioBlocked, hearing, transcribing, called, answering });
+  const waitingAnswer = useAiChatStore((state) => voiceQuestionId !== null && state.pendingId === voiceQuestionId);
+  // 철강맨이 읽어 주는 동안(이슈 #507)도 답하는 모양: 마이크는 쉬고 있다
+  const reading = useSteelmanSpeechStore((state) => state.speaking !== null);
+  return wakeOrbModeOf({ status, audioBlocked, hearing, transcribing, called, answering: waitingAnswer || reading });
 }
 
 /** 화면 그리기마다 목소리 크기를 읽어 원 크기(--orb-scale)를 바꾼다. 듣는 중·말소리 잡음일 때만 */

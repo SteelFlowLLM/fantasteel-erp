@@ -25,6 +25,8 @@ export interface RejectedLotListItem extends InspectedLotSummary {
   /** 불합격 처리 상태 (DISPOSITION_STATUS). 지정 전이면 null(미지정) */
   dispositionStatus: DispositionStatus | null;
   dispositionReason: string | null;
+  /** 처리 상태를 마지막으로 지정한 시각 (ISO 8601, 작업 로그 DISPOSITION_SET의 발생 시각). 지정 전이면 null */
+  dispositionAt: string | null;
   /** LOT의 updated_at (ISO 8601). 처리 상태 지정(POST /lots/:id/disposition) 때 expectedUpdatedAt으로 돌려보낸다 */
   updatedAt: string;
   /** 근거 검사. 근거 검사 행이 없으면 null */
