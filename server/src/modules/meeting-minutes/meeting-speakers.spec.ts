@@ -18,7 +18,7 @@ let prisma: PrismaService;
 let runner: MeetingTranscriptionRunner;
 const sttClient = { transcribe: jest.fn<Promise<SttTranscript>, unknown[]>() };
 const sttSettings = { read: jest.fn(async () => ({ baseUrl: 'http://stt.test/v1', model: null, apiKey: null })) };
-const llmClient = { chatJson: jest.fn<Promise<unknown>, [unknown, string, { role: string; content: string }[], ...unknown[]]>() };
+const llmClient = { chatJson: jest.fn<Promise<unknown>, [unknown, string, { role: string; content: string }[], ...unknown[]]>(), modelContextLength: jest.fn(async (): Promise<number | null> => null) };
 const llmSettings = { read: jest.fn(async (): Promise<{ baseUrl: string; apiKey: string | null; model: string | null }> => ({ baseUrl: 'http://llm.test/v1', apiKey: null, model: 'test-model' })) };
 /** 정다은 (구매, 작성자) */
 let purchaseCookie: string;

@@ -23,6 +23,7 @@ import { useMeetingMinutes } from '@/hooks/useMeetingMinutes';
 import { useMe } from '@/hooks/useMe';
 import { cn } from '@/lib/cn';
 import { fmtDateTime } from '@/lib/format';
+import { transcriptionProgressText } from '@/lib/meetingAnalysis';
 import { canAskAboutMeeting } from '@/lib/meetingAsk';
 import { fmtClock } from '@/lib/meetingAudio';
 import { SPEAKER_TONE_CLASSES, canLinkSpeakers, speakerBadge, speakerOrder } from '@/lib/meetingSpeakers';
@@ -42,6 +43,7 @@ function Body({ minutes, onDeleted }: { minutes: MeetingMinutesView; onDeleted: 
     timer.current = setTimeout(() => setHighlighted(null), 2500);
   };
 
+  const transcribingText = transcriptionProgressText(minutes.transcriptionProgress);
   // 분석에 실패했어도 전사가 있으면 음성을 다시 올릴 필요 없이 다시 정리하면 된다
   const failedAfterTranscript = minutes.meetingMinutesStatus === MEETING_MINUTES_STATUS.FAILED && !!minutes.transcript;
   return (
@@ -49,7 +51,13 @@ function Body({ minutes, onDeleted }: { minutes: MeetingMinutesView; onDeleted: 
       <PageHead crumb={<>회의록<Icon name="chevron-right" size="sm" />{minutes.meetingDate}</>} title={minutes.meetingMinutesTitle} actions={<><MeetingEditActions minutes={minutes} onDeleted={onDeleted} /><MeetingNotionExport minutes={minutes} /><MeetingStatusBadge status={minutes.meetingMinutesStatus} /></>} />
       {minutes.meetingMinutesStatus === MEETING_MINUTES_STATUS.TRANSCRIBING ? (
         <Banner tone="run" icon="clock">
-          <b>음성을 글로 바꾸는 중…</b> 길이에 따라 몇 분 걸릴 수 있어요. 이 화면은 끝나면 저절로 바뀌어요.
+          <b>음성을 글로 바꾸는 중…</b>
+          {transcribingText ? (
+            <span role="status" className="ml-1 font-semibold">
+              ({transcribingText})
+            </span>
+          ) : null}{' '}
+          길이에 따라 몇 분 걸릴 수 있어요. 이 화면은 끝나면 저절로 바뀌어요.
         </Banner>
       ) : null}
       {minutes.meetingMinutesStatus === MEETING_MINUTES_STATUS.ANALYZING ? (

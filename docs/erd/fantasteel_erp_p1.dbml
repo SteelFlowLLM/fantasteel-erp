@@ -780,6 +780,7 @@ Table meeting_minutes {
   analysis_result jsonb [note: 'AI 분석 결과·검토 중 수정본 (결정사항, 할 일·일정·구매 후보와 허가·제외 여부)']
   failure_reason varchar [note: '전사·분석 실패 사유 (FAILED일 때)']
   analysis_progress jsonb [note: 'AI 정리 진행 {phase: ANALYSIS·MERGE·REVIEW, current, total} (2026-10-21, 긴 전사 조각 분석). ANALYZING일 때만 읽는다']
+  transcription_progress jsonb [note: '음성 전사 진행 {phase: DIARIZE·TRANSCRIBE, current, total} (2026-10-22, 긴 회의 나눠 전사). TRANSCRIBING일 때만 읽는다']
   creator_id int [not null, ref: > employee.id, note: '회의록 작성자. 후보 항목을 허가하는 사람']
   confirmed_at timestamptz [note: '확정 시각. 확정 후 수정·재분석 불가']
   notion_page_url varchar [note: 'Notion으로 내보낸 페이지 주소 (2026-10-16, 이슈 #358). 한 번만 내보낸다']

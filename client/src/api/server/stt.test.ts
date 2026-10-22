@@ -37,11 +37,25 @@ describe('음성 인식 연결 설정 (api/stt.ts)', () => {
   });
 
   it('같은 Mac의 음성 서버 상태·켜기·끄기는 /stt/local-server 경로로 보낸다', async () => {
-    const view = { supported: true, installed: true, running: true, healthy: true, pid: 1, logPath: null, message: null };
+    const view = { supported: true, installed: true, running: true, healthy: true, pid: 1, logPath: null, message: null, transcribing: 0, needsConfirm: false, warning: null };
     const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, (c: ServerCall) => (c.path.startsWith('/stt/local-server') ? ok(view) : undefined));
     await sttApi.getLocalServer();
     await sttApi.startLocalServer();
     await sttApi.stopLocalServer();
     expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual(['GET /stt/local-server', 'POST /stt/local-server/start', 'POST /stt/local-server/stop']);
+    expect(calls[1].body).toEqual({});
+  });
+
+  it('받아쓰는 중 확인을 받은 다시 켜기·끄기는 confirmBusy를 보낸다 (이슈 #522)', async () => {
+    const view = { supported: true, installed: true, running: true, healthy: true, pid: 1, logPath: null, message: null, transcribing: 1, needsConfirm: true, warning: '회의 녹음 1건을 받아쓰는 중이에요' };
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, (c: ServerCall) => (c.path.startsWith('/stt/local-server') ? ok(view) : undefined));
+    const refused = await sttApi.startLocalServer();
+    expect(refused).toMatchObject({ needsConfirm: true, transcribing: 1 });
+    await sttApi.startLocalServer({ confirmBusy: true });
+    await sttApi.stopLocalServer({ confirmBusy: true });
+    expect(calls.slice(1).map((c) => [c.path, c.body])).toEqual([
+      ['/stt/local-server/start', { confirmBusy: true }],
+      ['/stt/local-server/stop', { confirmBusy: true }],
+    ]);
   });
 });

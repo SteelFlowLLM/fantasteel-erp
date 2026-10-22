@@ -3,12 +3,20 @@ import { speakerLabelText, type MeetingSpeakerSuggestion, type MeetingSpeakerSug
 import { LlmClient, LlmRequestError, type LlmJsonSchema } from '../llm/llm.client';
 import { llmEndpointOf, LlmSettingsStore } from '../llm/llm-settings.store';
 import { LLM_PROFILE } from '../llm/llm-profiles';
+import { SPEAKER_SUGGEST_CONTEXT_SHARE, SPEAKER_SUGGEST_DEFAULT_CHARS, SPEAKER_SUGGEST_MAX_CHARS, transcriptCharsFor } from './meeting-context-budget';
 
 /** 작성자가 버튼을 누르고 기다리므로 분석(5분)보다 짧게 끊는다 */
 const SUGGEST_TIMEOUT_MS = 2 * 60_000;
 const SUGGEST_MAX_TOKENS = 4000;
-/** 모델에 보내는 전사 글자 수 상한. 누가 누구인지는 앞부분 자기소개·호칭에서 대부분 드러난다 */
-export const SUGGEST_TRANSCRIPT_MAX = 24_000;
+/** 모델에 보내는 전사 글자 수 상한 (문맥 길이를 모를 때). 누가 누구인지는 앞부분 자기소개·호칭에서 대부분 드러난다 */
+export const SUGGEST_TRANSCRIPT_MAX = SPEAKER_SUGGEST_DEFAULT_CHARS;
+/** 전사가 넘칠 때 앞부분 몫. 나머지는 화자마다 처음 발언에 준다(늦게 처음 말한 화자도 근거가 보이게) */
+const HEAD_SHARE = 0.7;
+
+/** 모델 문맥 길이(토큰)로 정한 전사 글자 수 (이슈 #522). 모르면 SUGGEST_TRANSCRIPT_MAX */
+export function speakerTranscriptChars(contextLength: number | null): number {
+  return transcriptCharsFor(contextLength, SPEAKER_SUGGEST_CONTEXT_SHARE, SUGGEST_TRANSCRIPT_MAX, SPEAKER_SUGGEST_MAX_CHARS);
+}
 const REASON_MAX = 200;
 
 export const NO_MODEL_REASON = '사용할 AI 모델이 정해지지 않았어요. AI 연결 설정에서 모델을 골라 주세요';
@@ -65,18 +73,48 @@ function promptSpeakerName(label: string): string {
 }
 
 /** 사용자 메시지: 번호 붙은 참석자, 화자 목록, 번호 붙은 전사(화자 이름표만, 이미 연결된 이름은 숨긴다) */
-export function buildSpeakerUserMessage(input: { attendees: SpeakerSuggestAttendee[]; labels: string[]; segments: TranscriptSegment[] }): string {
+export function buildSpeakerUserMessage(input: { attendees: SpeakerSuggestAttendee[]; labels: string[]; segments: TranscriptSegment[] }, maxChars: number = SUGGEST_TRANSCRIPT_MAX): string {
   const attendees = input.attendees.map((a, index) => `${index + 1}. ${a.employeeName} (${a.departmentName}, ${a.roleLabel})`).join('\n');
   const speakers = input.labels.map(promptSpeakerName).join(', ');
-  const lines: string[] = [];
-  let length = 0;
-  for (const [index, s] of input.segments.entries()) {
-    const line = `[${index + 1}] ${s.speaker ? promptSpeakerName(s.speaker) : '(화자 모름)'}: ${s.text}`;
-    if (length + line.length > SUGGEST_TRANSCRIPT_MAX) break;
-    lines.push(line);
-    length += line.length + 1;
+  const lines = input.segments.map((s, index) => `[${index + 1}] ${s.speaker ? promptSpeakerName(s.speaker) : '(화자 모름)'}: ${s.text}`);
+  const picked = pickSpeakerLines(lines, input.segments, maxChars);
+  const note = picked.length < lines.length ? '\n(전사가 길어 앞부분과 화자마다 처음 발언 몇 개만 보여요. 번호가 건너뛴 곳은 빠진 발언이에요)' : '';
+  return `참석자 (attendeeNo. 이름 (부서, 역할)):\n${attendees}\n\n화자: ${speakers}${note}\n\n<transcript>\n${picked.join('\n')}\n</transcript>`;
+}
+
+/**
+ * 글자 수 안에 넣을 전사 줄 (이슈 #522). 다 들어가면 전부. 넘치면 앞부분(자기소개·호칭)을 먼저 넣고, 남은 몫은 화자마다 아직 보이지 않은
+ * 처음 발언을 한 줄씩 돌아가며 넣는다(회의 중간에 처음 말한 화자도 근거가 보이게). 줄은 원래 순서·번호 그대로다
+ */
+export function pickSpeakerLines(lines: readonly string[], segments: readonly TranscriptSegment[], maxChars: number): string[] {
+  const cost = (index: number) => lines[index].length + 1;
+  if (lines.reduce((sum, line) => sum + line.length + 1, 0) <= maxChars) return [...lines];
+  const chosen = new Set<number>();
+  const headBudget = Math.floor(maxChars * HEAD_SHARE);
+  let used = 0;
+  for (let index = 0; index < lines.length && used + cost(index) <= headBudget; index += 1) {
+    chosen.add(index);
+    used += cost(index);
   }
-  return `참석자 (attendeeNo. 이름 (부서, 역할)):\n${attendees}\n\n화자: ${speakers}\n\n<transcript>\n${lines.join('\n')}\n</transcript>`;
+  let left = maxChars - used;
+  const queues = new Map<string, number[]>();
+  for (const [index, segment] of segments.entries()) {
+    if (chosen.has(index) || !segment.speaker) continue;
+    const queue = queues.get(segment.speaker) ?? [];
+    queue.push(index);
+    queues.set(segment.speaker, queue);
+  }
+  for (let added = true; added; ) {
+    added = false;
+    for (const queue of queues.values()) {
+      const index = queue.shift();
+      if (index === undefined || cost(index) > left) continue;
+      chosen.add(index);
+      left -= cost(index);
+      added = true;
+    }
+  }
+  return [...chosen].sort((a, b) => a - b).map((index) => lines[index]);
 }
 
 /**
@@ -124,14 +162,17 @@ export class MeetingSpeakerSuggester {
   async suggest(input: { attendees: SpeakerSuggestAttendee[]; labels: string[]; segments: TranscriptSegment[] }): Promise<MeetingSpeakerSuggestResult> {
     const settings = await this.llmSettings.read();
     if (!settings.model) return { suggestions: [], failureReason: NO_MODEL_REASON };
+    const endpoint = llmEndpointOf(settings);
+    // 문맥 길이는 덤이다: 모르면 예전 글자 수로 보낸다
+    const contextLength = await this.llmClient.modelContextLength(endpoint, settings.model).catch(() => null);
     let raw: unknown;
     try {
       raw = await this.llmClient.chatJson(
-        llmEndpointOf(settings),
+        endpoint,
         settings.model,
         [
           { role: 'system', content: SPEAKER_SYSTEM_PROMPT },
-          { role: 'user', content: buildSpeakerUserMessage(input) },
+          { role: 'user', content: buildSpeakerUserMessage(input, speakerTranscriptChars(contextLength)) },
         ],
         SPEAKER_JSON_SCHEMA,
         { timeoutMs: SUGGEST_TIMEOUT_MS, maxTokens: SUGGEST_MAX_TOKENS, profile: LLM_PROFILE.MEETING_SPEAKER },

@@ -15,6 +15,9 @@ const listSelect = {
   _count: { select: { attendees: true } },
 } satisfies Prisma.MeetingMinutesSelect;
 
+/** 용어 힌트에 쓰는 기준정보 한 종류의 행 수 상한. 힌트는 200자라 이보다 많아도 들어가지 않는다 */
+const STT_HINT_ROWS = 50;
+
 /** 회의록 상세 (Notion 업무 공간 반영도 같은 모양으로 읽는다) */
 export const meetingMinutesDetailSelect = {
   id: true,
@@ -26,6 +29,7 @@ export const meetingMinutesDetailSelect = {
   summary: true,
   analysisResult: true,
   analysisProgress: true,
+  transcriptionProgress: true,
   failureReason: true,
   confirmedAt: true,
   notionPageUrl: true,
@@ -96,6 +100,29 @@ export class MeetingMinutesRepository {
   /** 아직 TRANSCRIBING인 행만 바꾼다. 그 사이 다른 상태가 됐으면 0건 */
   finishTranscription(tx: Tx, id: number, data: Prisma.MeetingMinutesUncheckedUpdateManyInput) {
     return tx.meetingMinutes.updateMany({ where: { id, meetingMinutesStatus: MEETING_MINUTES_STATUS.TRANSCRIBING }, data });
+  }
+
+  /** 전사 진행 상황 (아직 TRANSCRIBING인 행만, 이슈 #522). updated_at도 바뀌어 살아 있다는 표시를 겸한다 */
+  setTranscriptionProgress(tx: Tx, id: number, progress: Prisma.InputJsonObject) {
+    return tx.meetingMinutes.updateMany({ where: { id, meetingMinutesStatus: MEETING_MINUTES_STATUS.TRANSCRIBING }, data: { transcriptionProgress: progress } });
+  }
+
+  /** 전사 용어 힌트 재료 (읽기, 이슈 #522): 이 회의 참석자 이름, 강종 코드, 원료 이름·코드, 고객사·공급업체 이름 */
+  async findSttHints(tx: Tx, meetingMinutesId: number) {
+    const [attendees, steelGrades, rawMaterials, customers, suppliers] = await Promise.all([
+      tx.meetingAttendee.findMany({ where: { meetingMinutesId }, orderBy: { id: 'asc' }, select: { employee: { select: { employeeName: true } } } }),
+      tx.steelGrade.findMany({ orderBy: { steelGradeCode: 'asc' }, select: { steelGradeCode: true }, take: STT_HINT_ROWS }),
+      tx.item.findMany({ where: { itemType: ITEM_TYPE.RAW_MATERIAL }, orderBy: { id: 'asc' }, select: { itemName: true, itemCode: true }, take: STT_HINT_ROWS }),
+      tx.customer.findMany({ orderBy: { id: 'asc' }, select: { customerName: true }, take: STT_HINT_ROWS }),
+      tx.supplier.findMany({ orderBy: { id: 'asc' }, select: { supplierName: true }, take: STT_HINT_ROWS }),
+    ]);
+    return {
+      attendeeNames: attendees.map((a) => a.employee.employeeName),
+      steelGradeCodes: steelGrades.map((g) => g.steelGradeCode),
+      rawMaterials,
+      customerNames: customers.map((c) => c.customerName),
+      supplierNames: suppliers.map((s) => s.supplierName),
+    };
   }
 
   /** AI 정리를 시작한다: 전사가 있고 정리할 수 있는 상태일 때만 ANALYZING으로. 아니면 0건 */

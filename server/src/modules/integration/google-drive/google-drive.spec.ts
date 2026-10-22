@@ -758,9 +758,9 @@ describe('POST meeting-minutes/audio/from-drive', () => {
     expect(status).toBe(201);
     expect(res.data).toMatchObject({ meetingMinutesTitle: 'Drive 녹음 회의', meetingMinutesStatus: 'TRANSCRIBING', transcript: null, creator: { id: purchaseId } });
     await runner.drain();
-    const [, input] = sttClient.transcribe.mock.calls[0] as [unknown, { audio: Buffer; fileName: string; mimeType: string; speakerCount: number }];
+    const [, input] = sttClient.transcribe.mock.calls[0] as [unknown, { audio: Buffer; fileName: string; mimeType: string; maxSpeakers: number }];
     expect(input.audio.toString()).toBe('fake-m4a-bytes');
-    expect(input).toMatchObject({ fileName: '주간 회의.m4a', mimeType: 'audio/mp4', speakerCount: 2 });
+    expect(input).toMatchObject({ fileName: '주간 회의.m4a', mimeType: 'audio/mp4', maxSpeakers: 2 });
     const detail = await call<MeetingMinutesView>('GET', `/meeting-minutes/${res.data.id}`, purchaseCookie);
     expect(detail.body.data).toMatchObject({ meetingMinutesStatus: 'TRANSCRIBED', transcript: '다음 주 출하 일정 확인' });
   });

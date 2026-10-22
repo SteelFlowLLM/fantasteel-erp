@@ -38,7 +38,7 @@ import { AiActionCardService } from './ai-action-card.service';
 import { ACTION_CARD_TOOLS } from './tools/action-card.tool';
 import { READ_KNOWLEDGE_TOOL } from './tools/knowledge.tool';
 import { AiOpsCardService } from './ai-ops-card.service';
-import { buildMeetingContext } from './assistant-meeting.context';
+import { buildMeetingContext, meetingContextChars } from './assistant-meeting.context';
 import { buildResearchContext, citedResearchSources, type ResearchContext } from './assistant-research.context';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import type { ExecuteAiActionCardDto } from './dto/ai-assistant.dto';
@@ -330,8 +330,11 @@ export class AiAssistantService {
     if (!settings.model) throw noModelException();
     const model = settings.model;
 
+    const endpoint: LlmEndpoint = llmEndpointOf(settings);
+    // 모델 문맥 길이로 회의 내용·지난 대화 몫을 정한다 (이슈 #412·#522)
+    const contextLength = await this.llm.modelContextLength(endpoint, model);
     // 없는 회의록이면 VOC-001(404). 회의록은 전 역할이 볼 수 있어 따로 권한을 보지 않는다
-    const meetingContext = input.meetingMinutesId === undefined ? null : buildMeetingContext(await this.meetingMinutes.get(input.meetingMinutesId));
+    const meetingContext = input.meetingMinutesId === undefined ? null : buildMeetingContext(await this.meetingMinutes.get(input.meetingMinutesId), meetingContextChars(contextLength));
     // 심층 조사 보고서에 대한 질문 (이슈 #384): 내 완료한 조사만. 남의 조사는 없는 것처럼 RES-001
     const research = input.researchRunId === undefined ? null : await this.researchContext(user, input.researchRunId);
     // 저장하는 대화(이슈 #399, 실시간 답만)는 지난 대화를 화면이 보낸 것 대신 DB에서 읽는다. 내 대화가 아니면 AST-001. 새 대화는 지난 대화가 없다
@@ -340,9 +343,8 @@ export class AiAssistantService {
     const meetingThreadId = saving && input.meetingMinutesId !== undefined ? await this.chatThreads.meetingThreadId(user, input.meetingMinutesId) : undefined;
     if (saving && input.meetingMinutesId !== undefined && input.threadId !== undefined && input.threadId !== meetingThreadId) throw new AppException('AST-001');
     const threadId = input.meetingMinutesId !== undefined && saving ? meetingThreadId : input.threadId;
-    const endpoint: LlmEndpoint = llmEndpointOf(settings);
     // 지난 대화는 모델 문맥 길이만큼 (이슈 #412). 넘치는 옛 이야기는 지난 대화 찾기 도구로 읽는다
-    const budget = historyBudget(await this.llm.modelContextLength(endpoint, model));
+    const budget = historyBudget(contextLength);
     const history = recentHistory(saving ? (threadId === undefined ? [] : await this.chatThreads.historyFor(user, threadId, budget.maxTurns)) : (input.history ?? []), budget);
     const historySource = options.historySearch ?? (options.interactive === true ? this.chatThreads.searchSource(user) : null);
     const references = this.referencesFor(input.question, history);

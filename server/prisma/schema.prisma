@@ -832,6 +832,7 @@ model MeetingMinutes {
   analysisResult Json? @map("analysis_result") @db.JsonB /// AI 분석 결과·검토 중 수정본
   failureReason String? @map("failure_reason") @db.VarChar /// 전사·분석 실패 사유 (FAILED일 때)
   analysisProgress Json? @map("analysis_progress") @db.JsonB /// AI 정리 진행 {phase, current, total}. ANALYZING일 때만 읽는다
+  transcriptionProgress Json? @map("transcription_progress") @db.JsonB /// 음성 전사 진행 {phase, current, total}. TRANSCRIBING일 때만 읽는다
   creatorId Int @map("creator_id") /// 회의록 작성자. 후보 항목을 허가하는 사람
   confirmedAt DateTime? @map("confirmed_at") @db.Timestamptz(3) /// 확정 시각. 확정 후 수정·재분석 불가
   notionPageUrl String? @map("notion_page_url") @db.VarChar /// Notion으로 내보낸 페이지 주소. 한 번만 내보낸다

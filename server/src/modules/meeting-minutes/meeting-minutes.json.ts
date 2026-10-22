@@ -1,4 +1,4 @@
-import type { MeetingAnalysis, MeetingAnalysisProgress, MeetingAnalysisTrace, MeetingCandidate, MeetingCandidateContextLine, MeetingReviewResult, MeetingSpeakerSummary, MeetingTraceChange, MeetingTraceStep, TranscriptSegment } from '@fantasteel/shared';
+import type { MeetingAnalysis, MeetingAnalysisProgress, MeetingAnalysisTrace, MeetingTranscriptionProgress, MeetingCandidate, MeetingCandidateContextLine, MeetingReviewResult, MeetingSpeakerSummary, MeetingTraceChange, MeetingTraceStep, TranscriptSegment } from '@fantasteel/shared';
 import type { Prisma } from '../../generated/prisma/client';
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -126,6 +126,14 @@ export function readAnalysis(value: Prisma.JsonValue | null): MeetingAnalysis | 
 export function readProgress(value: Prisma.JsonValue | null): MeetingAnalysisProgress | null {
   if (!isObject(value)) return null;
   const phase = phaseOf(value.phase);
+  if (phase === undefined || typeof value.current !== 'number' || typeof value.total !== 'number') return null;
+  return { phase, current: value.current, total: value.total };
+}
+
+/** 전사 진행 칸 (이슈 #522). 모양이 다르면 null */
+export function readTranscriptionProgress(value: Prisma.JsonValue | null): MeetingTranscriptionProgress | null {
+  if (!isObject(value)) return null;
+  const phase = value.phase === 'DIARIZE' || value.phase === 'TRANSCRIBE' ? value.phase : undefined;
   if (phase === undefined || typeof value.current !== 'number' || typeof value.total !== 'number') return null;
   return { phase, current: value.current, total: value.total };
 }

@@ -140,6 +140,63 @@ describe('SttLocalServerService', () => {
     expect(calls.map((c) => c[0]).every((c) => ['print', 'bootstrap', 'bootout', 'kickstart'].includes(c))).toBe(true);
   });
 
+  describe('받아쓰는 중 다시 켜기·끄기 확인 (이슈 #522)', () => {
+    const health = (body: object) => fetchMock.mockImplementation(async () => new Response(JSON.stringify(body), { status: 200 }));
+    const commands = (run: jest.Mock) => run.mock.calls.map(([, args]: [string, string[]]) => args[0]).filter((c: string) => c !== 'print');
+
+    it('상태에 음성 서버가 받아쓰는 중인 긴 녹음 수를 보인다. 옛 음성 서버는 null', async () => {
+      await writeFile(plist, '<plist/>');
+      const run = jest.fn().mockResolvedValue({ stdout: RUNNING });
+      health({ status: 'ok', transcribing: 2 });
+      expect((await new TestService(run, 'darwin', plist).status()).transcribing).toBe(2);
+      health({ status: 'ok' });
+      expect((await new TestService(run, 'darwin', plist).status()).transcribing).toBeNull();
+    });
+
+    it('받아쓰는 중이면 확인 없이는 다시 켜지 않고 경고를 돌려준다', async () => {
+      await writeFile(plist, '<plist/>');
+      const run = jest.fn().mockResolvedValue({ stdout: RUNNING });
+      health({ status: 'ok', transcribing: 1 });
+      const result = await new TestService(run, 'darwin', plist).start();
+      expect(result).toMatchObject({ needsConfirm: true, running: true, transcribing: 1 });
+      expect(result.warning).toContain('회의 녹음 1건을 받아쓰는 중');
+      expect(result.warning).toContain('다시 켜면');
+      expect(commands(run)).toEqual([]);
+    });
+
+    it('확인하면(confirmBusy) 받아쓰는 중이어도 다시 켠다', async () => {
+      await writeFile(plist, '<plist/>');
+      const run = jest.fn().mockResolvedValue({ stdout: RUNNING });
+      health({ status: 'ok', transcribing: 1 });
+      const result = await new TestService(run, 'darwin', plist).start({ confirmBusy: true });
+      expect(result).toMatchObject({ needsConfirm: false, warning: null });
+      expect(run.mock.calls.some(([, args]: [string, string[]]) => args[0] === 'kickstart' && args[1] === '-k')).toBe(true);
+    });
+
+    it('끄기도 받아쓰는 중이면 확인을 받는다', async () => {
+      await writeFile(plist, '<plist/>');
+      const run = jest.fn().mockResolvedValue({ stdout: RUNNING });
+      health({ status: 'ok', transcribing: 3 });
+      const service = new TestService(run, 'darwin', plist);
+      const refused = await service.stop();
+      expect(refused).toMatchObject({ needsConfirm: true });
+      expect(refused.warning).toContain('끄면');
+      expect(commands(run)).toEqual([]);
+      await service.stop({ confirmBusy: true });
+      expect(commands(run)).toEqual(['bootout']);
+    });
+
+    it('받아쓰는 중이 아니거나 옛 음성 서버면 묻지 않고 다시 켠다', async () => {
+      await writeFile(plist, '<plist/>');
+      for (const body of [{ status: 'ok', transcribing: 0 }, { status: 'ok' }]) {
+        const run = jest.fn().mockResolvedValue({ stdout: RUNNING });
+        health(body);
+        expect(await new TestService(run, 'darwin', plist).start()).toMatchObject({ needsConfirm: false, warning: null });
+        expect(commands(run)).toEqual(['kickstart']);
+      }
+    });
+  });
+
   it('이미 켜져 있으면 다시 시작(kickstart -k)한다', async () => {
     await writeFile(plist, '<plist/>');
     const run = jest.fn<Promise<{ stdout: string }>, [string, string[]]>().mockResolvedValue({ stdout: RUNNING });
