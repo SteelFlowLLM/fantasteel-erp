@@ -229,6 +229,8 @@ export class WebToolSession {
   private readonly logger = new Logger(WebToolSession.name);
   /** 검색·장소 결과로 받은 주소 (키 → 출처). read_web_page는 여기 있는 주소만 읽는다 */
   private readonly found = new Map<string, AiWebSource>();
+  /** 링크로만 허용하는 주소 (allowLink). 읽지도, 출처 대체 후보로 쓰지도 않는다 */
+  private readonly linkable = new Map<string, AiWebSource>();
   /** 읽은 페이지 (이동 뒤 최종 주소) */
   private readonly read: AiWebSource[] = [];
   private searches = 0;
@@ -263,6 +265,15 @@ export class WebToolSession {
   /** 브라우저로 본 페이지 (이슈 #373). 답이 이 주소를 링크로 달 수 있게 한다 */
   rememberVisited(url: string, title: string) {
     this.remember(url, cutText(stripInvisible(title), TITLE_MAX));
+  }
+
+  /**
+   * 답이 링크로 달 수 있게만 허용하는 주소 (Drive 찾기 결과). 읽을 수 있는 주소(found)나 출처 대체 후보에는 넣지 않는다:
+   * 요약만 보고 답했을 때 검색 결과 앞의 3개를 출처로 쓰는데, 쓰지 않은 Drive 찾기 결과가 거기 붙지 않게 한다(이슈 #473)
+   */
+  allowLink(url: string, title: string) {
+    const key = urlKey(url);
+    if (key && !this.found.has(key) && !this.linkable.has(key)) this.linkable.set(key, { title: cutText(stripInvisible(title), TITLE_MAX), url });
   }
 
   /** 검색 전 확인: 회사 안 정보·한 답 횟수·사원별 1분 수. 막히면 그 종류와 이유 */
@@ -429,8 +440,8 @@ export class WebToolSession {
    * 출처 = 답이 링크로 단 결과 → 읽은 페이지 순. 둘 다 없으면 검색 결과 앞의 3개(요약만 보고 답했을 때).
    */
   finalize(answer: string): { answer: string; webSources: AiWebSource[] } {
-    const { answer: filtered, citedKeys } = filterAnswerLinks(answer, new Set(this.found.keys()));
-    const cited = citedKeys.map((key) => this.found.get(key)).filter((s): s is AiWebSource => s !== undefined);
+    const { answer: filtered, citedKeys } = filterAnswerLinks(answer, new Set([...this.found.keys(), ...this.linkable.keys()]));
+    const cited = citedKeys.map((key) => this.found.get(key) ?? this.linkable.get(key)).filter((s): s is AiWebSource => s !== undefined);
     let webSources = uniqueSources([...cited, ...this.read]);
     if (!webSources.length) webSources = [...this.found.values()].slice(0, FALLBACK_SOURCE_COUNT);
     return { answer: filtered, webSources };

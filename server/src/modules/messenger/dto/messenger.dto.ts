@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 import { CHAT_MEMBER_PICK_MAX, CHAT_ROOM_NAME_MAX, CHAT_ROOM_TYPE, MESSAGE_CONTENT_MAX, MESSAGE_EMOTICON_KEYS, MESSAGE_PAGE_SIZE_MAX, MESSAGE_REACTION_EMOJIS, MESSAGE_SEARCH_QUERY_MAX, type ChatRoomType, type MessageEmoticonKey, type MessageReactionEmoji } from '@fantasteel/shared';
 
@@ -84,6 +84,19 @@ export class UploadAttachmentDto {
   @IsString({ message: '메시지는 글자여야 해요' })
   @MaxLength(MESSAGE_CONTENT_MAX, { message: `메시지는 ${MESSAGE_CONTENT_MAX}자까지 보낼 수 있어요` })
   content?: string;
+
+  /**
+   * @멘션한 사원 (글 메시지와 같은 규칙, 방 멤버가 아니면 무시한다). multipart라 같은 이름으로 여러 번 보내면 배열, 한 번만 보내면
+   * 글자 하나로 오므로 숫자 배열로 바꿔 받는다
+   */
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    value === undefined ? undefined : (Array.isArray(value) ? value : [value]).map((id: unknown) => (typeof id === 'string' && id.trim() !== '' ? Number(id) : Number.NaN)),
+  )
+  @IsArray({ message: 'mentionedEmployeeIds는 사원 id 배열이어야 해요' })
+  @ArrayMaxSize(CHAT_MEMBER_PICK_MAX, { message: `한 번에 ${CHAT_MEMBER_PICK_MAX}명까지 멘션할 수 있어요` })
+  @IsInt({ each: true, message: 'mentionedEmployeeIds는 사원 id 배열이어야 해요' })
+  mentionedEmployeeIds?: number[];
 
   /** 화면이 만든 보내기 id(UUID 권장). 같은 id로 다시 보내면 새로 저장하지 않고 처음 메시지를 돌려준다 (#151) */
   @IsOptional()

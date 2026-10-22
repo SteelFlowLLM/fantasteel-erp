@@ -1,16 +1,10 @@
-// 출고 확정 화면 ↔ 서버 API (server/src/modules/shipment, lot). 출고 확정은 POST shipment-requests/:id/issue.
-// 서버에는 출고 전 재검증만 하는 API가 없어서, 화면에 보일 ready·problems는 출하요청·수주·LOT 상세로 출고 확정과 같은 규칙을 계산한다.
+// 출고 확정 화면 ↔ 서버 API (server/src/modules/shipment). 출고 확정은 POST shipment-requests/:id/issue.
+// 서버에는 출고 전 재검증만 하는 API가 없어서, 화면에 보일 ready·problems는 출하요청·수주 상세로 출고 확정과 같은 규칙을 계산한다.
+// 배정 LOT의 상태·생산완료일·검사 판정·상위 히트는 출하요청 응답이 함께 주므로 LOT 상세를 따로 부르지 않는다(이슈 #519).
 // 이 값은 보여 주기만 하고, 확정할 때 서버가 같은 규칙을 다시 확인한다(INV-001·INV-002·INV-004·SHP-002·COM-001).
-// 수주 조회 권한이 없는 사원이면 이론중량·품목 유형을 규격 목록(GET /items)에서 읽고, 수주 매수·출하 매수는 비운다.
-import type {
-  InspectionResult,
-  ItemView,
-  LotDetail,
-  MillSheetSummary,
-  SalesOrderDetail,
-  SalesOrderItemFulfillment,
-  ShipmentRequestDetail,
-} from '@fantasteel/shared';
+// 수주 조회 권한이 없는 사원이면 수주 매수·출하 매수는 비우고, 이론중량·품목 유형은 출하요청 품목의 값을 쓴다.
+// 출고 완료 줄은 재검증하지 않으므로 목록에서 수주를 읽지 않는다.
+import type { InspectionResult, MillSheetSummary, SalesOrderDetail, SalesOrderItemFulfillment, ShipmentRequestAllocation, ShipmentRequestDetail } from '@fantasteel/shared';
 import type { GoodsIssueLineView, GoodsIssueLotRow, GoodsIssueProblem, GoodsIssueQueueRow, GoodsIssueView } from '@/api/goodsIssues';
 import { serverRequest } from '@/api/http';
 import { allPages, orEmpty } from '@/api/server/inspections';
@@ -26,19 +20,12 @@ interface ItemFacts {
   so: SalesOrderItemFulfillment | null;
 }
 
-interface LotFacts {
-  lot: LotDetail;
-  heatInspectionResult: InspectionResult | null;
-}
-
 const productType = (itemType: string | undefined): ProductItemType => (itemType === 'COIL' ? 'COIL' : 'SLAB');
 const passedOf = (result: InspectionResult | null): boolean | null => (result === 'PASS' ? true : result === 'FAIL' ? false : null);
 
-/** 한 번의 화면 조회 안에서 같은 수주·LOT을 두 번 읽지 않도록 모아 둔다 */
+/** 한 번의 화면 조회 안에서 같은 수주를 두 번 읽지 않도록 모아 둔다 */
 class Reader {
   private readonly salesOrders = new Map<number, Promise<SalesOrderDetail | null>>();
-  private readonly lots = new Map<number, Promise<LotDetail>>();
-  private items: Promise<ItemView[]> | null = null;
 
   private salesOrder(id: number): Promise<SalesOrderDetail | null> {
     let found = this.salesOrders.get(id);
@@ -49,36 +36,19 @@ class Reader {
     return found;
   }
 
-  private itemList(): Promise<ItemView[]> {
-    this.items ??= orEmpty(() => serverRequest<ItemView[]>('GET', '/items'), []);
-    return this.items;
-  }
-
-  private lot(id: number): Promise<LotDetail> {
-    let found = this.lots.get(id);
-    if (!found) {
-      found = serverRequest<LotDetail>('GET', `/lots/${id}`);
-      this.lots.set(id, found);
-    }
-    return found;
-  }
-
-  /** shipment_request_item id → 수주 품목 정보 */
-  async itemFacts(detail: ShipmentRequestDetail): Promise<Map<number, ItemFacts>> {
-    const salesOrders = await Promise.all([...new Set(detail.items.map((i) => i.salesOrderId))].map((id) => this.salesOrder(id)));
+  /** shipment_request_item id → 수주 품목 정보. readSalesOrders가 false면 수주를 읽지 않고 출하요청 품목의 값만 쓴다 */
+  async itemFacts(detail: ShipmentRequestDetail, readSalesOrders = true): Promise<Map<number, ItemFacts>> {
+    const salesOrders = readSalesOrders ? await Promise.all([...new Set(detail.items.map((i) => i.salesOrderId))].map((id) => this.salesOrder(id))) : [];
     const soItems = new Map<number, { item: SalesOrderItemFulfillment; lineNo: number }>();
     for (const so of salesOrders) so?.items.forEach((item, index) => soItems.set(item.salesOrderItemId, { item, lineNo: index + 1 }));
-    const missing = detail.items.some((i) => !soItems.has(i.salesOrderItemId));
-    const masters = missing ? new Map((await this.itemList()).map((m) => [m.id, m])) : new Map<number, ItemView>();
     return new Map(
       detail.items.map((i) => {
         const found = soItems.get(i.salesOrderItemId);
-        const master = masters.get(i.itemId);
         return [
           i.id,
           {
-            itemType: productType(found?.item.itemType ?? master?.itemType),
-            theoreticalWeightTon: found?.item.theoreticalWeightTon ?? master?.theoreticalWeightTon ?? '0.000',
+            itemType: productType(found?.item.itemType ?? i.itemType),
+            theoreticalWeightTon: found?.item.theoreticalWeightTon ?? i.theoreticalWeightTon ?? '0.000',
             salesOrderLineNo: found?.lineNo ?? 0,
             so: found?.item ?? null,
           },
@@ -86,22 +56,13 @@ class Reader {
       }),
     );
   }
-
-  /** 배정 LOT의 상세와 상위 히트 판정 */
-  async lotFacts(detail: ShipmentRequestDetail): Promise<Map<number, LotFacts>> {
-    const lotIds = [...new Set(detail.items.flatMap((i) => i.allocations.map((a) => a.lotId)))];
-    const lots = await Promise.all(lotIds.map((id) => this.lot(id)));
-    const heatIds = [...new Set(lots.flatMap((l) => (l.heat ? [l.heat.id] : [])))];
-    const heats = new Map((await Promise.all(heatIds.map((id) => this.lot(id)))).map((h) => [h.id, h]));
-    return new Map(lots.map((lot) => [lot.id, { lot, heatInspectionResult: lot.heat ? (heats.get(lot.heat.id)?.inspectionResult ?? null) : null }]));
-  }
 }
 
-const eligibilityOf = ({ lot, heatInspectionResult }: LotFacts) =>
-  productEligibility({ lotStatus: lot.lotStatus, isPassed: passedOf(lot.inspectionResult) }, lot.heat ? { isPassed: passedOf(heatInspectionResult) } : null);
+const eligibilityOf = (a: ShipmentRequestAllocation) =>
+  productEligibility({ lotStatus: a.lotStatus, isPassed: passedOf(a.inspectionResult) }, a.heat ? { isPassed: passedOf(a.heat.inspectionResult) } : null);
 
 /** 출고 확정 전 재검증 (서버 출고 확정과 같은 순서·규칙) */
-function checkOf(detail: ShipmentRequestDetail, items: Map<number, ItemFacts>, lots: Map<number, LotFacts>): { ready: boolean; problems: GoodsIssueProblem[] } {
+function checkOf(detail: ShipmentRequestDetail, items: Map<number, ItemFacts>): { ready: boolean; problems: GoodsIssueProblem[] } {
   if (detail.shipmentRequestStatus === 'ISSUED') return { ready: false, problems: [] };
   const problems: GoodsIssueProblem[] = [];
   if (detail.shipmentRequestStatus === 'CANCELLED') problems.push({ code: 'COM-003', message: '취소된 출하요청이에요', lotNo: null });
@@ -113,16 +74,14 @@ function checkOf(detail: ShipmentRequestDetail, items: Map<number, ItemFacts>, l
       problems.push({ code: 'SHP-002', message: '예약·수주 잔량보다 많아요', lotNo: null });
     }
     for (const a of confirmed) {
-      const facts = lots.get(a.lotId);
-      if (!facts) continue;
-      if (facts.lot.lotStatus !== 'AVAILABLE') problems.push({ code: 'INV-004', message: '이미 투입·출고된 LOT', lotNo: a.lotNo });
-      else if (eligibilityOf(facts) !== 'ELIGIBLE') problems.push({ code: 'INV-002', message: '미검사·불합격 LOT은 출고할 수 없어요', lotNo: a.lotNo });
+      if (a.lotStatus !== 'AVAILABLE') problems.push({ code: 'INV-004', message: '이미 투입·출고된 LOT', lotNo: a.lotNo });
+      else if (eligibilityOf(a) !== 'ELIGIBLE') problems.push({ code: 'INV-002', message: '미검사·불합격 LOT은 출고할 수 없어요', lotNo: a.lotNo });
     }
   }
   return { ready: problems.length === 0, problems };
 }
 
-function linesOf(detail: ShipmentRequestDetail, items: Map<number, ItemFacts>, lots: Map<number, LotFacts>): GoodsIssueLineView[] {
+function linesOf(detail: ShipmentRequestDetail, items: Map<number, ItemFacts>): GoodsIssueLineView[] {
   return detail.items.map((i, index) => {
     const facts = items.get(i.id);
     const theoreticalWeightTon = facts?.theoreticalWeightTon ?? '0.000';
@@ -142,21 +101,20 @@ function linesOf(detail: ShipmentRequestDetail, items: Map<number, ItemFacts>, l
       salesOrderItemStatus: facts?.so?.salesOrderItemStatus ?? 'OPEN',
       // 서버의 출하 매수가 곧 CONVERTED 예약 합계다 (SalesOrderItemFulfillment.shippedQty)
       convertedQty: facts?.so?.shippedQty ?? 0,
-      lots: i.allocations.map((a): GoodsIssueLotRow => {
-        const lot = lots.get(a.lotId);
-        return {
+      lots: i.allocations.map(
+        (a): GoodsIssueLotRow => ({
           allocationId: a.allocationId,
           allocationStatus: a.allocationStatus,
           lotId: a.lotId,
           lotNo: a.lotNo,
-          producedDate: lot?.lot.producedDate ?? '',
-          heatNo: lot?.lot.heat?.lotNo ?? null,
-          lotStatus: lot?.lot.lotStatus ?? 'AVAILABLE',
-          productInspectionResult: lot?.lot.inspectionResult ?? null,
-          heatInspectionResult: lot?.heatInspectionResult ?? null,
-          eligibility: lot ? eligibilityOf(lot) : 'PENDING',
-        };
-      }),
+          producedDate: a.producedDate ?? '',
+          heatNo: a.heat?.lotNo ?? null,
+          lotStatus: a.lotStatus,
+          productInspectionResult: a.inspectionResult,
+          heatInspectionResult: a.heat?.inspectionResult ?? null,
+          eligibility: eligibilityOf(a),
+        }),
+      ),
     };
   });
 }
@@ -172,8 +130,8 @@ const millSheetsOf = (shipmentRequestId: number) => orEmpty(() => allPages<MillS
 async function detail(shipmentRequestId: number): Promise<GoodsIssueView> {
   const reader = new Reader();
   const d = await serverRequest<ShipmentRequestDetail>('GET', `/shipment-requests/${shipmentRequestId}`);
-  const [items, lots, millSheets] = await Promise.all([reader.itemFacts(d), reader.lotFacts(d), millSheetsOf(d.id)]);
-  const check = checkOf(d, items, lots);
+  const [items, millSheets] = await Promise.all([reader.itemFacts(d), millSheetsOf(d.id)]);
+  const check = checkOf(d, items);
   return {
     id: d.id,
     shipmentRequestNo: d.shipmentRequestNo,
@@ -194,7 +152,7 @@ async function detail(shipmentRequestId: number): Promise<GoodsIssueView> {
     waitingAllocationQty: d.shipmentRequestStatus === 'CANCELLED' ? 0 : d.items.reduce((sum, i) => sum + Math.max(0, i.requestQty - i.allocations.length), 0),
     totalWeightTon: totalWeightOf(d, items),
     millSheets: millSheets.map((m) => ({ id: m.id, millSheetNo: m.millSheetNo, salesOrderId: m.salesOrderId, issuedAt: m.issuedAt, pdfPath: m.pdfPath })),
-    lines: linesOf(d, items, lots),
+    lines: linesOf(d, items),
     ready: check.ready,
     problems: check.problems,
   };
@@ -209,9 +167,9 @@ async function queue(): Promise<GoodsIssueQueueRow[]> {
   const details = (await allPages<ShipmentRequestDetail>('/shipment-requests', { withItems: 'true' })).filter((s) => s.shipmentRequestStatus !== 'CANCELLED');
   const rows = await Promise.all(
     details.map(async (d): Promise<GoodsIssueQueueRow> => {
-      // 출고 완료 줄은 재검증하지 않으므로 LOT을 읽지 않는다
-      const [items, lots] = await Promise.all([reader.itemFacts(d), d.shipmentRequestStatus === 'ISSUED' ? new Map<number, LotFacts>() : reader.lotFacts(d)]);
-      const check = checkOf(d, items, lots);
+      // 출고 완료 줄은 재검증하지 않으므로 수주를 읽지 않는다 (톤은 출하요청 품목의 이론중량으로 계산한다)
+      const items = await reader.itemFacts(d, d.shipmentRequestStatus !== 'ISSUED');
+      const check = checkOf(d, items);
       return {
         shipmentRequestId: d.id,
         shipmentRequestNo: d.shipmentRequestNo,

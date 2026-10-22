@@ -16,6 +16,10 @@ export const DRIVE_SEARCH_LIMIT = 15;
 export const MAX_DRIVE_SEARCHES_PER_ANSWER = 4;
 export const MAX_DRIVE_READS_PER_ANSWER = 4;
 const QUERY_MAX = 100;
+/** 사진 칸에 붙인 Drive 사진의 출처 확인 제한 (가정값). 답을 늦추지 않게 짧게 둔다 */
+const FILE_REF_TIMEOUT_MS = 3_000;
+/** 이름 일부(확장자 뺀 이름)만 답에 나왔을 때 같은 파일로 보는 최소 글자 수. 짧은 낱말('보고서')이 다른 문장에 우연히 들어 있는 것을 막는다 */
+const STEM_MATCH_MIN = 4;
 
 const KIND_LABEL = { audio: '녹음', image: '사진', document: '문서' } as const;
 
@@ -90,6 +94,29 @@ export class AssistantDriveToolbox {
     return [DRIVE_SEARCH, DRIVE_READ];
   }
 
+  /**
+   * 화면이 사진 칸에 붙여 보낸 Drive 사진의 출처. 사진 내용은 이미 질문에 붙어 있어 다시 읽지 않고, 폴더 안 파일인지와 이름만 확인한다.
+   * 폴더 밖·없는 파일·시간 초과(FILE_REF_TIMEOUT_MS)는 출처에서 조용히 뺀다(이름을 화면이 정하게 두지 않고, 출처 때문에 답이 늦어지거나 Drive 연결 문제로 기록되지 않게)
+   */
+  async fileRefs(fileIds: readonly string[]): Promise<AiWebSource[]> {
+    const refs = await Promise.all(
+      fileIds.map(async (id): Promise<AiWebSource[]> => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(new DOMException('Drive 파일 확인 시간이 지났어요', 'AbortError')), FILE_REF_TIMEOUT_MS);
+        try {
+          const file = await this.drive.fileName(id, controller.signal);
+          return [{ title: stripInvisible(file.name), url: driveWebUrl(file.id) }];
+        } catch (error) {
+          if (error instanceof AppException || controller.signal.aborted) return [];
+          throw error;
+        } finally {
+          clearTimeout(timer);
+        }
+      }),
+    );
+    return refs.flat();
+  }
+
   /** vision: 지금 모델이 사진을 보는지 (모르면 null) */
   session(vision: () => Promise<boolean | null>): DriveToolSession {
     return new DriveToolSession(this.drive, this.reader, vision);
@@ -100,8 +127,10 @@ export class DriveToolSession {
   private readonly logger = new Logger(DriveToolSession.name);
   private searches = 0;
   private reads = 0;
-  /** 이번 답에서 찾거나 읽은 파일 (답의 출처) */
+  /** 이번 답에서 읽은 파일 (답의 출처) */
   private readonly seen: AiWebSource[] = [];
+  /** 이번 답에서 찾기로 나온 파일. 읽지 않았어도 답에 나온 것은 출처가 된다 */
+  private readonly found: (AiWebSource & { id: string })[] = [];
 
   constructor(
     private readonly drive: DriveSource,
@@ -113,9 +142,20 @@ export class DriveToolSession {
     return AI_ASSISTANT_DRIVE_TOOLS.includes(name);
   }
 
-  /** 이번 답에서 찾거나 읽은 파일 (답의 출처). 찾기만 하고 답한 경우에도 출처가 빈 채로 보이지 않게 찾은 파일도 넣는다 */
-  sources(): AiWebSource[] {
-    return [...this.seen];
+  /**
+   * 이번 답의 Drive 출처: 읽은 파일 + 찾기에 나온 파일 중 답에 나온 것(주소·id·이름). 찾기만 하고 답한 경우에도 출처가 '없음'으로 보이지 않게 하되,
+   * 답에 쓰지 않은 찾기 결과가 출처에 줄줄이 붙지 않게 한다(이슈 #473). 이름은 자모 풀림(NFD)과 확장자를 무시하고 견준다
+   */
+  sources(answer = ''): AiWebSource[] {
+    const text = answer.normalize('NFC').toLowerCase();
+    const nameOf = (title: string) => title.normalize('NFC').toLowerCase();
+    const stemOf = (title: string) => nameOf(title).replace(/\.[a-z0-9]{1,5}$/, '');
+    // 주소·id·확장자까지 쓴 이름은 그대로 맞는 것이고, 확장자를 뺀 이름은 STEM_MATCH_MIN자 이상일 때만 맞는 것으로 본다
+    const mentioned = this.found.filter(
+      (f) => text.includes(f.url.toLowerCase()) || text.includes(f.id.toLowerCase()) || text.includes(nameOf(f.title)) || (stemOf(f.title).length >= STEM_MATCH_MIN && text.includes(stemOf(f.title))),
+    );
+    const sources = [...this.seen, ...mentioned.map(({ title, url }) => ({ title, url }))];
+    return sources.filter((s, i) => sources.findIndex((o) => o.url === s.url) === i);
   }
 
   private remember(sources: readonly AiWebSource[]) {
@@ -149,9 +189,10 @@ export class DriveToolSession {
     if (++this.searches > MAX_DRIVE_SEARCHES_PER_ANSWER) return failure(`이번 질문에서는 Drive 찾기를 ${MAX_DRIVE_SEARCHES_PER_ANSWER}번까지만 해요`, { 안내: '지금까지의 결과로 답해요' });
     const files = await this.drive.searchFiles(query, kind, DRIVE_SEARCH_LIMIT);
     if (files.length === 0) return failure('찾은 파일이 없어요', { 검색어: query, 안내: '더 짧은 핵심 낱말 하나나 문서 종류 낱말(기준서·매뉴얼·표준서·단가표·점검표 등)로 한 번 더 찾아요. 그래도 없으면 없다고 알려요' });
-    const body = files.map((f, i) => `${i + 1}. ${cutText(stripInvisible(f.name), 200)} (${KIND_LABEL[f.kind]}, ${sizeText(f.size)}, 수정 ${f.modifiedTime?.slice(0, 10) ?? '알 수 없음'})\n   id: ${f.id}`).join('\n');
+    const body = files.map((f, i) => `${i + 1}. ${cutText(stripInvisible(f.name), 200)} (${KIND_LABEL[f.kind]}, ${sizeText(f.size)}, 수정 ${f.modifiedTime?.slice(0, 10) ?? '알 수 없음'})\n   id: ${f.id}\n   주소: ${driveWebUrl(f.id)}`).join('\n');
     const webSources = files.map((f) => ({ title: stripInvisible(f.name), url: driveWebUrl(f.id) }));
-    // 답의 출처는 읽은 파일만 (내용으로도 찾아 결과가 많아져, 찾기만 하고 읽지 않은 파일이 출처에 줄줄이 붙지 않게, 이슈 #473). 결과 줄의 webSources는 도구 기록용
+    for (const [index, source] of webSources.entries()) if (!this.found.some((o) => o.url === source.url)) this.found.push({ ...source, id: files[index].id });
+    // 답의 출처는 읽은 파일과, 찾기만 했다면 답에 이름·주소·id가 나온 파일뿐이다 (내용으로도 찾아 결과가 많아져, 읽지도 쓰지도 않은 파일이 출처에 줄줄이 붙지 않게, 이슈 #473). 결과 줄의 webSources는 도구 기록용
     return { content: [`[Drive 찾기 결과] ${query ? `이름이나 내용에 "${query}"` : '최근 파일'} · ${files.length}개`, DRIVE_UNTRUSTED_NOTE, wrapUntrusted('drive_search', body)].join('\n'), webSources };
   }
 
@@ -168,7 +209,9 @@ export class DriveToolSession {
   private async idByName(name: string): Promise<string> {
     // 이름으로 집는 것이라 내용 검색은 하지 않는다 (내용에 그 낱말이 든 다른 파일이 15개 안에 밀어내지 않게)
     const files: DriveFileView[] = await this.drive.searchFiles(name, 'all', DRIVE_SEARCH_LIMIT, false);
-    const same = files.filter((f) => f.name.trim().toLowerCase() === name.trim().toLowerCase());
+    // 모델이 넘기는 이름은 합친 글자(NFC)인데 Drive 이름은 자모로 풀린 글자(NFD)일 수 있어 양쪽을 합쳐서 견준다
+    const keyOf = (value: string) => value.normalize('NFC').trim().toLowerCase();
+    const same = files.filter((f) => keyOf(f.name) === keyOf(name));
     if (same.length === 1) return same[0].id;
     throw new ToolArgumentError(same.length > 1 ? '이름이 같은 파일이 여럿이에요. drive_search 결과의 id를 넘겨요' : 'file은 drive_search 결과의 파일 id예요. 먼저 drive_search로 찾아요');
   }

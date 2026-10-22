@@ -255,6 +255,15 @@ export class AskAiAssistantDto {
   @ArrayUnique({ message: '같은 파일을 두 번 붙일 수 없어요' })
   @Matches(/^[A-Za-z0-9_-]{10,200}$/, { each: true, message: 'Drive 파일 id가 올바르지 않아요' })
   driveFileIds?: string[];
+
+  /** 화면이 사진 칸에 붙여 보낸 Drive 사진의 파일 id. 사진 내용은 images로 오므로 읽지 않고, 답의 Drive 출처로만 쓴다 (폴더 안 파일일 때만) */
+  @IsOptional()
+  @IsArray()
+  // 같은 Drive 사진을 피커와 @로 두 번 붙일 수 있어 거절하지 않고 한 번으로 합친다
+  @Transform(({ value }: { value: unknown }) => (Array.isArray(value) ? [...new Set(value as unknown[])] : value))
+  @ArrayMaxSize(AI_IMAGE_MAX_COUNT, { message: `사진은 ${AI_IMAGE_MAX_COUNT}장까지 붙일 수 있어요` })
+  @Matches(/^[A-Za-z0-9_-]{10,200}$/, { each: true, message: 'Drive 파일 id가 올바르지 않아요' })
+  driveImageIds?: string[];
 }
 
 /** Notion 페이지 고치기 한 군데 (이슈 #398) */

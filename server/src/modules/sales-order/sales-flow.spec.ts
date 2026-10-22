@@ -531,6 +531,17 @@ describe('LOT 배정 (REQ-INV-006·009)', () => {
     expect(event.businessEventLots.map((l) => l.lotId).sort()).toEqual([older[0].id, older[1].id].sort());
   });
 
+  it('추천: 없는 품목·출고 확정된 출하요청은 거절하고 작업 로그를 남기지 않는다', async () => {
+    const itemId = await nextSlabItemId();
+    await addSlabs(itemId, 1);
+    const { salesOrderId, request, requestItemId } = await requestFor(itemId, 1);
+    const recommend = (shipmentRequestItemId: number) => inventory.recommendAllocations(sales, { allocationPurpose: 'SHIPMENT', shipmentRequestItemId });
+    expect(await codeOf(recommend(0))).toBe('COM-003');
+    await prisma.shipmentRequest.update({ where: { id: request.id }, data: { shipmentRequestStatus: SHIPMENT_REQUEST_STATUS.ISSUED } });
+    expect(await codeOf(recommend(requestItemId))).toBe('COM-001');
+    expect(await prisma.businessEvent.count({ where: { salesOrderId, businessEventType: BUSINESS_EVENT_TYPE.ALLOCATION_RECOMMENDED } })).toBe(0);
+  });
+
   it('확정 → 모두 배정되면 배정 확정, 해제하면 배정 대기, 변경은 한 번에', async () => {
     const itemId = await nextSlabItemId();
     const lots = await addSlabs(itemId, 3);

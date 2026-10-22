@@ -229,7 +229,8 @@ export function readDriveFile(raw: unknown): DriveFileMeta | null {
   const size = typeof r.size === 'string' && /^\d+$/.test(r.size) ? Number(r.size) : typeof r.size === 'number' ? r.size : null;
   return {
     id: r.id,
-    name: r.name,
+    // macOS에서 올린 파일은 한글 이름이 자모로 풀린(NFD) 채 온다. 화면 검색어(NFC)와 맞고 AI가 옮겨 적다 글자가 깨지지 않게 합쳐서 쓴다
+    name: r.name.normalize('NFC'),
     mimeType: r.mimeType,
     size,
     modifiedTime: typeof r.modifiedTime === 'string' ? r.modifiedTime : null,

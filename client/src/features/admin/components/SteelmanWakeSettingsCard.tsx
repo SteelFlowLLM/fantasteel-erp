@@ -92,6 +92,7 @@ function VoiceServerStatus({ canEdit, check, onOpenVoiceTab }: { canEdit: boolea
   const result = query.data;
   return (
     <Field
+      group
       label="음성 서버"
       hint={
         <>

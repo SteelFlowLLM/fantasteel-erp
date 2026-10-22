@@ -421,35 +421,41 @@ export class InventoryService {
   /** 배정 추천: 저장하지 않고 작업 로그(ALLOCATION_RECOMMENDED)만 남긴다. 후보 전부를 FIFO 순서로 주고 앞에서 미배정 매수만큼 추천한다 */
   async recommendAllocations(user: AuthUser, dto: RecommendAllocationDto): Promise<AllocationRecommendation> {
     this.assertPurposePermission(user, dto.allocationPurpose, 'USE');
-    return this.prisma.$transaction(async (tx) => {
-      const requestItem = await this.openShipmentRequestItem(tx, dto.shipmentRequestItemId);
-      const unallocatedQty = requestItem.requestQty - (await this.repository.countConfirmedShipmentAllocations(tx, requestItem.id));
-      // 트랜잭션 안에서도 불리므로 한 연결에 쿼리를 겹쳐 보내지 않고 차례로 읽는다 (pg 다음 버전에서 오류, #478)
-      const lots = await this.repository.findAllocatableLots(tx, requestItem.salesOrderItem.itemId);
-      const yardNames = await this.yardNames(tx);
-      if (unallocatedQty > 0 && lots.length === 0) throw new AppException('INV-001', '배정할 수 있는 합격 LOT이 없어요');
-      const candidates: AllocationCandidate[] = lots.map((lot, index) => ({
-        lotId: lot.id,
-        lotNo: lot.lot_no,
-        producedDate: dateOnly(lot.produced_date),
-        heatNo: lot.heat_no,
-        yardId: lot.yard_id,
-        yardName: yardNameOf(yardNames, lot.yard_id),
-        isRecommended: index < unallocatedQty,
-      }));
-      const recommended = candidates.filter((c) => c.isRecommended);
-      // 미배정 매수가 없으면 추천한 LOT이 없으므로 작업 로그도 남기지 않는다
-      if (recommended.length > 0) await this.businessEventRecorder.record(tx, {
-        type: BUSINESS_EVENT_TYPE.ALLOCATION_RECOMMENDED,
-        actor: user,
-        target: { table: 'shipment_request_item', id: requestItem.id },
-        salesOrderId: requestItem.salesOrderItem.salesOrderId,
-        lotIds: recommended.map((c) => c.lotId),
-        after: { unallocatedQty, recommendedLotNos: recommended.map((c) => c.lotNo) },
-        reason: `FIFO_RECOMMENDATION: 생산완료일이 오래된 순으로 ${recommended.length}개 추천 (미배정 ${unallocatedQty}매)`,
-      });
-      return { allocationPurpose: ALLOCATION_PURPOSE.SHIPMENT, shipmentRequestItemId: requestItem.id, itemId: requestItem.salesOrderItem.itemId, unallocatedQty, candidates };
-    });
+    // 추천은 아무것도 바꾸지 않아 출하요청을 잠글 필요가 없다. 후보 조회(LOT 전체 + 야드)를 트랜잭션 안에서 하면
+    // DB가 느릴 때 기본 5초 제한을 넘겨 COM-999가 나므로, 읽기는 밖에서 하고 작업 로그만 짧은 트랜잭션에 남긴다.
+    // 한 연결에 쿼리를 겹쳐 보내지 않고 차례로 읽는다 (pg 다음 버전에서 오류, #478)
+    const requestItem = await this.repository.findShipmentRequestItem(this.prisma, dto.shipmentRequestItemId);
+    if (!requestItem) throw new AppException('COM-003');
+    this.assertOpenShipmentRequest(requestItem.shipmentRequest.shipmentRequestStatus);
+    const unallocatedQty = requestItem.requestQty - (await this.repository.countConfirmedShipmentAllocations(this.prisma, requestItem.id));
+    const lots = await this.repository.findAllocatableLots(this.prisma, requestItem.salesOrderItem.itemId);
+    const yardNames = await this.yardNames(this.prisma);
+    if (unallocatedQty > 0 && lots.length === 0) throw new AppException('INV-001', '배정할 수 있는 합격 LOT이 없어요');
+    const candidates: AllocationCandidate[] = lots.map((lot, index) => ({
+      lotId: lot.id,
+      lotNo: lot.lot_no,
+      producedDate: dateOnly(lot.produced_date),
+      heatNo: lot.heat_no,
+      yardId: lot.yard_id,
+      yardName: yardNameOf(yardNames, lot.yard_id),
+      isRecommended: index < unallocatedQty,
+    }));
+    const recommended = candidates.filter((c) => c.isRecommended);
+    // 미배정 매수가 없으면 추천한 LOT이 없으므로 작업 로그도 남기지 않는다
+    if (recommended.length > 0) {
+      await this.prisma.$transaction((tx) =>
+        this.businessEventRecorder.record(tx, {
+          type: BUSINESS_EVENT_TYPE.ALLOCATION_RECOMMENDED,
+          actor: user,
+          target: { table: 'shipment_request_item', id: requestItem.id },
+          salesOrderId: requestItem.salesOrderItem.salesOrderId,
+          lotIds: recommended.map((c) => c.lotId),
+          after: { unallocatedQty, recommendedLotNos: recommended.map((c) => c.lotNo) },
+          reason: `FIFO_RECOMMENDATION: 생산완료일이 오래된 순으로 ${recommended.length}개 추천 (미배정 ${unallocatedQty}매)`,
+        }),
+      );
+    }
+    return { allocationPurpose: ALLOCATION_PURPOSE.SHIPMENT, shipmentRequestItemId: requestItem.id, itemId: requestItem.salesOrderItem.itemId, unallocatedQty, candidates };
   }
 
   /**

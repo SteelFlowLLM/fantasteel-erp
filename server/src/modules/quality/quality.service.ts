@@ -47,6 +47,9 @@ function lockScopeLotIds(lot: {
 const DEFAULT_PAGE = 1;
 const DEFAULT_SIZE = 20;
 
+/** 검사 등록은 판정 뒤 재고 반영·자동 예약까지 쿼리가 많아 DB가 느리면 기본 5초 제한을 넘어 COM-999가 났다. 다른 쓰기 서비스와 같은 제한을 쓴다 */
+const LONG_TX = { maxWait: 5_000, timeout: 30_000 };
+
 /** 보낸 항목 확인: 같은 항목을 두 번 보내거나 이 LOT에 적용되지 않는 항목이면 COM-004 */
 function assertValueTargets(itemIds: number[], applicableItemIds: Set<number>): void {
   const seen = new Set<number>();
@@ -242,7 +245,7 @@ export class QualityService {
       const detail = await this.repository.findInspectionDetail(tx, inspection.id);
       if (!detail) throw new AppException('COM-003');
       return { ...toQualityInspectionDetail(detail, await this.repository.findIssuedMillSheetNos(tx, lockScopeLotIds(detail.lot))), stockSync };
-    });
+    }, LONG_TX);
   }
 
   /**

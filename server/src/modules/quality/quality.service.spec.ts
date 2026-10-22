@@ -438,7 +438,15 @@ describe('검사 등록·자동 판정 (API-117·224, REQ-QC-001·003)', () => {
   });
 
   it('적용 항목이 모두 기준 안이면 PASS, 최신 기준 버전·검사자를 남기고 상세를 돌려준다', async () => {
-    const detail = await service.registerQualityInspection({ lotId: lots.coilPass, values: passValues9mm() }, user);
+    // 등록 트랜잭션은 느린 DB에서도 기본 5초 제한에 걸리지 않게 긴 제한을 쓴다 (부하 중 시연에서 COM-999)
+    const transaction = jest.spyOn(prisma, '$transaction');
+    let detail;
+    try {
+      detail = await service.registerQualityInspection({ lotId: lots.coilPass, values: passValues9mm() }, user);
+      expect(transaction.mock.calls.map((call) => call[1])).toContainEqual({ maxWait: 5_000, timeout: 30_000 });
+    } finally {
+      transaction.mockRestore();
+    }
     expect(detail).toMatchObject({
       lotId: lots.coilPass,
       inspectionResult: 'PASS',

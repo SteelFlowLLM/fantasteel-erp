@@ -177,10 +177,11 @@ async function upload(cookie: string, chatRoomId: number, fileName: string, cont
   return uploadMany(cookie, chatRoomId, [{ fileName, content }], text);
 }
 
-async function uploadMany(cookie: string, chatRoomId: number, files: readonly { fileName: string; content: Uint8Array }[], text?: string) {
+async function uploadMany(cookie: string, chatRoomId: number, files: readonly { fileName: string; content: Uint8Array }[], text?: string, mentionedEmployeeIds: readonly (number | string)[] = []) {
   const form = new FormData();
   for (const file of files) form.append('files', new Blob([file.content]), file.fileName);
   if (text !== undefined) form.append('content', text);
+  for (const id of mentionedEmployeeIds) form.append('mentionedEmployeeIds', String(id));
   const res = await fetch(`${baseUrl}/chat-rooms/${chatRoomId}/attachments`, { method: 'POST', headers: { cookie }, body: form });
   return { status: res.status, body: (await res.json()) as { success: boolean; data: ChatMessageView; error?: { code: string; message: string } } };
 }
@@ -392,6 +393,55 @@ describe('멘션·업무방 알림', () => {
     const rows = await notificationsOf(sent.body.data.id);
     expect(rows.map((r) => [r.recipientId, r.notificationType])).toEqual([[qualityId, NOTIFICATION_TYPE.MENTION]]);
     expect(rows[0].notificationContent).toBe('박서영님이 멘션했어요 · 멘션방 · 확인');
+  });
+});
+
+describe('첨부와 함께 보낸 멘션', () => {
+  const notificationsOf = (messageId: number) => prisma.notification.findMany({ where: { messageId }, orderBy: { recipientId: 'asc' } });
+  const bytes = new TextEncoder().encode('hello');
+
+  it('멘션을 한 명만 보내도(글자 하나로 온다) 멘션 알림이 가고, 방 멤버가 아닌 사원·나 자신은 무시한다', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId, productionId], chatRoomName: '첨부 멘션방' });
+    const sent = await uploadMany(salesCookie, room.id, [{ fileName: '성적서.txt', content: bytes }], '@서민지 확인', [qualityId]);
+    expect(sent.status).toBe(201);
+    const rows = await notificationsOf(sent.body.data.id);
+    expect(rows.map((r) => [r.recipientId, r.notificationType])).toEqual([[qualityId, NOTIFICATION_TYPE.MENTION]]);
+    expect(rows[0].notificationContent).toBe('박서영님이 멘션했어요 · 첨부 멘션방 · @서민지 확인');
+
+    const several = await uploadMany(salesCookie, room.id, [{ fileName: 'a.txt', content: bytes }], '확인', [qualityId, productionId, purchaseId, salesId]);
+    const severalRows = await notificationsOf(several.body.data.id);
+    expect(severalRows.map((r) => [r.recipientId, r.notificationType])).toEqual(
+      [
+        [qualityId, NOTIFICATION_TYPE.MENTION],
+        [productionId, NOTIFICATION_TYPE.MENTION],
+      ].sort((a, b) => Number(a[0]) - Number(b[0])),
+    );
+  });
+
+  it('같은 clientMessageId로 다시 보내도 멘션 알림은 한 번만 간다', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    const send = async () => {
+      const form = new FormData();
+      form.append('files', new Blob([bytes]), 'a.txt');
+      form.append('content', '확인');
+      form.append('mentionedEmployeeIds', String(qualityId));
+      form.append('clientMessageId', 'a1b2c3d4-0000-4000-8000-000000000077');
+      return (await (await fetch(`${baseUrl}/chat-rooms/${room.id}/attachments`, { method: 'POST', headers: { cookie: salesCookie }, body: form })).json()) as { data: ChatMessageView };
+    };
+    const first = await send();
+    const again = await send();
+    expect(again.data.id).toBe(first.data.id);
+    expect(await notificationsOf(first.data.id)).toHaveLength(1);
+  });
+
+  it('멘션 id가 숫자가 아니면 400, 정한 수를 넘어도 400이고 아무것도 저장하지 않는다', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [qualityId] });
+    const before = await prisma.message.count({ where: { chatRoomId: room.id } });
+    const bad = await uploadMany(salesCookie, room.id, [{ fileName: 'a.txt', content: bytes }], '확인', ['abc']);
+    expect(bad.status).toBe(400);
+    const tooMany = await uploadMany(salesCookie, room.id, [{ fileName: 'a.txt', content: bytes }], '확인', Array.from({ length: CHAT_MEMBER_PICK_MAX + 1 }, (_, i) => i + 1));
+    expect(tooMany.status).toBe(400);
+    expect(await prisma.message.count({ where: { chatRoomId: room.id } })).toBe(before);
   });
 });
 

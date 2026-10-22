@@ -132,6 +132,18 @@ export class GoogleDriveService {
   }
 
   /**
+   * 폴더 안 파일의 이름만 확인한다 (사진 출처용). checkFile과 같이 폴더 밖·휴지통·없는 파일은 INT-012지만 종류·크기는 보지 않는다.
+   * signal은 호출한 쪽이 끊는 짧은 제한이라, 끊겨도 Drive 연결 문제(last_error)로 기록되지 않는다
+   */
+  async fileName(fileId: string, signal: AbortSignal): Promise<{ id: string; name: string }> {
+    if (!isDriveId(fileId)) throw new AppException('INT-012');
+    const folderId = await this.assertReady();
+    const meta = await this.client.getFile(fileId, DRIVE_FILE_FIELDS, signal);
+    if (meta.trashed || !meta.parents.includes(folderId)) throw new AppException('INT-012', '설정한 Drive 폴더에 그 파일이 없어요');
+    return { id: meta.id, name: meta.name };
+  }
+
+  /**
    * 확인한 뒤 내용을 스트림으로 연다 (GET …/files/:fileId/content). Range는 한 구간만 Drive로 넘기고(206),
    * 파일 크기를 넘는 범위면 열지 않고 unsatisfiable로 돌려준다(416). Google 문서류는 PDF로 내보낸 것을 통째로 준다 (Range 없음).
    */

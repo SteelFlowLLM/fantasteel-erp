@@ -199,6 +199,30 @@ describe('ShipmentService 출고 확정 (REQ-SHP-002·003, REQ-INV-005, REQ-SO-0
     expect(await prisma.millSheet.count({ where: { shipmentRequestId: request.id } })).toBe(1);
   });
 
+  it('출하요청 응답이 배정 LOT의 상태·생산완료일·검사 판정·상위 히트를 함께 준다 (LOT 상세를 따로 부르지 않게)', async () => {
+    const so = await salesOrder(2);
+    const request = await shipmentRequest([{ salesOrderItemId: so.salesOrderItemId, requestQty: 2 }]);
+    const [passed, failed] = request.lotsByLine[0];
+    await prisma.qualityInspection.updateMany({ where: { lotId: failed.heatId }, data: { inspectionResult: INSPECTION_RESULT.FAIL } });
+
+    const allocations = (await service.findOne(logistics, request.id)).items[0].allocations;
+    expect(allocations).toEqual([
+      expect.objectContaining({ lotId: passed.slabId, lotStatus: LOT_STATUS.AVAILABLE, producedDate: '2026-10-02', inspectionResult: INSPECTION_RESULT.PASS, heat: { id: passed.heatId, lotNo: passed.heatNo, inspectionResult: INSPECTION_RESULT.PASS } }),
+      expect.objectContaining({ lotId: failed.slabId, inspectionResult: INSPECTION_RESULT.PASS, heat: { id: failed.heatId, lotNo: failed.heatNo, inspectionResult: INSPECTION_RESULT.FAIL } }),
+    ]);
+    // 목록(withItems)도 같은 값이다
+    const listed = await service.list(logistics, { shipmentRequestNo: request.shipmentRequestNo, withItems: true, page: 1, size: 20 });
+    expect(listed.items).toEqual([expect.objectContaining({ id: request.id, items: [expect.objectContaining({ allocations })] })]);
+
+    // 검사·상위 히트가 없는 LOT은 null로 준다
+    const bare = await prisma.lot.create({ data: { lotNo: `SL-GI-BARE-${request.id}`, lotType: LOT_TYPE.SLAB, itemId: item.id, productionResultId: casting, producedDate: new Date('2026-10-02T00:00:00.000Z') } });
+    await prisma.allocation.create({
+      data: { lotId: bare.id, allocationPurpose: ALLOCATION_PURPOSE.SHIPMENT, shipmentRequestItemId: (await service.findOne(logistics, request.id)).items[0].id, allocationStatus: ALLOCATION_STATUS.CONFIRMED },
+    });
+    const withBare = (await service.findOne(logistics, request.id)).items[0].allocations.find((a) => a.lotId === bare.id);
+    expect(withBare).toMatchObject({ inspectionResult: null, heat: null });
+  });
+
   it('상위 히트가 불합격인 슬래브가 섞여 있으면 INV-002로 막고 아무것도 바뀌지 않는다', async () => {
     const so = await salesOrder(2);
     const request = await shipmentRequest([{ salesOrderItemId: so.salesOrderItemId, requestQty: 2 }]);

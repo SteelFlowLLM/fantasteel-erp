@@ -368,6 +368,10 @@ export class AiAssistantService {
     // Drive 도구도 같다 (이슈 #398 2단계). @로 붙인 파일은 칩과 상관없이 시작 전에 읽는다: 폴더 밖·없는 파일·너무 큰 파일은 평소 API 오류(INT-012·014)
     const driveOn = options.interactive === true && input.drive === true && (await this.driveTools.availability()).available;
     const attached = options.interactive === true && input.driveFileIds?.length ? await this.readAttachments(input.driveFileIds) : null;
+    // 화면이 사진 칸에 붙여 보낸 Drive 사진도 Drive 파일 출처로 보인다 (사진 내용은 이미 질문에 붙어 있다)
+    // Drive 사진 id는 붙인 사진의 일부여야 한다(사진 없이 아무 파일 id를 출처로 달 수 없게)
+    if (options.interactive === true && (input.driveImageIds?.length ?? 0) > (input.images?.length ?? 0)) throw new AppException('COM-004', 'Drive 사진 파일이 붙인 사진보다 많아요');
+    const driveImages = options.interactive === true && input.driveImageIds?.length ? await this.driveTools.fileRefs(input.driveImageIds) : [];
     // 모델이 사진을 보는지는 Drive 사진을 읽거나 브라우저 화면 사진을 보낼 때 한 번만 묻는다
     let vision: Promise<boolean | null> | null = null;
     const visionOf = () => (vision ??= this.llm.modelCapabilities(endpoint, model).then((caps) => caps.vision));
@@ -567,7 +571,11 @@ export class AiAssistantService {
                 result = { content: driveResult.content, source: null };
                 webSources = driveResult.webSources;
                 roundImages.push(...(driveResult.images ?? []));
-                if (toolCall.name !== 'drive_search') for (const source of driveResult.webSources) web?.rememberVisited(source.url, source.title);
+                // 읽은 파일은 읽은 페이지처럼, 찾기 결과는 링크로만 허용한다 (쓰지 않은 찾기 결과가 웹 출처 대체 후보로 붙지 않게)
+                for (const source of driveResult.webSources) {
+                  if (toolCall.name === 'drive_search') web?.allowLink(source.url, source.title);
+                  else web?.rememberVisited(source.url, source.title);
+                }
               } else if (historySearch?.has(toolCall.name)) {
                 result = { content: await historySearch.run(toolCall), source: null };
               } else {
@@ -627,8 +635,8 @@ export class AiAssistantService {
           // 조사 보고서의 출처를 [n]으로 쓴 답은 그 출처를 웹 출처로 함께 돌려준다
           const researchSources = research ? citedResearchSources(finalAnswer, research).filter((s) => !webFinal?.webSources.some((w) => w.url === s.url)) : [];
           // 읽은 Notion 페이지는 웹 출처처럼 답 아래 보인다 (이슈 #398)
-          // @로 붙인 파일과 읽은 Drive 파일도 같다 (이슈 #398 2단계)
-          const notionSources = [...(notion?.sources() ?? []), ...(drive?.sources() ?? []), ...(attached?.sources ?? [])].filter(
+          // @로 붙인 파일과 읽은 Drive 파일, 찾아서 답에 쓴 Drive 파일도 같다 (이슈 #398 2단계)
+          const notionSources = [...(notion?.sources() ?? []), ...(drive?.sources(finalAnswer) ?? []), ...(attached?.sources ?? []), ...driveImages].filter(
             (s, i, all) => !webFinal?.webSources.some((w) => w.url === s.url) && all.findIndex((o) => o.url === s.url) === i,
           );
           const webSources = webFinal || researchSources.length || notionSources.length ? [...(webFinal?.webSources ?? []), ...researchSources, ...notionSources] : null;

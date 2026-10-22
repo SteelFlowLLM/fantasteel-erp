@@ -226,6 +226,21 @@ describe('메신저 서버 어댑터 (api/server/messenger.ts)', () => {
     expect(await files[0].text()).toBe('hello');
   });
 
+  it('파일과 함께 보낸 글의 @멘션도 멘션한 사원 id를 같은 이름으로 하나씩 multipart에 담아 보낸다', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.sales, (c) => {
+      if (c.path === '/chat-rooms/7') return ok(detail());
+      if (c.path === '/chat-rooms/7/attachments') return ok(message(51, '@정다은 @품질부 첨부해요', { senderId: 3, isMine: true, attachments: [{ id: 31, fileName: '성적서.txt', fileSize: 5 }] }));
+      return undefined;
+    });
+    await messengerApi.sendMessage({
+      chatRoomId: 7,
+      content: '@정다은 @품질부 첨부해요',
+      files: [{ name: '성적서.txt', size: 5, mimeType: 'text/plain', dataUrl: `data:text/plain;base64,${btoa('hello')}` }],
+    });
+    const form = calls.find((c) => c.path === '/chat-rooms/7/attachments')?.body as FormData;
+    expect(form.getAll('mentionedEmployeeIds')).toEqual(['5', '13', '12']);
+  });
+
   it('메시지 검색어는 서버 상한(100자)까지만 보낸다 (넘으면 서버가 400, 이슈 #498)', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.sales, (c) => {
       if (c.path === '/chat-rooms/7') return ok(detail());

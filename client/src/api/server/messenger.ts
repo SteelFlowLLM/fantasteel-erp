@@ -254,7 +254,7 @@ export const serverMessengerApi = {
       body: { chatRoomType: input.chatRoomType, memberIds: input.memberIds, chatRoomName: input.chatRoomName ?? null },
     }),
 
-  /** 글·이모티콘은 메시지 API, 파일은 첨부 API(여러 개를 files로 한 번에, 글을 함께 보내면 파일 메시지의 글이 된다). 멘션은 글 메시지에만 붙는다 */
+  /** 글·이모티콘은 메시지 API, 파일은 첨부 API(여러 개를 files로 한 번에, 글을 함께 보내면 파일 메시지의 글이 된다). 멘션은 둘 다 본문에서 찾아 붙인다 */
   sendMessage: async (input: SendMessageInput): Promise<MessageView> => {
     const content = (input.content ?? '').trim();
     const room = await roomRaw(input.chatRoomId);
@@ -263,6 +263,8 @@ export const serverMessengerApi = {
       const form = new FormData();
       for (const file of input.files) form.append('files', blobOf(file.dataUrl), file.name);
       if (content) form.append('content', content);
+      // multipart라 멘션한 사원 id를 같은 이름으로 하나씩 보낸다 (서버가 숫자 배열로 받는다)
+      for (const id of mentionedEmployeeIdsOf(content, room)) form.append('mentionedEmployeeIds', String(id));
       if (input.clientMessageId) form.append('clientMessageId', input.clientMessageId);
       if (input.parentMessageId) form.append('parentMessageId', String(input.parentMessageId));
       return toMessageView(await serverUpload<ServerMessageView>(`/chat-rooms/${input.chatRoomId}/attachments`, form), myTargets);

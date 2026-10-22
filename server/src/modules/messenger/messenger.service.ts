@@ -750,7 +750,7 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * 파일 첨부 (REQ-MSG-003). 업로드하면 바로 메시지 1건이 생긴다. 스키마 3차부터 메시지 1건에 파일 여러 개(최대 MESSAGE_ATTACHMENT_MAX_COUNT, 가정값),
-   * 파일마다 10MB·실행 파일 거부. 하나라도 걸리면 아무것도 저장하지 않는다. 글은 선택
+   * 파일마다 10MB·실행 파일 거부. 하나라도 걸리면 아무것도 저장하지 않는다. 글은 선택. @멘션 알림은 글 메시지와 같다
    */
   async sendAttachments(user: AuthUser, chatRoomId: number, files: readonly UploadedAttachment[], dto: UploadAttachmentDto): Promise<ChatMessageView> {
     if (files.length === 0) throw new AppException('COM-004', '첨부할 파일을 골라 주세요 (files 필드)');
@@ -774,7 +774,7 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
         attachments.push({ filePath: await this.storage.save('messages', fileName, file.buffer), fileName, fileSize: file.size });
       }
       const content = dto.content?.trim() || null;
-      const posted = await this.postMessageResult(user, chatRoomId, { content, attachments, clientMessageId, parentMessageId }, [], progress);
+      const posted = await this.postMessageResult(user, chatRoomId, { content, attachments, clientMessageId, parentMessageId }, dto.mentionedEmployeeIds ?? [], progress);
       if (!posted.saved) await removeSaved();
       return posted.view;
     } catch (error) {

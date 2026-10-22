@@ -41,6 +41,11 @@ function source(files: Record<string, { file: CheckedDriveFile; buffer: Buffer |
       searches.push({ query, kind, limit, content });
       return list;
     },
+    fileName: async (id) => {
+      const entry = files[id];
+      if (!entry) throw new AppException('INT-012', '설정한 Drive 폴더에 그 파일이 없어요');
+      return { id, name: entry.file.name };
+    },
     readForAssistant: async (id) => {
       const entry = files[id];
       if (!entry) throw new AppException('INT-012', '설정한 Drive 폴더에 그 파일이 없어요');
@@ -185,13 +190,33 @@ describe('Drive 도구', () => {
     const result = await session.run({ id: 'c1', name: 'drive_search', arguments: JSON.stringify({ query: '점검', kind: 'document' }) });
     expect(drive.searches).toEqual([{ query: '점검', kind: 'document', limit: 15 }]);
     expect(result.content).toContain('이름이나 내용에 "점검"');
-    // 찾기만 하고 읽지 않은 파일은 답의 출처가 아니다 (내용으로도 찾아 결과가 많아진다, 이슈 #473)
+    // 찾기만 하고 읽지 않은 파일은 답에 나오지 않으면 출처가 아니다 (내용으로도 찾아 결과가 많아진다, 이슈 #473)
     expect(session.sources()).toEqual([]);
+    expect(session.sources('관련 자료를 찾지 못했어요.')).toEqual([]);
     expect(result.content).toContain('<untrusted_web_content source="drive_search">');
     expect(result.content).toContain('id: docReportPdf07');
+    expect(result.content).toContain('주소: https://drive.google.com/file/d/docReportPdf07/view');
     expect(result.content).toContain('(사진, 3.0MB');
     expect(JSON.parse((await session.run({ id: 'c2', name: 'drive_search', arguments: JSON.stringify({ kind: 'video' }) })).content).오류).toContain('kind');
     expect(JSON.parse((await session.run({ id: 'c3', name: 'drive_read_file', arguments: '{}' })).content)).toEqual({ 오류: 'file가 필요해요' });
+  });
+
+  it('찾기만 한 답의 출처: 답에 이름(자모 풀림·확장자 무시)·주소·id가 나온 파일만, 읽은 파일과 겹치지 않게', async () => {
+    const photoName = '검사성적서_밀시트_예시.png';
+    const drive = source({}, [view({}), view({ id: 'imagePhoto0005', name: photoName.normalize('NFD'), mimeType: 'image/png', kind: 'image' }), view({ id: 'docOther000001', name: '다른 문서.pdf' })]);
+    const session = new AssistantDriveToolbox(drive).session(async () => true);
+    await session.run({ id: 'c1', name: 'drive_search', arguments: JSON.stringify({ query: '성적서' }) });
+    const url = (id: string) => `https://drive.google.com/file/d/${id}/view`;
+    // 이름으로 나옴 (확장자 없이, 풀림 없이 써도), 주소로 나옴, id로 나옴
+    expect(session.sources('검사성적서_밀시트_예시를 찾았어요')).toEqual([{ title: photoName.normalize('NFD'), url: url('imagePhoto0005') }]);
+    expect(session.sources(`[보고서](${url('docReportPdf07')})`)).toEqual([{ title: '보고서.pdf', url: url('docReportPdf07') }]);
+    expect(session.sources('[보고서](drive:docReportPdf07)')).toEqual([{ title: '보고서.pdf', url: url('docReportPdf07') }]);
+    // 확장자까지 쓴 이름은 그대로, 확장자를 뺀 이름은 4자 이상일 때만 맞는다 ('보고서' 세 글자는 다른 문장에 우연히 들어 있을 수 있다)
+    expect(session.sources('보고서와 다른 문서')).toEqual([{ title: '다른 문서.pdf', url: url('docOther000001') }]);
+    expect(session.sources('보고서.pdf와 다른 문서')).toEqual([
+      { title: '보고서.pdf', url: url('docReportPdf07') },
+      { title: '다른 문서.pdf', url: url('docOther000001') },
+    ]);
   });
 
   it('결과가 없으면 더 짧은 낱말이나 문서 종류 낱말로 다시 찾게 안내한다', async () => {
@@ -224,6 +249,44 @@ describe('Drive 도구', () => {
     expect(JSON.parse(missing.content).오류).toContain('drive_search');
     const outside = await session.run({ id: 'c3', name: 'drive_read_file', arguments: JSON.stringify({ file: 'audioOutside04' }) });
     expect(JSON.parse(outside.content).오류).toBe('설정한 Drive 폴더에 그 파일이 없어요');
+  });
+
+  it('이름으로 집을 때 모델이 넘긴 합친(NFC) 이름과 자모 풀린(NFD) Drive 이름도 같은 이름으로 본다', async () => {
+    const nfdName = '품질기준서_FS-QA-001.pdf'.normalize('NFD');
+    const drive = source({ docQaStd000001: text('docQaStd000001', nfdName, '기준 내용') }, [view({ id: 'docQaStd000001', name: nfdName })]);
+    const session = new AssistantDriveToolbox(drive).session(async () => true);
+    const result = await session.run({ id: 'c1', name: 'drive_read_file', arguments: JSON.stringify({ file: '품질기준서_FS-QA-001.pdf'.normalize('NFC') }) });
+    expect(result.content).toContain('[Drive 파일]');
+    expect(result.webSources).toHaveLength(1);
+  });
+
+  it('사진 칸의 Drive 사진 확인은 한꺼번에 하고, 3초 안에 끝나지 않은 것은 조용히 뺀다 (끊을 때 쓴 signal은 호출한 쪽이 끊은 것으로 전달)', async () => {
+    jest.useFakeTimers();
+    try {
+      const seen: AbortSignal[] = [];
+      const drive = source({});
+      drive.fileName = (id, signal) => {
+        seen.push(signal);
+        if (id === 'slowPhoto0001') return new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason)));
+        return Promise.resolve({ id, name: `${id}.png` });
+      };
+      const pending = new AssistantDriveToolbox(drive).fileRefs(['slowPhoto0001', 'fastPhoto0001']);
+      await jest.advanceTimersByTimeAsync(3_000);
+      expect(await pending).toEqual([{ title: 'fastPhoto0001.png', url: 'https://drive.google.com/file/d/fastPhoto0001/view' }]);
+      // 두 확인이 동시에 시작됐다 (차례로 기다리지 않는다)
+      expect(seen).toHaveLength(2);
+      expect(seen[0].aborted).toBe(true);
+      expect(seen[0].reason).toMatchObject({ name: 'AbortError' });
+      expect(seen[1].aborted).toBe(false);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('사진 칸의 Drive 사진: 이름만 확인해 출처로 만들고, 폴더 밖·없는 파일은 뺀다', async () => {
+    const drive = source({ imagePhoto0005: { file: checked({ id: 'imagePhoto0005', name: '현장.png', mimeType: 'image/png', kind: 'image' }), buffer: Buffer.from('png') } });
+    const refs = await new AssistantDriveToolbox(drive).fileRefs(['imagePhoto0005', 'outsideFile0001']);
+    expect(refs).toEqual([{ title: '현장.png', url: 'https://drive.google.com/file/d/imagePhoto0005/view' }]);
   });
 
   it(`사진은 볼 수 있는 모델에만 다음 메시지로 붙이고, 한 답에 ${MAX_DRIVE_READS_PER_ANSWER}개까지만 읽는다`, async () => {

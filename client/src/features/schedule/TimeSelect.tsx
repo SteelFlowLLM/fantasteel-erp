@@ -2,7 +2,7 @@
 
 // 시각 고르기 (내 일정 창). 브라우저 기본 <select>는 펼치는 방향을 브라우저가 정해 위로 펼쳐지기도 해서, 늘 칸 아래로 펼치는 목록을 둔다.
 // 목록은 DateInput 달력처럼 화면 기준(fixed)으로 띄워 창(Modal) 안에서 잘리지 않게 하고, 글자 크기 설정(zoom)을 나눠 위치를 맞춘다.
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type Ref } from 'react';
 import { Icon } from '@/components/Icon';
 import { cn } from '@/lib/cn';
 import { appZoom } from '@/lib/fontSize';
@@ -127,36 +127,70 @@ export function TimeSelect({ value, options, onChange, ariaLabel }: TimeSelectPr
         <Icon name="chevron-down" className="text-ink-3" />
       </button>
       {open ? (
-        <ul
-          ref={listRef}
-          role="listbox"
-          aria-label={ariaLabel}
-          aria-activedescendant={optionId(active)}
-          tabIndex={-1}
-          onKeyDown={onListKeyDown}
-          className="fixed z-[70] overflow-auto rounded-md border border-line bg-surface py-1 shadow-pop outline-none"
-          // 칸 바로 아래 위치·너비·남은 높이는 열 때 재는 값이라 style로 준다
+        <TimeOptionList
+          listRef={listRef}
+          label={ariaLabel}
+          activeId={optionId(active)}
           style={{ top: box.top, left: box.left, width: box.width, maxHeight: box.maxHeight }}
-        >
-          {options.map((time) => (
-            <li
-              key={time}
-              id={optionId(time)}
-              role="option"
-              aria-selected={time === value}
-              data-time={time}
-              onPointerEnter={() => setActive(time)}
-              onClick={() => pick(time)}
-              className={cn(
-                'cursor-pointer px-2.5 py-1.5 font-mono text-sm tabular-nums',
-                time === value ? 'bg-brand text-white' : time === active ? 'bg-surface-3' : 'text-ink',
-              )}
-            >
-              {time}
-            </li>
-          ))}
-        </ul>
+          options={options}
+          value={value}
+          active={active}
+          optionId={optionId}
+          onKeyDown={onListKeyDown}
+          onHover={setActive}
+          onPick={pick}
+        />
       ) : null}
     </>
+  );
+}
+
+interface TimeOptionListProps {
+  listRef: Ref<HTMLUListElement>;
+  label: string;
+  activeId: string;
+  /** 칸 바로 아래 위치·너비·남은 높이는 열 때 재는 값이라 style로 준다 */
+  style: CSSProperties;
+  options: readonly string[];
+  value: string;
+  active: string;
+  optionId: (time: string) => string;
+  onKeyDown: (event: KeyboardEvent<HTMLUListElement>) => void;
+  onHover: (time: string) => void;
+  onPick: (time: string) => void;
+}
+
+/**
+ * 시각 목록. 이 목록은 Field가 감싼 label 안에 있어서, 항목이나 빈 곳을 누른 클릭이 label까지 올라가면
+ * label이 안의 첫 단추(목록을 여는 칸)를 다시 눌러 고른 직후 목록이 다시 열렸다. 그래서 클릭의 기본 동작을 여기서 막는다
+ */
+export function TimeOptionList({ listRef, label, activeId, style, options, value, active, optionId, onKeyDown, onHover, onPick }: TimeOptionListProps) {
+  return (
+    <ul
+      ref={listRef}
+      role="listbox"
+      aria-label={label}
+      aria-activedescendant={activeId}
+      tabIndex={-1}
+      onKeyDown={onKeyDown}
+      onClick={(event: MouseEvent<HTMLUListElement>) => event.preventDefault()}
+      className="fixed z-[70] overflow-auto rounded-md border border-line bg-surface py-1 shadow-pop outline-none"
+      style={style}
+    >
+      {options.map((time) => (
+        <li
+          key={time}
+          id={optionId(time)}
+          role="option"
+          aria-selected={time === value}
+          data-time={time}
+          onPointerEnter={() => onHover(time)}
+          onClick={() => onPick(time)}
+          className={cn('cursor-pointer px-2.5 py-1.5 font-mono text-sm tabular-nums', time === value ? 'bg-brand text-white' : time === active ? 'bg-surface-3' : 'text-ink')}
+        >
+          {time}
+        </li>
+      ))}
+    </ul>
   );
 }

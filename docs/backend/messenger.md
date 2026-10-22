@@ -37,7 +37,7 @@ Prisma 관계 이름: `ChatRoom.chatRoomMembers`·`messages`, `ChatRoomMember.la
 | GET | `chat-rooms/:id` | 채팅방 상세 | 방 멤버 | |
 | GET | `chat-rooms/:id/messages` | 메시지 목록 | 방 멤버 | 12.2의 `/messages`를 방 하위 경로로 둠. `?before=<메시지 id>&limit=` (기본 50, 최대 100) |
 | POST | `chat-rooms/:id/messages` | 메시지 전송 | 방 멤버 | 실시간 수신은 WebSocket Gateway. `emoticonKey`(선택, 18번)를 주면 `content`는 비워도 된다 |
-| POST | `chat-rooms/:id/attachments` | 파일 첨부 업로드 | 방 멤버 | multipart `files`(1~10개, 스키마 3차) + `content`(선택). 파일마다 10MB, 실행 파일 거부 |
+| POST | `chat-rooms/:id/attachments` | 파일 첨부 업로드 | 방 멤버 | multipart `files`(1~10개, 스키마 3차) + `content`(선택) + `mentionedEmployeeIds`(선택, 같은 이름으로 하나씩 여러 번. 글 메시지와 같은 멘션 알림, 이슈 #519). 파일마다 10MB, 실행 파일 거부 |
 | GET | `attachments/:id` | 첨부 파일 다운로드 | 방 멤버 | `:id` = `message_attachment.id` (스키마 3차) |
 | POST | `chat-rooms/:id/read` | 읽음 위치 갱신 | 방 멤버 | |
 | POST | `chat-rooms/:id/members` | 멤버 초대 | 방 멤버 | **명세에 없음** (방 관리, 2026-10-07 단계별 추가). `{ memberIds }` → `{ chatRoomId, addedCount }` |

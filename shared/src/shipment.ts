@@ -1,5 +1,5 @@
 // shipment 모듈 응답 타입 (REQ-SHP-001). 이름은 ERD 컬럼명, 날짜는 'YYYY-MM-DD', 시각은 ISO 8601.
-import type { AllocationPurpose, AllocationStatus, ItemType, LotStatus, ShipmentRequestStatus } from './codes';
+import type { AllocationPurpose, AllocationStatus, InspectionResult, ItemType, LotStatus, ShipmentRequestStatus } from './codes';
 
 export interface ShipmentRequestSummary {
   id: number;
@@ -21,6 +21,14 @@ export interface ShipmentRequestAllocation {
   lotId: number;
   lotNo: string;
   allocationStatus: AllocationStatus;
+  /** 출고 확정 화면이 배정 LOT마다 LOT 상세를 따로 부르지 않게 함께 주는 값 (LOT 상세와 같은 규칙, 이슈 #519) */
+  lotStatus: LotStatus;
+  /** 슬래브·코일 생산완료일 */
+  producedDate: string | null;
+  /** 자기 검사 판정. 검사가 없으면 null */
+  inspectionResult: InspectionResult | null;
+  /** 상위 히트(조상 가운데 가장 가까운 히트)와 그 히트의 검사 판정 */
+  heat: { id: number; lotNo: string; inspectionResult: InspectionResult | null } | null;
 }
 
 export interface ShipmentRequestItemDetail {

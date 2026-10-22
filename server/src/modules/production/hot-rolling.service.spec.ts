@@ -160,7 +160,15 @@ describe('14.2 코일 3개: 필요한 슬래브만 열연, 판매 예약 비침�
     expect(await stock()).toMatchObject({ rollingAllocatedQty: 0 });
     expect(await codeOf(hotRolling.confirm(producer, planId, { lotIds: slabIds.slice(0, 4) }))).toBe('INV-001');
 
-    const confirmed = await hotRolling.confirm(producer, planId, { lotIds: slabIds.slice(0, 2) });
+    // 배정 확정·해제 트랜잭션은 느린 DB에서도 기본 5초 제한에 걸리지 않게 긴 제한을 쓴다 (부하 중 시연에서 COM-999)
+    const transaction = jest.spyOn(prisma, '$transaction');
+    let confirmed;
+    try {
+      confirmed = await hotRolling.confirm(producer, planId, { lotIds: slabIds.slice(0, 2) });
+      expect(transaction.mock.calls.map((call) => call[1])).toContainEqual({ maxWait: 5_000, timeout: 30_000 });
+    } finally {
+      transaction.mockRestore();
+    }
     expect(confirmed).toMatchObject({ confirmedAllocationQty: 2, neededQty: 1, slabPool: { rollingAllocatedQty: 2, availableQty: 0 } });
     expect(await codeOf(hotRolling.confirm(producer, planId, { lotIds: [slabIds[0]] }))).toBe('INV-003');
     expect(await expectListMatchesDetail(planId)).toMatchObject({ confirmedAllocationQty: 2, neededQty: 1 });
@@ -170,7 +178,14 @@ describe('14.2 코일 3개: 필요한 슬래브만 열연, 판매 예약 비침�
     const before = await hotRolling.detail(planId);
     const first = before.allocations.find((a) => a.lotId === slabIds[0]);
     if (!first) throw new Error('배정이 없습니다');
-    const changed = await hotRolling.release(producer, planId, first.id, { newLotId: slabIds[2], reason: '야드 위치' });
+    const transaction = jest.spyOn(prisma, '$transaction');
+    let changed;
+    try {
+      changed = await hotRolling.release(producer, planId, first.id, { newLotId: slabIds[2], reason: '야드 위치' });
+      expect(transaction.mock.calls.map((call) => call[1])).toContainEqual({ maxWait: 5_000, timeout: 30_000 });
+    } finally {
+      transaction.mockRestore();
+    }
     expect(changed.allocations.filter((a) => a.allocationStatus === 'CONFIRMED').map((a) => a.lotId).sort()).toEqual([slabIds[1], slabIds[2]].sort());
     expect(await prisma.businessEvent.count({ where: { businessEventType: BUSINESS_EVENT_TYPE.ALLOCATION_CHANGED, businessEventLots: { some: { lotId: slabIds[2] } } } })).toBe(1);
     expect(await stock()).toMatchObject({ rollingAllocatedQty: 2 });

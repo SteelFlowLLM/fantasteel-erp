@@ -307,11 +307,14 @@ export class InventoryRepository {
     });
   }
 
-  createHotRollingAllocation(tx: Tx, lotId: number, productionPlanId: number) {
-    return tx.allocation.create({
+  async createHotRollingAllocation(tx: Tx, lotId: number, productionPlanId: number) {
+    const created = await tx.allocation.create({
       data: { lotId, productionPlanId, allocationPurpose: ALLOCATION_PURPOSE.HOT_ROLLING, allocationStatus: ALLOCATION_STATUS.CONFIRMED },
       include: allocationInclude,
     });
+    // 트랜잭션이 제한 시간을 넘겨 닫힌 뒤에는 쿼리가 오류 없이 null을 돌려준 적이 있다(부하 중 시연). 그대로 두면 호출한 쪽의 created.id에서 원인을 알 수 없는 TypeError가 난다
+    if (!created) throw new Error(`열연 배정을 저장하지 못했어요 (계획 ${productionPlanId}, LOT ${lotId}). 트랜잭션이 이미 닫혔을 수 있어요`);
+    return created;
   }
 
   findAllocation(tx: Tx, id: number) {

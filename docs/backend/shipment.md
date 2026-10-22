@@ -30,7 +30,7 @@
 | --- | --- | --- | --- | --- |
 | GET | `shipment-requests` | 출하요청 목록 | `SHIPMENT_REQUEST_MANAGE` VIEW 또는 `GOODS_ISSUE_CONFIRM` VIEW | `shipmentRequestNo`(번호 일부, 대소문자 무시)로 거른다(상단 통합 검색). `withItems=true`(이슈 #476)면 줄마다 상세(`GET :id`와 같은 값: 품목·배정·출고 확정자)를 함께 준다: 화면이 목록 줄마다 상세를 따로 부르던 N+1을 없앤다 |
 | POST | `shipment-requests` | 출하요청 등록 | `SHIPMENT_REQUEST_MANAGE` USE | 출하 가능 매수 초과 시 SHP-002 |
-| GET | `shipment-requests/:id` | 출하요청 상세 | 목록과 같음 | |
+| GET | `shipment-requests/:id` | 출하요청 상세 | 목록과 같음 | 배정 줄마다 LOT 상태·생산완료일·자기 검사 판정·상위 히트(번호·판정)를 함께 준다(이슈 #519, LOT 상세와 같은 규칙, 목록 `withItems`도 같다): 출고 확정 화면이 배정 LOT마다 `GET lots/:id`를 부르던 N+1을 없앤다 |
 | POST | `shipment-requests/:id/cancel` | 출하요청 취소 | `SHIPMENT_REQUEST_MANAGE` USE | 출고 후면 SHP-003 |
 | POST | `shipment-requests/:id/issue` | 출고 확정 | `GOODS_ISSUE_CONFIRM` USE | INV-002·INV-004·SHP-002. SELECT FOR UPDATE |
 | GET | `mill-sheets` | 밀시트 목록 | `MILL_SHEET_READ` VIEW | 쿼리 예: `shipmentRequestId`, `salesOrderId`. 줄마다 스냅샷에서 뽑은 `customerName`·`totalQty`·`totalWeightTon`·`heatNos`·`itemTypes`·`itemCodes`를 함께 준다(이슈 #498): 화면이 밀시트마다 상세(스냅샷 전체)를 따로 부르던 N+1을 없앤다. 스냅샷 자체는 주지 않는다. 스냅샷 JSON을 서버로 읽어 오지 않고 `listMillSheetSummaries.sql`이 필요한 칸만 뽑으며, 값이 없는 옛 스냅샷은 빈 칸(빈 글자·0·빈 배열)이 되어 목록 전체가 실패하지 않는다 |
