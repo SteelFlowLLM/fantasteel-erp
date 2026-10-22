@@ -181,7 +181,9 @@ export const AI_REPLY_MARK = '[AI 어시스턴트';
 /** 입력 중 표시에서 AI의 사원 id (화면이 보낸 사원 없는 메시지의 senderId로 쓰는 0과 같다) */
 export const AI_TYPING_EMPLOYEE_ID = 0;
 
-const AI_REPLY_HEAD = /^\[AI 어시스턴트(?::([a-z_]+(?:,[a-z_]+)*))?\] /;
+/** 조회 출처 id: 도구 이름, 위젯처럼 범위가 있는 도구는 `도구:범위` (예: get_dashboard_summary:process_yield, 이슈 #506) */
+const AI_DATA_TOOL_ID = '[a-z0-9_]+(?::[a-z0-9_]+)?';
+const AI_REPLY_HEAD = new RegExp(`^\\[AI 어시스턴트(?::(${AI_DATA_TOOL_ID}(?:,${AI_DATA_TOOL_ID})*))?\\] `);
 
 /**
  * AI 답 본문을 저장 모양으로 만든다. 조회 도구(데이터)를 쓴 답은 쓴 도구 이름을 접두어에 함께 적어,
@@ -195,6 +197,14 @@ export function aiReplyContent(text: string, dataTools: readonly string[] = []):
 export function parseAiReply(content: string | null): { text: string; dataTools: string[] } | null {
   const head = content === null ? null : AI_REPLY_HEAD.exec(content);
   return head && content !== null ? { text: content.slice(head[0].length), dataTools: head[1] ? head[1].split(',') : [] } : null;
+}
+
+/**
+ * AI 답 표시(`[AI 어시스턴트`)로 시작하는데 읽을 수 없는 본문. 어떤 조회 도구를 썼는지 알 수 없으므로 볼 권한을 가릴 수 없다.
+ * 부르는 쪽은 일반 메시지로 보이지 않게 숨긴다 (표시를 읽지 못해 데이터 답이 방 멤버 모두에게 보이던 일을 막는다, 이슈 #506)
+ */
+export function isUnreadableAiReply(content: string | null): boolean {
+  return content !== null && content.startsWith(AI_REPLY_MARK) && parseAiReply(content) === null;
 }
 
 /** '@AI' 뒤에 영문·숫자가 이어지지 않는 호출만 (@AI야·@AI, 는 호출, @AIR는 아님) */

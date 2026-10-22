@@ -4,6 +4,7 @@
 // 확정 주체는 초안을 만든 사원이고 그 유형의 사용 권한이 있어야 고치고 확정·반려한다. AI가 채운 칸도 사람이 확인하고 확정한다.
 // 서버가 준 미확정 칸(unresolvedFields)을 칸 옆에 '미확정'으로 보인다. 칸 검증·실행은 서버가 한다.
 import { useState, type ReactNode } from 'react';
+import { MAX_ORDERED_QTY } from '@fantasteel/shared';
 import { DRAFT_STATUS_LABEL, SALES_ORDER_ITEM_STATUS, SHIPMENT_REQUEST_STATUS } from '@/codes';
 import { actionDraftApi, type DraftConfirmResult, type DraftDetailView } from '@/api/actionDrafts';
 import { ApiError, InputError } from '@/api/errors';
@@ -358,7 +359,7 @@ function SalesOrderFields({ ctx, form, onChange }: { ctx: FieldContext; form: Sa
       <span className="flex items-center text-sm font-semibold">
         품목
         <UnresolvedMark show={isUnresolved('품목', form.items.length !== saved.items.length)} />
-        <span className="ml-2 text-cap font-normal text-ink-3">매수는 1 이상 정수 · 톤은 매수 × 이론중량으로 계산해요</span>
+        <span className="ml-2 text-cap font-normal text-ink-3">매수는 1~{MAX_ORDERED_QTY.toLocaleString('en-US')} 정수 · 톤은 매수 × 이론중량으로 계산해요</span>
       </span>
       <LineTable
         headers={['규격', '매수', '납기']}

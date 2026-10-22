@@ -2,9 +2,9 @@
 // 발주·발주 품목·입고·공급업체·원료 id는 서버 id를 그대로 쓴다.
 import type { GoodsReceiptView as ServerGoodsReceiptView, PageResult, PurchaseOrderView as ServerPurchaseOrderView } from '@fantasteel/shared';
 import { ApiError, InputError } from '@/api/errors';
-import type { GoodsReceiptInput, GoodsReceiptResult, GoodsReceiptView } from '@/api/goodsReceipts';
+import type { GoodsReceiptCancelInput, GoodsReceiptInput, GoodsReceiptResult, GoodsReceiptView } from '@/api/goodsReceipts';
 import { serverRequest } from '@/api/http';
-import type { PurchaseOrderCreateInput, PurchaseOrderView, RequisitionPurchaseOrderLine } from '@/api/purchasing';
+import type { PurchaseOrderCreateInput, PurchaseOrderReasonInput, PurchaseOrderView, RequisitionPurchaseOrderLine } from '@/api/purchasing';
 
 const PAGE_SIZE = 100;
 
@@ -39,6 +39,7 @@ function toOrderView(po: ServerPurchaseOrderView, receipts: readonly ServerGoods
     supplierName: po.supplierName,
     purchaseOrderStatus: po.purchaseOrderStatus,
     orderedEmployeeName: po.orderedEmployeeName,
+    statusChange: po.statusChange,
     createdAt: po.createdAt,
     items: po.items.map((i) => ({
       id: i.purchaseOrderItemId,
@@ -51,10 +52,19 @@ function toOrderView(po: ServerPurchaseOrderView, receipts: readonly ServerGoods
       expectedReceiptDate: i.expectedReceiptDate,
       receivedTon: i.receivedTon,
       remainingTon: i.remainingTon,
+      closedTon: i.closedTon,
       goodsReceipts: receipts
         .filter((g) => g.purchaseOrderItemId === i.purchaseOrderItemId)
         .sort((a, b) => a.id - b.id)
-        .map((g) => ({ id: g.id, goodsReceiptNo: g.goodsReceiptNo, receivedTon: g.receivedTon, receivedDate: g.receivedDate, lotNo: g.lotNo })),
+        .map((g) => ({
+          id: g.id,
+          goodsReceiptNo: g.goodsReceiptNo,
+          receivedTon: g.receivedTon,
+          receivedDate: g.receivedDate,
+          lotNo: g.lotNo,
+          reversedGoodsReceiptNo: g.reversedGoodsReceiptNo,
+          reversalGoodsReceiptNo: g.reversalGoodsReceiptNo,
+        })),
     })),
   };
 }
@@ -94,6 +104,14 @@ export const serverPurchaseOrderApi = {
     }
     return created;
   },
+
+  /** 발주 취소 (API-284). 화면은 목록을 다시 읽으므로 입고 내역은 비워 돌려준다 */
+  cancel: async ({ purchaseOrderId, reason }: PurchaseOrderReasonInput): Promise<PurchaseOrderView> =>
+    toOrderView(await serverRequest<ServerPurchaseOrderView>('POST', `/purchase-orders/${purchaseOrderId}/cancel`, { body: { reason } }), []),
+
+  /** 잔량 마감 (API-285) */
+  close: async ({ purchaseOrderId, reason }: PurchaseOrderReasonInput): Promise<PurchaseOrderView> =>
+    toOrderView(await serverRequest<ServerPurchaseOrderView>('POST', `/purchase-orders/${purchaseOrderId}/close`, { body: { reason } }), []),
 };
 
 export const serverGoodsReceiptApi = {
@@ -126,6 +144,10 @@ export const serverGoodsReceiptApi = {
       lineRemainingTon: line?.remainingTon ?? '0.000',
     };
   },
+
+  /** 입고 취소 (API-286): 취소 행(음수 입고). 공급업체 이름은 화면이 목록을 다시 읽어 채운다 */
+  cancel: async ({ goodsReceiptId, reason }: GoodsReceiptCancelInput): Promise<GoodsReceiptView> =>
+    toReceiptView(await serverRequest<ServerGoodsReceiptView>('POST', `/goods-receipts/${goodsReceiptId}/cancel`, { body: { reason } }), new Map()),
 };
 
 /** 구매요청 상세의 "연결 발주": 그 요청을 담은 발주 품목 (발주 조회 권한이 없으면 비운다) */

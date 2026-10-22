@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MEETING_AUDIO_ACCEPT, audioFileProblem, createRecordStartGuard, fmtClock, microphoneErrorMessage, pickRecorderMimeType, recordingFileName } from '@/lib/meetingAudio';
+import { MEETING_AUDIO_ACCEPT, audioFileProblem, createRecordStartGuard, fmtClock, meetingDateAfterPick, meetingDateOfAudio, microphoneErrorMessage, pickRecorderMimeType, recordingFileName } from '@/lib/meetingAudio';
 
 describe('회의 음성 도우미 (lib/meetingAudio.ts)', () => {
   it('녹음 형식: webm/opus 먼저, 없으면 mp4, 둘 다 없으면 기본값', () => {
@@ -18,6 +18,33 @@ describe('회의 음성 도우미 (lib/meetingAudio.ts)', () => {
   it('녹음 파일 이름은 형식에 맞는 확장자를 쓴다', () => {
     expect(recordingFileName('audio/webm;codecs=opus')).toBe('회의-녹음.webm');
     expect(recordingFileName('audio/mp4')).toBe('회의-녹음.m4a');
+  });
+
+  it('회의일 기본값: 파일의 마지막 수정 시각을 서울 날짜로 (UTC 날짜가 아니라), 시각을 모르면 null (이슈 #498)', () => {
+    // 2026-10-21 23:59:59 KST = 14:59:59 UTC → 같은 날, 1초 뒤는 다음 날
+    expect(meetingDateOfAudio(Date.parse('2026-10-21T14:59:59.000Z'))).toBe('2026-10-21');
+    expect(meetingDateOfAudio(Date.parse('2026-10-21T15:00:00.000Z'))).toBe('2026-10-22');
+    // Drive가 주는 수정 시각(ISO 글자)도 같은 규칙
+    expect(meetingDateOfAudio('2026-10-18T01:30:00.000Z')).toBe('2026-10-18');
+    expect(meetingDateOfAudio(0)).toBeNull();
+    expect(meetingDateOfAudio(null)).toBeNull();
+    expect(meetingDateOfAudio(undefined)).toBeNull();
+    expect(meetingDateOfAudio('')).toBeNull();
+    expect(meetingDateOfAudio('아님')).toBeNull();
+    expect(meetingDateOfAudio(Number.NaN)).toBeNull();
+  });
+
+  it('파일을 골랐을 때 회의일: 파일 날짜로 바꾸되, 직접 고친 뒤나 파일 날짜를 모를 때는 지금 값을 둔다 (녹음 파일·Drive 녹음 모두)', () => {
+    const today = '2026-10-22';
+    const fileDate = meetingDateOfAudio(Date.parse('2026-10-10T05:00:00+09:00'));
+    expect(meetingDateAfterPick(today, false, fileDate)).toBe('2026-10-10');
+    // Drive 녹음: 수정 시각(ISO)에서
+    expect(meetingDateAfterPick(today, false, meetingDateOfAudio('2026-10-08T01:00:00.000Z'))).toBe('2026-10-08');
+    // 회의일을 직접 고쳤으면 파일을 골라도 그대로
+    expect(meetingDateAfterPick('2026-10-15', true, fileDate)).toBe('2026-10-15');
+    // 파일 날짜를 모르면(시각 0·Drive가 안 줌) 그대로
+    expect(meetingDateAfterPick(today, false, meetingDateOfAudio(0))).toBe(today);
+    expect(meetingDateAfterPick(today, false, meetingDateOfAudio(null))).toBe(today);
   });
 
   it('올릴 파일: 오디오·video/webm만, 비었거나 500MB를 넘으면 거절', () => {

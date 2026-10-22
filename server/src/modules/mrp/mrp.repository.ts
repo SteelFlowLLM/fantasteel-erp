@@ -1,7 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import { ITEM_TYPE, PROCESS_TYPE, PRODUCTION_PLAN_STATUS } from '@fantasteel/shared';
+import { ITEM_TYPE, PROCESS_TYPE, PRODUCTION_PLAN_STATUS, PURCHASE_ORDER_STATUS, PURCHASE_REQUISITION_STATUS } from '@fantasteel/shared';
+import type { Prisma } from '../../generated/prisma/client';
 import { countHeatLotsByPlan, findOpenPurchaseOrderItemsForMrp, sumRawMaterialRemainingByItem } from '../../generated/prisma/sql';
 import type { Tx } from '../../prisma/prisma.service';
+
+/** 더 들어올 원료가 없는 구매요청: 발주 취소됐거나 잔량 마감한 발주의 요청 (purchasing의 같은 계획·원료 중복 확인과 같은 기준, BP-PUR-02) */
+const NO_MORE_SUPPLY: Prisma.PurchaseRequisitionWhereInput[] = [
+  { purchaseRequisitionStatus: PURCHASE_REQUISITION_STATUS.ORDER_CANCELLED },
+  { purchaseOrderItem: { is: { purchaseOrder: { is: { purchaseOrderStatus: PURCHASE_ORDER_STATUS.CLOSED } } } } },
+];
 
 /**
  * DB 접근은 여기서만 한다. 함수의 첫 인자는 tx (컨벤션 8장).
@@ -55,10 +62,13 @@ export class MrpRepository {
     return tx.$queryRawTyped(findOpenPurchaseOrderItemsForMrp());
   }
 
-  /** 같은 계획·원료의 기존 구매요청 (MRP를 다시 계산해도 중복 요청하지 않게 보여 준다) */
+  /**
+   * 같은 계획·원료의 기존 구매요청 (MRP를 다시 계산해도 중복 요청하지 않게 보여 준다).
+   * 발주 취소된 요청과 잔량 마감한 발주의 요청은 더 들어올 원료가 없어 빼고, 부족하면 다시 요청하게 한다 (BP-PUR-02, 이슈 #500)
+   */
   findRequisitionsForPlans(tx: Tx, productionPlanIds: number[]) {
     return tx.purchaseRequisition.findMany({
-      where: { productionPlanId: { in: productionPlanIds } },
+      where: { productionPlanId: { in: productionPlanIds }, NOT: NO_MORE_SUPPLY },
       select: { productionPlanId: true, itemId: true, purchaseRequisitionNo: true },
       orderBy: { id: 'desc' },
     });

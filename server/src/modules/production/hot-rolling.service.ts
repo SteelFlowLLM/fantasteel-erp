@@ -9,12 +9,14 @@ import {
   PRODUCTION_PLAN_STATUS,
   type AuthUser,
   type HotRollingDetail,
+  type HotRollingPlanListItem,
+  type PageResult,
 } from '@fantasteel/shared';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory.service';
-import type { ConfirmHotRollingDto, ReleaseHotRollingDto } from './dto/hot-rolling.dto';
+import type { ConfirmHotRollingDto, ListHotRollingPlansDto, ReleaseHotRollingDto } from './dto/hot-rolling.dto';
 import { toPlanLot, toPlanSummary } from './production-plan.mapper';
 import { toResultView } from './production-result.mapper';
 import { ProductionResultRepository } from './production-result.repository';
@@ -38,6 +40,44 @@ export class HotRollingService {
     private readonly businessEventRecorder: BusinessEventRecorder,
     @Inject(forwardRef(() => InventoryService)) private readonly inventory: InventoryService,
   ) {}
+
+  /**
+   * 열연 투입 목록 (이슈 #498): 코일 계획마다 상세와 같은 규칙의 요약 값. 완료·취소 계획도 포함한다(화면이 따로 묶어 보인다).
+   * 계획들의 LOT·열연 배정을 한 번에 읽어, 계획마다 상세(FIFO 후보·실적까지)를 따로 읽던 N+1을 없앤다.
+   * 기준정보가 모자라 슬래브 규격을 정할 수 없는 계획은 slabItemCode가 null이다.
+   */
+  async list(query: ListHotRollingPlansDto): Promise<PageResult<HotRollingPlanListItem>> {
+    const page = query.page ?? 1;
+    const size = query.size ?? 20;
+    const filter = { itemType: ITEM_TYPE.COIL };
+    const rows = await this.plans.findPlans(this.prisma, filter, { skip: (page - 1) * size, take: size });
+    const total = await this.plans.countPlans(this.prisma, filter);
+    const ids = rows.map((r) => r.id);
+    // 한 연결에 쿼리를 겹쳐 보내지 않고 차례로 읽는다 (#478)
+    const lots = await this.plans.findLotsOfPlans(this.prisma, ids);
+    const confirmedByPlan = await this.plans.countConfirmedRollingByPlans(this.prisma, ids);
+    const bases = await this.production.heatPlanBasesOf(this.prisma, rows.map((r) => r.itemId));
+    const items: HotRollingPlanListItem[] = [];
+    for (const row of rows) {
+      const basis = bases.get(row.itemId);
+      const coils = lots.filter((l) => l.productionResult?.productionPlanId === row.id && l.lotType === LOT_TYPE.COIL).map(toPlanLot);
+      const failedCoilQty = coils.filter((c) => c.judgement === 'FAIL').length;
+      const usableCoilQty = coils.length - failedCoilQty;
+      const confirmedAllocationQty = confirmedByPlan.get(row.id) ?? 0;
+      const open = row.productionPlanStatus === PRODUCTION_PLAN_STATUS.PLANNED || row.productionPlanStatus === PRODUCTION_PLAN_STATUS.IN_PROGRESS;
+      items.push({
+        plan: toPlanSummary(row),
+        slabItemCode: basis instanceof AppException || basis === undefined ? null : basis.slabItem.itemCode,
+        shortageQty: row.shortageQty,
+        usableCoilQty,
+        failedCoilQty,
+        confirmedAllocationQty,
+        neededQty: Math.max(0, row.shortageQty - usableCoilQty - confirmedAllocationQty),
+        isRollable: row.salesOrderItemId !== null && open,
+      });
+    }
+    return { items, page, size, total };
+  }
 
   async detail(productionPlanId: number, tx: Tx = this.prisma): Promise<HotRollingDetail> {
     const plan = await this.plans.findPlan(tx, productionPlanId);

@@ -3,17 +3,18 @@
 // 출하요청 상세의 배정 LOT마다 역추적해 하나로 합친다. 출하요청 조회 권한이 없으면 COM-002다.
 // 서버 LOT 응답에 없는 값(공급업체, 생산계획, 배정 확정 시각·수주, 소진·출고·여재 시각)은 비운다.
 // 이론중량·치수는 규격 목록(GET /items)에서 채우고, 그 권한이 없으면 비운다.
-import type {
-  ItemView,
-  LotDetail,
-  LotSummary,
-  LotTrace,
-  MillSheetSummary,
-  PageResult,
-  ShipmentRequestDetail,
-  ShipmentRequestSummary,
-  TraceLotNode as ServerTraceLotNode,
-  TraceShipment as ServerTraceShipment,
+import {
+  LOT_NO_FILTER_MAX,
+  type ItemView,
+  type LotDetail,
+  type LotSummary,
+  type LotTrace,
+  type MillSheetSummary,
+  type PageResult,
+  type ShipmentRequestDetail,
+  type ShipmentRequestSummary,
+  type TraceLotNode as ServerTraceLotNode,
+  type TraceShipment as ServerTraceShipment,
 } from '@fantasteel/shared';
 import { ApiError } from '@/api/errors';
 import { serverRequest } from '@/api/http';
@@ -66,6 +67,8 @@ function toListItem(lot: LotSummary): LotListItem {
 
 async function searchLots(query: LotSearchQuery = {}): Promise<LotListResult> {
   const term = normalize(query.keyword ?? '');
+  // 서버 번호 조건 상한을 넘는 글은 그런 LOT이 없다: 물으면 400이라 묻지 않는다 (이슈 #498)
+  if (term.length > LOT_NO_FILTER_MAX) return { items: [], total: 0 };
   const size = Math.min(Math.max(query.limit ?? DEFAULT_SEARCH_LIMIT, 1), MAX_PAGE_SIZE);
   const result = await serverRequest<PageResult<LotSummary>>('GET', '/lots', { query: { lotNo: term || undefined, lotType: query.lotType || undefined, page: 1, size } });
   return { items: exactFirst(result.items, (l) => l.lotNo, term).map(toListItem), total: result.total };
@@ -74,6 +77,7 @@ async function searchLots(query: LotSearchQuery = {}): Promise<LotListResult> {
 /** 번호가 정확히 같은 LOT (서버 lotNo 필터는 앞부분 일치라 같은 앞부분 LOT 가운데서 고른다) */
 async function lotByNo(lotNo: string): Promise<LotSummary> {
   const term = normalize(lotNo);
+  if (term.length > LOT_NO_FILTER_MAX) throw new ApiError('COM-003', `LOT ${lotNo.trim().slice(0, LOT_NO_FILTER_MAX)}…`);
   for (let page = 1; ; page++) {
     const result = await serverRequest<PageResult<LotSummary>>('GET', '/lots', { query: { lotNo: term, page, size: MAX_PAGE_SIZE } });
     const found = result.items.find((l) => normalize(l.lotNo) === term);

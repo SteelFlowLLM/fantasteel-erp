@@ -39,6 +39,8 @@ export interface BusinessEventView {
   reason: string | null;
   isAiAssisted: boolean;
   actionDraftId: number | null;
+  /** actionDraftId가 Agent 대응 후보(메시지 없는 초안, payload.agent)면 true. 화면이 초안 상세 대신 /agent로 잇는다 (#509) */
+  isAgentCandidate: boolean;
   messageId: number | null;
   /** 원본 메시지(messageId)의 채팅방 (message.chat_room_id). 화면이 메신저의 그 메시지로 이동할 때 쓴다 */
   chatRoomId: number | null;

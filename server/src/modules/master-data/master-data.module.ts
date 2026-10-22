@@ -7,5 +7,7 @@ import { MasterDataService } from './master-data.service';
 @Module({
   controllers: [MasterDataController],
   providers: [MasterDataService, MasterDataRepository],
+  // 철강맨AI 기준정보 조회 도구(이슈 #506)가 기준정보 화면과 같은 목록 service를 쓴다
+  exports: [MasterDataService],
 })
 export class MasterDataModule {}

@@ -2,7 +2,8 @@
 
 // 새 회의록: 제목·회의일·참석자는 공통, 기록은 녹음 / 파일 올리기 / Drive에서 가져오기 / 글로 붙여넣기 중 하나로 받는다.
 // Drive 가져오기(이슈 #361)는 회사 Google Drive가 연결되고 폴더가 정해졌을 때만 보인다.
-// 음성은 올리면 서버가 백그라운드로 글로 바꾼다 (BP-VOC-01). AI 정리는 다음 단계다.
+// 음성은 올리면 서버가 백그라운드로 글로 바꾼다 (BP-VOC-01). AI 정리는 만든 뒤 상세 화면의 AI 분석(MeetingAnalysisPanel)에서 시킨다.
+// 회의일은 오늘이 기본이고, 녹음 파일·Drive 녹음을 고르면 그 파일의 마지막 수정 날짜(서울 기준)로 바꾼다(직접 고친 뒤에는 그대로 둔다).
 import { useId, useMemo, useState } from 'react';
 import { InputError } from '@/api/errors';
 import type { DriveFileView } from '@/api/integrations';
@@ -23,7 +24,7 @@ import { useIntegrations } from '@/hooks/useIntegrations';
 import { useMe } from '@/hooks/useMe';
 import { fmtBytes, todayStr } from '@/lib/format';
 import { canImportAudioFromDrive, driveFileSizeLabel, googleDriveConnection } from '@/lib/integrations';
-import { MEETING_AUDIO_ACCEPT, audioFileProblem } from '@/lib/meetingAudio';
+import { MEETING_AUDIO_ACCEPT, audioFileProblem, meetingDateAfterPick, meetingDateOfAudio } from '@/lib/meetingAudio';
 
 type InputMode = 'record' | 'file' | 'drive' | 'text';
 const MODE_TABS: readonly { key: InputMode; label: string }[] = [
@@ -38,6 +39,8 @@ export function MeetingForm({ onCreated, onCancel }: { onCreated: (created: Meet
   const formId = useId();
   const [title, setTitle] = useState('');
   const [meetingDate, setMeetingDate] = useState(todayStr());
+  // 회의일을 직접 고쳤으면 파일을 골라도 덮어쓰지 않는다
+  const [meetingDateEdited, setMeetingDateEdited] = useState(false);
   const [attendeeIds, setAttendeeIds] = useState<number[]>([myId]);
   const [mode, setMode] = useState<InputMode>('record');
   const [transcript, setTranscript] = useState('');
@@ -136,7 +139,16 @@ export function MeetingForm({ onCreated, onCancel }: { onCreated: (created: Meet
                 />
               </Field>
               <Field label="회의일" required htmlFor={`${formId}-date`} error={fieldErrors.meetingDate}>
-                <DateInput id={`${formId}-date`} value={meetingDate} onChange={setMeetingDate} invalid={Boolean(fieldErrors.meetingDate)} className="w-full" />
+                <DateInput
+                  id={`${formId}-date`}
+                  value={meetingDate}
+                  onChange={(value) => {
+                    setMeetingDate(value);
+                    setMeetingDateEdited(true);
+                  }}
+                  invalid={Boolean(fieldErrors.meetingDate)}
+                  className="w-full"
+                />
               </Field>
             </div>
             <Field label={`참석자 ${attendeeIds.length}명`} required error={fieldErrors.attendeeIds} hint="조직도의 사용 중인 사원">
@@ -179,6 +191,7 @@ export function MeetingForm({ onCreated, onCancel }: { onCreated: (created: Meet
                           const problem = picked ? audioFileProblem(picked) : null;
                           setFileProblem(problem);
                           setAudioFile(picked && !problem ? picked : null);
+                          setMeetingDate(meetingDateAfterPick(meetingDate, meetingDateEdited, picked && !problem ? meetingDateOfAudio(picked.lastModified) : null));
                         }}
                       />
                       {audioFile ? (
@@ -212,7 +225,7 @@ export function MeetingForm({ onCreated, onCancel }: { onCreated: (created: Meet
             )}
           </CardBody>
           <CardFoot>
-            <span className="text-cap text-ink-3">{isAudio ? '올린 뒤 글로 바뀔 때까지 기다리지 않고 상세 화면으로 가요' : '만든 뒤에는 전체 기록을 고칠 수 없어요 · AI 정리는 다음 단계에서 붙어요'}</span>
+            <span className="text-cap text-ink-3">{isAudio ? '올린 뒤 글로 바뀔 때까지 기다리지 않고 상세 화면으로 가요' : '만든 뒤에는 전체 기록을 고칠 수 없어요 · 만든 뒤 상세 화면에서 "AI로 정리"를 눌러요'}</span>
             <Button className="ml-auto" onClick={onCancel} disabled={pending}>
               취소
             </Button>
@@ -227,6 +240,7 @@ export function MeetingForm({ onCreated, onCancel }: { onCreated: (created: Meet
           selectedId={driveFile?.id ?? null}
           onPick={(file) => {
             setDriveFile(file);
+            setMeetingDate(meetingDateAfterPick(meetingDate, meetingDateEdited, meetingDateOfAudio(file.modifiedTime)));
             setPickingDrive(false);
           }}
           onClose={() => setPickingDrive(false)}

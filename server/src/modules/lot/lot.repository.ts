@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ALLOCATION_STATUS } from '@fantasteel/shared';
 import type { Prisma } from '../../generated/prisma/client';
-import { findLotEligibility, traceLotBackward, traceLotForward } from '../../generated/prisma/sql';
+import { findLotEligibility, findNearestHeatsOfLots, traceLotBackward, traceLotForward } from '../../generated/prisma/sql';
 import type { Tx } from '../../prisma/prisma.service';
 
 const lotSelect = {
@@ -114,6 +114,13 @@ export class LotRepository {
   async walkRelations(tx: Tx, lotId: number, direction: 'backward' | 'forward'): Promise<{ lotId: number; depth: number }[]> {
     const rows = await tx.$queryRawTyped(direction === 'backward' ? traceLotBackward(lotId) : traceLotForward(lotId));
     return rows.map((r) => ({ lotId: r.lot_id ?? lotId, depth: r.depth ?? 0 }));
+  }
+
+  /** 슬래브·코일 여러 개의 상위 히트(가장 가까운 조상 히트)와 그 히트의 검사 판정. 상위 히트가 없는 LOT은 빠진다 */
+  async findNearestHeats(tx: Tx, lotIds: number[]): Promise<Map<number, { id: number; lotNo: string; inspectionResult: string | null }>> {
+    if (lotIds.length === 0) return new Map();
+    const rows = await tx.$queryRawTyped(findNearestHeatsOfLots(lotIds));
+    return new Map(rows.flatMap((r) => (r.lot_id === null ? [] : [[r.lot_id, { id: r.heat_id, lotNo: r.heat_lot_no, inspectionResult: (r.heat_inspection_result as string | null) ?? null }] as const])));
   }
 
   /** 주어진 LOT들 사이의 연결만 (한쪽이라도 범위 밖이면 뺀다) */

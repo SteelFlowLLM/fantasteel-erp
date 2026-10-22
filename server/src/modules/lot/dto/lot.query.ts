@@ -1,6 +1,6 @@
-import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
-import { LOT_STATUS, LOT_TYPE, TRACE_DIRECTION, type LotStatus, type LotType, type TraceDirection } from '@fantasteel/shared';
+import { Transform, Type } from 'class-transformer';
+import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { LOT_NO_FILTER_MAX, LOT_STATUS, LOT_TYPE, TRACE_DIRECTION, type LotStatus, type LotType, type TraceDirection } from '@fantasteel/shared';
 
 /** LOT 목록 조건 (API-235). 페이징 page·size, 생산완료일 최근 순 */
 export class ListLotsQuery {
@@ -20,8 +20,14 @@ export class ListLotsQuery {
   /** LOT 번호 앞부분 (대소문자 구분 없음) */
   @IsOptional()
   @IsString()
-  @MaxLength(60)
+  @MaxLength(LOT_NO_FILTER_MAX)
   lotNo?: string;
+
+  /** true면 줄마다 상위 히트·불합격 처리·현재 배정을 함께 준다. 화면이 줄마다 상세를 따로 부르지 않게 한다 (이슈 #498) */
+  @IsOptional()
+  @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
+  @IsBoolean({ message: 'withLinks는 true 또는 false여야 합니다' })
+  withLinks?: boolean;
 
   @IsOptional()
   @Type(() => Number)

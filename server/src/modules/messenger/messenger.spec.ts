@@ -1405,6 +1405,59 @@ actionCards: [],
     }
   });
 
+  it('위젯 범위가 붙은 조회 출처(get_dashboard_summary:process_yield)로 답한 AI 답도 그 위젯의 권한이 있는 멤버에게만 보낸다 (이슈 #506)', async () => {
+    // 관리자가 정다은(구매)의 공정 실적 조회 권한을 뺀 경우. 박서영(영업)이 공정별 수율 위젯으로 답을 받는다
+    const restore = await revokeRolePermission('PURCHASE', 'PRODUCTION_RESULT_CONFIRM');
+    try {
+      askSpy().mockResolvedValue({
+        answer: '연주 실적 수율은 94.2%예요.',
+        sources: [{ kind: 'DATA', id: 'get_dashboard_summary:process_yield', label: '대시보드 · 공정별 수율' }],
+        model: 'test-model',
+        latencyMs: 1,
+        toolCalls: [],
+        thinking: null,
+        reasoningApplied: true,
+        actionCards: [],
+      });
+      const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [purchaseId] });
+      await send(salesCookie, room.id, '@AI 공정별 수율 알려줘');
+      const [reply] = await aiRepliesOf(room.id, 1);
+
+      // 위젯 id의 ':'를 읽지 못하면 표시가 깨져 일반 메시지로 보이고 방 멤버 모두에게 갔다
+      expect(reply.content?.startsWith('[AI 어시스턴트:get_dashboard_summary:process_yield] ')).toBe(true);
+      const delivered = socketRecords.filter((r) => r.event === 'message:new' && (r.payload as ChatMessageView).id === reply.id);
+      expect(delivered.map((r) => r.employeeId)).toEqual([salesId]);
+      expect(delivered[0].payload).toMatchObject({ isAi: true, content: expect.stringContaining('94.2%') });
+
+      const salesPage = await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/messages`, salesCookie);
+      const purchasePage = await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/messages`, purchaseCookie);
+      expect(salesPage.body.data.items.at(-1)).toMatchObject({ isAi: true, content: expect.stringContaining('94.2%') });
+      expect(purchasePage.body.data.items.map((m) => m.isAi)).toEqual([false]);
+      expect(JSON.stringify(purchasePage.body.data)).not.toContain('94.2%');
+      expect(JSON.stringify(purchasePage.body.data)).not.toContain('[AI 어시스턴트');
+      const purchaseRooms = await call<ChatRoomListItem[]>('GET', '/chat-rooms', purchaseCookie);
+      expect(purchaseRooms.body.data.find((r) => r.id === room.id)?.lastMessage?.preview).toBe('AI 어시스턴트가 답했어요');
+    } finally {
+      await restore();
+    }
+  });
+
+  it('AI 답 표시를 읽지 못하는 시스템 메시지는 숨긴다(fail-closed). 사람이 쓴 [AI 어시스턴트 …] 글은 그대로 보인다 (이슈 #506)', async () => {
+    const room = await createRoom(salesCookie, { chatRoomType: 'GROUP', memberIds: [purchaseId] });
+    const human = await send(salesCookie, room.id, '[AI 어시스턴트 사용법] 안내 글이에요');
+    expect(human.status).toBe(201);
+    const broken = await prisma.message.create({ data: { chatRoomId: room.id, messageType: MESSAGE_TYPE.SYSTEM, senderId: null, content: '[AI 어시스턴트:Get-Bad!] 연주 수율 94.2%' } });
+
+    for (const cookie of [salesCookie, purchaseCookie]) {
+      const page = await call<ChatMessagePage>('GET', `/chat-rooms/${room.id}/messages`, cookie);
+      expect(page.body.data.items.map((m) => m.id)).not.toContain(broken.id);
+      expect(JSON.stringify(page.body.data)).not.toContain('94.2%');
+      expect(page.body.data.items.map((m) => m.content)).toContain('[AI 어시스턴트 사용법] 안내 글이에요');
+      const rooms = await call<ChatRoomListItem[]>('GET', '/chat-rooms', cookie);
+      expect(rooms.body.data.find((r) => r.id === room.id)?.lastMessage?.preview).toBe('AI 어시스턴트가 답했어요');
+    }
+  });
+
   it('AI가 답을 만드는 동안 방 멤버에게 입력 중(AI 표시)을 보낸다', async () => {
     let finish: (reply: Awaited<ReturnType<AiAssistantService['ask']>>) => void = () => undefined;
     askSpy().mockReturnValue(new Promise((resolve) => (finish = resolve)));

@@ -17,10 +17,24 @@ const order: PurchaseOrderView = {
   totalOrderedTon: '5.000',
   totalReceivedTon: '1.500',
   totalRemainingTon: '3.500',
+  totalClosedTon: '0.000',
+  statusChange: null,
   createdAt: '2026-10-06T01:00:00.000Z',
   updatedAt: '2026-10-06T02:00:00.000Z',
   items: [
-    { purchaseOrderItemId: 61, purchaseRequisitionId: 901, purchaseRequisitionNo: 'PR-2610-0001', itemId: 41, itemCode: 'SMN01', itemName: '실리코망가니즈', orderedTon: '5.000', expectedReceiptDate: '2026-10-10', receivedTon: '1.500', remainingTon: '3.500' },
+    {
+      purchaseOrderItemId: 61,
+      purchaseRequisitionId: 901,
+      purchaseRequisitionNo: 'PR-2610-0001',
+      itemId: 41,
+      itemCode: 'SMN01',
+      itemName: '실리코망가니즈',
+      orderedTon: '5.000',
+      expectedReceiptDate: '2026-10-10',
+      receivedTon: '1.500',
+      remainingTon: '3.500',
+      closedTon: '0.000',
+    },
   ],
 };
 const receipt: GoodsReceiptView = {
@@ -28,6 +42,7 @@ const receipt: GoodsReceiptView = {
   goodsReceiptNo: 'GR-2610-0001',
   purchaseOrderId: 31,
   purchaseOrderNo: 'PO-2610-0001',
+  purchaseOrderStatus: 'PARTIALLY_RECEIVED',
   purchaseOrderItemId: 61,
   itemId: 41,
   itemCode: 'SMN01',
@@ -36,9 +51,15 @@ const receipt: GoodsReceiptView = {
   receivedDate: '2026-10-06',
   lotId: 501,
   lotNo: 'RM-SMN01-261006-001',
+  lotStatus: 'AVAILABLE',
   yardId: 2,
   yardName: '원료 야드',
   confirmedEmployeeName: '정다은',
+  reversedGoodsReceiptId: null,
+  reversedGoodsReceiptNo: null,
+  reversalGoodsReceiptNo: null,
+  cancelReason: null,
+  isCancellable: true,
   createdAt: '2026-10-06T02:00:00.000Z',
 };
 const approved: PurchaseRequisitionSummary = {
@@ -129,6 +150,48 @@ describe('발주·입고 서버 어댑터 (api/server/purchaseOrders.ts)', () =>
 
     expect(calls[0].body).toEqual({ purchaseOrderItemId: 61, receivedTon: '1.5', receivedDate: '2026-10-06' });
     expect(result).toMatchObject({ lotNo: 'RM-SMN01-261006-001', yardName: '원료 야드', purchaseOrderStatus: 'PARTIALLY_RECEIVED', lineReceivedTon: '1.500', lineRemainingTon: '3.500' });
+  });
+
+  it('발주 취소·잔량 마감: 사유를 본문에 실어 보내고, 마감한 발주는 입고 줄에서 닫힌 줄이 된다 (이슈 #500)', async () => {
+    const closed: PurchaseOrderView = {
+      ...order,
+      purchaseOrderStatus: 'CLOSED',
+      totalRemainingTon: '0.000',
+      totalClosedTon: '3.500',
+      statusChange: { reason: '잔량 포기', employeeName: '정다은', at: '2026-10-22T01:00:00.000Z' },
+      items: [{ ...order.items[0], remainingTon: '0.000', closedTon: '3.500' }],
+    };
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, (c) => {
+      if (c.method === 'POST') return ok(closed);
+      if (c.path === '/purchase-orders' && c.method === 'GET') return ok(page([closed]));
+      if (c.path === '/items') return ok([]);
+      if (c.path === '/yards') return ok([]);
+      return respond(c);
+    });
+    expect(await purchaseOrderApi.cancel({ purchaseOrderId: 31, reason: '공급 중단' })).toMatchObject({ purchaseOrderStatus: 'CLOSED', statusChange: { reason: '잔량 포기' } });
+    await purchaseOrderApi.close({ purchaseOrderId: 31, reason: '잔량 포기' });
+    expect(calls.filter((c) => c.method === 'POST').map((c) => [c.path, c.body])).toEqual([
+      ['/purchase-orders/31/cancel', { reason: '공급 중단' }],
+      ['/purchase-orders/31/close', { reason: '잔량 포기' }],
+    ]);
+    expect(await goodsReceiptApi.lines()).toEqual([expect.objectContaining({ purchaseOrderItemId: 61, isFullyReceived: true, isClosed: true, closedTon: '3.500' })]);
+  });
+
+  it('입고 취소: 사유를 보내고 취소 행(음수 입고)을 돌려준다. 발주 품목 입고 내역에는 서로 가리키는 번호가 붙는다', async () => {
+    const reversal: GoodsReceiptView = { ...receipt, id: 72, goodsReceiptNo: 'GR-2610-0002', receivedTon: '-1.500', lotId: null, lotNo: null, lotStatus: null, reversedGoodsReceiptId: 71, reversedGoodsReceiptNo: 'GR-2610-0001', cancelReason: '오입고', isCancellable: false };
+    const cancelled: GoodsReceiptView = { ...receipt, lotStatus: 'RECEIPT_CANCELLED', reversalGoodsReceiptNo: 'GR-2610-0002', cancelReason: '오입고', isCancellable: false };
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.purchase, (c) => {
+      if (c.path === '/goods-receipts/71/cancel') return ok(reversal);
+      if (c.path === '/goods-receipts' && c.method === 'GET') return ok(page([reversal, cancelled]));
+      return respond(c);
+    });
+    expect(await goodsReceiptApi.cancel({ goodsReceiptId: 71, reason: '오입고' })).toMatchObject({ receivedTon: '-1.500', reversedGoodsReceiptNo: 'GR-2610-0001', cancelReason: '오입고' });
+    expect(calls[0].body).toEqual({ reason: '오입고' });
+    const [po] = await purchaseOrderApi.list();
+    expect(po.items[0].goodsReceipts).toEqual([
+      expect.objectContaining({ id: 71, reversalGoodsReceiptNo: 'GR-2610-0002', reversedGoodsReceiptNo: null }),
+      expect.objectContaining({ id: 72, receivedTon: '-1.500', reversedGoodsReceiptNo: 'GR-2610-0001' }),
+    ]);
   });
 
   it('구매요청 상세: 발주됐으면 연결 발주 줄을 발주 목록에서 채운다', async () => {

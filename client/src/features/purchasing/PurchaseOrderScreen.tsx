@@ -3,11 +3,13 @@
 // 발주 (REQ-PUR-003, BP-PUR-01): 승인된 구매요청을 원료의 기본 공급업체별로 묶어 공급업체 1곳당 발주 1건(여러 품목, 발주 품목 1행 = 구매요청 1건).
 // 발주는 만들면 바로 확정(CONFIRMED)이고 입고예정에 반영된다(미입고량 = 발주량 − 입고 누계, 계산값). 발주량 = 요청 톤(나눠 발주하지 않음).
 // 발주한 구매요청은 '발주 완료'가 된다. 승인 전이면 PUR-002.
+// 반대 거래(BP-PUR-02): 입고가 없는 발주는 '발주 취소'(연결 구매요청은 발주 취소), 일부만 입고된 발주는 '잔량 마감'(남은 양은 입고예정에서 빠짐). 둘 다 사유 필수.
 // 주소: ?po= 발주 상세, ?pr= 그 구매요청을 골라 둔 발주 작성, ?supplier= 그 공급업체 요청을 골라 둔 발주 작성.
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { PERMISSION, PURCHASE_ORDER_STATUS_LABEL, type PurchaseOrderStatus } from '@/codes';
 import type { PurchaseOrderCandidateItem, PurchaseOrderView } from '@/api/purchasing';
+import { Badge } from '@/components/Badge';
 import { Banner } from '@/components/Banner';
 import { Button, ButtonLink } from '@/components/Button';
 import { Card, CardBody, CardFoot, CardHead } from '@/components/Card';
@@ -15,6 +17,7 @@ import { Chip } from '@/components/Chip';
 import { DateInput } from '@/components/DateInput';
 import { Field } from '@/components/Field';
 import { Kpi, StatBar } from '@/components/Kpi';
+import { KvList } from '@/components/KvList';
 import { MasterPane, PageHead, PageMain } from '@/components/Page';
 import { Progress } from '@/components/Progress';
 import { QueryBoundary } from '@/components/QueryBoundary';
@@ -22,15 +25,16 @@ import { ReadOnlyHint } from '@/components/ReadOnlyHint';
 import { EmptyNote, StateView } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
 import { MasterGroupTitle, MasterItem, MasterNote, PurchaseOrderStatusBadge } from '@/features/purchasing/components/PurchasingParts';
+import { ReasonDialog } from '@/features/purchasing/components/ReasonDialog';
 import { useUrlParams } from '@/features/purchasing/hooks/useUrlParams';
 import { earliestDate, groupBySupplier, plannedPurchaseOrders, ratioPercent, summarizeItemNames, type SupplierGroup } from '@/features/purchasing/lib/purchasingView';
 import { useCanUse, useCanView } from '@/hooks/usePermission';
-import { useCreatePurchaseOrders, usePurchaseOrderCandidateItems, usePurchaseOrderList } from '@/hooks/usePurchaseOrders';
+import { useCancelPurchaseOrder, useClosePurchaseOrder, useCreatePurchaseOrders, usePurchaseOrderCandidateItems, usePurchaseOrderList } from '@/hooks/usePurchaseOrders';
 import { decCmp, decSum } from '@/lib/decimal';
 import { fmtDate, fmtDateTime, fmtMD, fmtNum, fmtTon } from '@/lib/format';
 import { permissionNeedText } from '@/lib/permissions';
 
-const STATUS_FILTERS: readonly PurchaseOrderStatus[] = ['CONFIRMED', 'PARTIALLY_RECEIVED', 'RECEIVED'];
+const STATUS_FILTERS: readonly PurchaseOrderStatus[] = ['CONFIRMED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CLOSED', 'CANCELLED'];
 /** 기본 공급업체가 없는 묶음의 주소 값 */
 const NO_SUPPLIER = 'none';
 
@@ -38,6 +42,9 @@ const supplierKey = (supplierId: number | null): string => (supplierId === null 
 const purchaseOrderReceivedTon = (po: PurchaseOrderView): string => decSum(po.items.map((i) => i.receivedTon));
 const purchaseOrderOrderedTon = (po: PurchaseOrderView): string => decSum(po.items.map((i) => i.orderedTon));
 const purchaseOrderRemainingTon = (po: PurchaseOrderView): string => decSum(po.items.map((i) => i.remainingTon));
+const purchaseOrderClosedTon = (po: PurchaseOrderView): string => decSum(po.items.map((i) => i.closedTon));
+/** 발주 취소·잔량 마감해 더는 입고하지 않는 발주 */
+const isEnded = (po: PurchaseOrderView): boolean => po.purchaseOrderStatus === 'CANCELLED' || po.purchaseOrderStatus === 'CLOSED';
 /** 남은 품목 중 가장 이른 입고 예정일 (발주 단위 납기는 ERD에 없다) */
 const nextExpectedDate = (po: PurchaseOrderView): string | null =>
   earliestDate(po.items.filter((i) => decCmp(i.remainingTon, 0) > 0).map((i) => i.expectedReceiptDate));
@@ -349,12 +356,25 @@ export function PurchaseOrderForm({
   );
 }
 
+type EndAction = 'cancel' | 'close';
+
 function PurchaseOrderDetail({ po }: { po: PurchaseOrderView }) {
   const canSeeReceipts = useCanView(PERMISSION.GOODS_RECEIPT_CONFIRM, PERMISSION.PURCHASE_ORDER_CONFIRM);
+  const canConfirmPurchaseOrder = useCanUse(PERMISSION.PURCHASE_ORDER_CONFIRM);
   const ordered = purchaseOrderOrderedTon(po);
   const received = purchaseOrderReceivedTon(po);
   const remaining = purchaseOrderRemainingTon(po);
+  const closed = purchaseOrderClosedTon(po);
+  const ended = isEnded(po);
   const receipts = po.items.flatMap((line) => line.goodsReceipts.map((receipt) => ({ ...receipt, itemName: line.itemName, purchaseRequisitionNo: line.purchaseRequisitionNo })));
+  const [acting, setActing] = useState<EndAction | null>(null);
+  const done = { onSuccess: () => setActing(null) };
+  const cancel = useCancelPurchaseOrder({ success: (result) => `${result.purchaseOrderNo} 발주를 취소했어요. 같은 원료가 필요하면 MRP에서 다시 요청할 수 있어요`, ...done });
+  const canSeeMrp = useCanView(PERMISSION.PURCHASE_REQUISITION_CREATE);
+  const close = useClosePurchaseOrder({ success: (result) => `${result.purchaseOrderNo} 남은 양을 잔량 마감했어요. 입고예정에서 빠져요`, ...done });
+  const action = acting === 'cancel' ? cancel : close;
+  // 입고가 없으면 발주 취소, 일부만 들어왔으면 잔량 마감 (서버 PUR-004·005와 같은 조건)
+  const endAction: EndAction | null = po.purchaseOrderStatus === 'CONFIRMED' ? 'cancel' : po.purchaseOrderStatus === 'PARTIALLY_RECEIVED' ? 'close' : null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -367,20 +387,52 @@ function PurchaseOrderDetail({ po }: { po: PurchaseOrderView }) {
           </span>
         }
         actions={
-          canSeeReceipts ? (
-            <ButtonLink href={`/goods-receipts?po=${po.id}`} size="sm" variant={po.purchaseOrderStatus === 'RECEIVED' ? 'default' : 'primary'} icon="box">
-              {po.purchaseOrderStatus === 'RECEIVED' ? '입고 내역' : '입고 처리'}
-            </ButtonLink>
-          ) : null
+          <>
+            {endAction ? (
+              <Button
+                size="sm"
+                variant="danger-outline"
+                icon="x"
+                disabled={!canConfirmPurchaseOrder}
+                title={canConfirmPurchaseOrder ? undefined : permissionNeedText([PERMISSION.PURCHASE_ORDER_CONFIRM])}
+                onClick={() => setActing(endAction)}
+              >
+                {endAction === 'cancel' ? '발주 취소' : '잔량 마감'}
+              </Button>
+            ) : null}
+            {canSeeReceipts ? (
+              <ButtonLink href={`/goods-receipts?po=${po.id}`} size="sm" variant={po.purchaseOrderStatus === 'RECEIVED' || ended ? 'default' : 'primary'} icon="box">
+                {po.purchaseOrderStatus === 'RECEIVED' || ended ? '입고 내역' : '입고 처리'}
+              </ButtonLink>
+            ) : null}
+          </>
         }
       />
       <p className="-mt-2 text-sm text-ink-2">
         {po.supplierName} · 발주 확정 {fmtDateTime(po.createdAt)} · 품목 {po.items.length}개 · 발주 {po.orderedEmployeeName ?? '-'}
       </p>
+      {ended ? (
+        <Banner tone="wait">
+          <b>{po.purchaseOrderStatus === 'CANCELLED' ? '발주 취소' : '잔량 마감'}</b>
+          {po.statusChange ? ` · ${po.statusChange.employeeName ?? '-'} ${fmtDateTime(po.statusChange.at)}` : ''} · 사유 {po.statusChange?.reason ?? '-'} ·{' '}
+          {po.purchaseOrderStatus === 'CANCELLED' ? '연결 구매요청은 발주 취소가 됐어요. 같은 원료가 필요하면 ' : `남은 ${fmtTon(closed)}은 입고예정에서 빠졌어요. 부족하면 `}
+          {canSeeMrp ? (
+            <Link className="font-semibold text-run hover:underline" href="/mrp">
+              MRP에서 다시 요청할 수 있어요
+            </Link>
+          ) : (
+            '새로 구매요청해 주세요'
+          )}
+        </Banner>
+      ) : null}
       <StatBar petKey="card:purchaseOrders.summary">
         <Kpi flat label="발주" value={fmtNum(ordered, 3)} unit="t" />
         <Kpi flat label="입고 누계" value={fmtNum(received, 3)} unit="t" sub={`발주 대비 ${Math.round(ratioPercent(received, ordered))}%`} />
-        <Kpi flat label="입고예정" value={fmtNum(remaining, 3)} unit="t" sub="발주 − 입고 누계 (MRP 입고예정)" />
+        {ended ? (
+          <Kpi flat label={po.purchaseOrderStatus === 'CANCELLED' ? '취소한 양' : '마감한 잔량'} value={fmtNum(closed, 3)} unit="t" sub="입고예정에서 빠졌어요 · 더는 입고하지 않아요" />
+        ) : (
+          <Kpi flat label="입고예정" value={fmtNum(remaining, 3)} unit="t" sub="발주 − 입고 누계 (MRP 입고예정)" />
+        )}
       </StatBar>
       <Card petKey="card:purchaseOrders.items">
         <CardHead title="발주 품목" />
@@ -416,7 +468,9 @@ function PurchaseOrderDetail({ po }: { po: PurchaseOrderView }) {
                     <Progress value={ratioPercent(line.receivedTon, line.orderedTon)} tone={ratioPercent(line.receivedTon, line.orderedTon) >= 100 ? 'ok' : 'run'} label={`${line.purchaseRequisitionNo ?? line.itemName} 입고 진행`} />
                   </Td>
                   <Td align="right">
-                    {ratioPercent(line.receivedTon, line.orderedTon) >= 100 ? (
+                    {ended ? (
+                      <span className="text-cap text-ink-3">{po.purchaseOrderStatus === 'CANCELLED' ? '발주 취소' : `잔량 마감 ${fmtTon(line.closedTon)}`}</span>
+                    ) : ratioPercent(line.receivedTon, line.orderedTon) >= 100 ? (
                       <span className="text-cap text-ink-3">입고 끝</span>
                     ) : canSeeReceipts ? (
                       <ButtonLink href={`/goods-receipts?po=${po.id}&item=${line.id}`} size="sm">
@@ -471,7 +525,14 @@ function PurchaseOrderDetail({ po }: { po: PurchaseOrderView }) {
               <tbody>
                 {receipts.map((receipt) => (
                   <tr key={receipt.id} data-pet-item="goodsReceipt" data-pet-item-title={receipt.goodsReceiptNo}>
-                    <Td className="font-mono">{receipt.goodsReceiptNo}</Td>
+                    <Td className="font-mono">
+                      {receipt.goodsReceiptNo}{' '}
+                      {receipt.reversedGoodsReceiptNo ? (
+                        <Badge tone="neutral">입고 취소 · {receipt.reversedGoodsReceiptNo}</Badge>
+                      ) : receipt.reversalGoodsReceiptNo ? (
+                        <Badge tone="neutral">취소됨</Badge>
+                      ) : null}
+                    </Td>
                     <Td>
                       {receipt.itemName} <span className="font-mono text-cap text-ink-3">{receipt.purchaseRequisitionNo}</span>
                     </Td>
@@ -493,6 +554,34 @@ function PurchaseOrderDetail({ po }: { po: PurchaseOrderView }) {
           )}
         </CardBody>
       </Card>
+      {acting ? (
+        <ReasonDialog
+          id={`po-${acting}-${po.id}`}
+          title={acting === 'cancel' ? '발주를 취소할까요?' : '남은 양을 잔량 마감할까요?'}
+          confirmLabel={acting === 'cancel' ? '발주 취소' : '잔량 마감'}
+          reasonLabel={acting === 'cancel' ? '취소 사유' : '마감 사유'}
+          pending={action.isPending}
+          error={action.error}
+          onCancel={() => {
+            setActing(null);
+            action.reset();
+          }}
+          onConfirm={(reason) => action.mutate({ purchaseOrderId: po.id, reason })}
+        >
+          <KvList
+            items={[
+              { label: '발주', value: `${po.purchaseOrderNo} · ${po.supplierName}` },
+              { label: '발주 / 입고', value: `${fmtTon(ordered)} / ${fmtTon(received)}` },
+              { label: acting === 'cancel' ? '취소할 양' : '마감할 잔량', value: fmtTon(remaining) },
+            ]}
+          />
+          <p className="text-cap text-ink-3">
+            {acting === 'cancel'
+              ? '취소하면 되돌릴 수 없어요. 연결 구매요청은 발주 취소가 되고, 같은 원료가 필요하면 MRP에서 다시 요청해요(새 요청은 다시 부서장 승인).'
+              : '마감하면 되돌릴 수 없어요. 남은 양은 입고예정(MRP)에서 빠지고 이 발주로는 더 입고하지 않아요. 부족하면 MRP에서 다시 요청해요.'}
+          </p>
+        </ReasonDialog>
+      ) : null}
     </div>
   );
 }

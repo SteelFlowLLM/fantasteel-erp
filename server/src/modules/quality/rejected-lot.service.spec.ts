@@ -295,9 +295,14 @@ describe('불합격 처리 상태 지정 (API-226·124, REQ-QC-004)', () => {
 
   it('자기 FAIL LOT에 처리 상태·사유를 기록하고, 응답은 그 LOT의 불합격 목록 행', async () => {
     const before = await updatedAtOf(lots.coilFail);
+    // 지정하기 전에는 지정 시각이 없다
+    expect((await service.listRejectedLots({ lotId: lots.coilFail }, user)).items[0]).toMatchObject({ dispositionStatus: null, dispositionAt: null });
     const row = await set(lots.coilFail, 'HOLD', '  샤르피 미달, 재시험 대기  ', before);
     expect(row).toMatchObject({ lotId: lots.coilFail, inspectionResult: 'FAIL', dispositionStatus: 'HOLD', dispositionReason: '샤르피 미달, 재시험 대기' });
     expect(row.updatedAt).not.toBe(before);
+    // 지정 시각 = 작업 로그 DISPOSITION_SET의 발생 시각 (이슈 #498)
+    const [event] = await eventsOf(lots.coilFail);
+    expect(row.dispositionAt).toBe(event.createdAt.toISOString());
     const lot = await prisma.lot.findUniqueOrThrow({ where: { id: lots.coilFail } });
     expect(lot).toMatchObject({ dispositionStatus: 'HOLD', dispositionReason: '샤르피 미달, 재시험 대기', lotStatus: 'AVAILABLE' });
   });
@@ -320,6 +325,8 @@ describe('불합격 처리 상태 지정 (API-226·124, REQ-QC-004)', () => {
     const row = await set(lots.coilFail, 'DOWNGRADED', '재시험도 미달, 격하');
     expect(row).toMatchObject({ dispositionStatus: 'DOWNGRADED', dispositionReason: '재시험도 미달, 격하' });
     const [, second] = await eventsOf(lots.coilFail);
+    // 다시 지정하면 마지막 지정의 시각이다
+    expect(row.dispositionAt).toBe(second.createdAt.toISOString());
     expect(second.beforeData).toEqual({ dispositionStatus: 'HOLD', dispositionReason: '샤르피 미달, 재시험 대기' });
   });
 

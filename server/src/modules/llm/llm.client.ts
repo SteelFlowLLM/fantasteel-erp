@@ -1,10 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
+import type { Agent } from 'undici';
 import type { LlmModelView, LlmServerKind } from '@fantasteel/shared';
+import { createMetadataGuardedAgent, isBlockedLookupError, netFetch } from '../../common/net/guarded-agent';
 import { isBlockedServerHost, redactUrl } from '../../common/net/server-url';
 import type { LlmProfile, LlmReasoning } from './llm-profiles';
 
-/** 모델 목록은 바로 와야 하고, 첫 대화는 LM Studio가 모델을 메모리에 올리느라 오래 걸릴 수 있다 */
-const MODELS_TIMEOUT_MS = 5_000;
+/**
+ * 모델 목록(GET /models)의 제한 시간. 로컬 LLM이 답을 만드는 중이면 목록 요청도 늦게 와서 5초로는 AI 연결 화면의 '연결 확인'이 '연결 안 됨'이 되곤 했다(이슈 #510).
+ * 첫 대화는 LM Studio가 모델을 메모리에 올리느라 더 오래 걸릴 수 있다
+ */
+const MODELS_TIMEOUT_MS = 15_000;
+/** 서버 종류 탐침(LM Studio·Unsloth 고유 경로)과 모델 정보의 제한 시간. 탐침은 차례로 여러 번 부르므로 5초 그대로 둔다(멈춘 서버에서 연결 확인이 1분 넘게 걸리지 않게) */
+const PROBE_TIMEOUT_MS = 5_000;
 const CHAT_TIMEOUT_MS = 120_000;
 /** 모델의 생각 설정 지원 여부는 요청마다 묻지 않는다. 모델을 바꾸거나 새로 받으면 이 시간 안에 반영된다 */
 const MODEL_INFO_TTL_MS = 60_000;
@@ -16,6 +23,31 @@ const REASONING_LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh'] as const;
 const MANUAL_REASONING_OPTIONS = ['off', 'on'] as const;
 /** Unsloth Studio의 top_k 상한 (ChatCompletionRequest 스키마) */
 const UNSLOTH_TOP_K_MAX = 100;
+
+/**
+ * 생각(reasoning) 토큰을 max_tokens 안에서 세는 서버(Unsloth·그 밖의 OpenAI 호환)에서 생각을 켠 요청의 max_tokens에 더하는 여유분 (이슈 #502, 가정값).
+ * 회의 분석(8,000)을 Unsloth Qwen3.8-Flash-Next가 생각 보통으로 받으면 생각 글 17,835자에 거의 다 써 답 JSON이 잘렸다(2026-10-22 재현).
+ * LM Studio는 이 문제가 없어 더하지 않는다
+ */
+export const REASONING_HEADROOM_TOKENS: Readonly<Record<string, number>> = { minimal: 2_000, low: 4_000, medium: 12_000, high: 24_000, xhigh: 32_000 };
+/** 문맥 길이를 모를 때 max_tokens 상한 (서버가 문맥보다 큰 값을 거절하지 않게, 가정값) */
+const UNKNOWN_CONTEXT_MAX_TOKENS = 32_768;
+/** 문맥 길이에서 프롬프트를 빼고 남길 여유 */
+const CONTEXT_MARGIN_TOKENS = 1_024;
+
+/**
+ * 생각 여유분을 더한 max_tokens. 생각을 안 켰거나(none) 생각 토큰을 따로 세는 서버면 그대로.
+ * 프롬프트 토큰은 글자 수로 어림한다: 한국어는 1자 ≈ 1토큰에 가까워(회의록 프롬프트 약 1.15자/토큰) 넉넉하게 1자 = 1토큰으로 본다
+ */
+export function reasoningMaxTokens(requested: number, effort: string | null, countsReasoning: boolean, contextLength: number | null, promptChars: number): number {
+  if (!countsReasoning || !effort || effort === 'none') return requested;
+  const wanted = requested + (REASONING_HEADROOM_TOKENS[effort] ?? REASONING_HEADROOM_TOKENS.medium);
+  const room = contextLength ? contextLength - promptChars - CONTEXT_MARGIN_TOKENS : UNKNOWN_CONTEXT_MAX_TOKENS;
+  return Math.max(requested, Math.min(wanted, room));
+}
+
+/** undici Agent의 기본값은 응답 머리를 300초 안에 못 받으면 끊는다. LLM 요청은 우리 제한 시간이 먼저 걸리도록 여유를 더한 전용 Agent를 쓴다 (이슈 #502) */
+const AGENT_TIMEOUT_MARGIN_MS = 10_000;
 
 export interface LlmEndpoint {
   baseUrl: string;
@@ -96,6 +128,12 @@ interface WireToolCall {
  */
 export type LlmFailureKind = 'NO_MODEL' | 'CONNECT' | 'TIMEOUT' | 'SERVER';
 
+/** JSON 호출 한 번의 결과 (잘렸는지·생각을 켰는지·보낸 max_tokens를 함께, 다시 시도를 정하려고) */
+type JsonAttempt = { truncated: boolean; thinkingOn: boolean; maxTokens: number | undefined; room: number | null } & (
+  | { ok: true; reply: LlmJsonReply }
+  | { ok: false; message: string; rawText: string; thinking: string | null }
+);
+
 /** 화면에 그대로 보일 연결 실패 이유. 내부 LLM 주소(사설망·Tailscale)는 문구에 넣지 않는다(서버 로그에만 남긴다) */
 export class LlmRequestError extends Error {
   constructor(
@@ -142,6 +180,11 @@ export class LlmJsonParseError extends LlmRequestError {
     super(message);
   }
 }
+
+/** 답이 길이 상한(max_tokens)에 걸려 잘려 JSON으로 읽지 못했다 (이슈 #502). 생각을 끄고 다시 해도 잘렸을 때 던진다 */
+export class LlmTruncatedError extends LlmJsonParseError {}
+
+export const LLM_TRUNCATED_MESSAGE = 'AI 답이 길이 상한에 걸려 잘렸어요. 생각을 끄고 다시 해 봤지만 답이 길어 다 받지 못했어요';
 
 /** JSON 형식을 강제해 답을 받는 호출의 옵션 */
 export interface LlmJsonSchema {
@@ -212,6 +255,8 @@ export interface LlmModelCapabilities {
 export class LlmClient {
   private readonly logger = new Logger(LlmClient.name);
   private readonly serverInfoCache = new Map<string, { at: number; info: LlmServerInfo }>();
+  /** 제한 시간별 전용 Agent (응답 머리·본문 대기를 그 시간에 맞추고, 이름이 메타데이터 주소로 풀리면 연결하지 않음). 제한 시간 값은 몇 가지라 기억해 두고 쓴다 */
+  private readonly agents = new Map<number, Agent>();
   /** Unsloth Studio의 모델별 사진 지원·임베딩 여부 (/api/models/check-vision·check-embedding). 열쇠는 `경로|서버 루트|모델` */
   private readonly unslothCheckCache = new Map<string, { at: number; value: boolean | null }>();
 
@@ -265,7 +310,7 @@ export class LlmClient {
         'GET',
         '/api/v0/models',
         undefined,
-        MODELS_TIMEOUT_MS,
+        PROBE_TIMEOUT_MS,
       );
       return new Map((body.data ?? []).map((m) => [m.id, { type: m.type, state: m.state }]));
     } catch {
@@ -279,7 +324,7 @@ export class LlmClient {
       endpoint,
       'POST',
       '/chat/completions',
-      { model, messages, stream: false, ...(await this.profileFields(endpoint, model, profile)).fields, ...(maxTokens === undefined ? {} : { max_tokens: maxTokens }) },
+      { model, messages, stream: false, ...(await this.requestFields(endpoint, model, profile, messages, maxTokens)).fields },
       timeoutMs,
     );
     return body.choices?.[0]?.message?.content?.trim() ?? '';
@@ -295,7 +340,7 @@ export class LlmClient {
       endpoint,
       'POST',
       '/chat/completions',
-      { model, messages, stream: false, ...(await this.profileFields(endpoint, model, options.profile)).fields, ...(options.maxTokens === undefined ? {} : { max_tokens: options.maxTokens }) },
+      { model, messages, stream: false, ...(await this.requestFields(endpoint, model, options.profile, messages, options.maxTokens)).fields },
       options.timeoutMs,
       options.signal,
     );
@@ -313,16 +358,33 @@ export class LlmClient {
     return (await this.chatJsonWithText(endpoint, model, messages, format, options)).value;
   }
 
-  /** chatJson과 같고, 모델이 쓴 원문과 생각 글도 돌려준다 (회의록 AI 실행 기록) */
+  /**
+   * chatJson과 같고, 모델이 쓴 원문과 생각 글도 돌려준다 (회의록 AI 실행 기록).
+   * 답이 길이 상한에 걸려 잘려 JSON으로 읽지 못하면(finish_reason=length) 한 번 더 부른다(이슈 #502): 생각을 켰으면 끄고,
+   * 안 켰으면 max_tokens를 두 배로(문맥 안에서). 그래도 잘리면 LlmTruncatedError
+   */
   async chatJsonWithText(endpoint: LlmEndpoint, model: string, messages: ChatMessage[], format: LlmJsonSchema, options: LlmJsonOptions): Promise<LlmJsonReply> {
-    const base = {
-      model,
-      messages,
-      stream: false,
-      ...(await this.profileFields(endpoint, model, options.profile)).fields,
-      ...(options.maxTokens === undefined ? {} : { max_tokens: options.maxTokens }),
-    };
-    type Reply = { choices?: { message?: { content?: string | null; reasoning_content?: string | null } }[] };
+    const first = await this.jsonAttempt(endpoint, model, messages, format, options);
+    if (first.ok || !first.truncated) return this.jsonResult(first);
+    const retry: LlmJsonOptions = first.thinkingOn
+      ? { ...options, profile: { ...options.profile, reasoning: 'off' } }
+      : { ...options, maxTokens: first.maxTokens === undefined ? undefined : Math.min(first.maxTokens * 2, first.room ?? first.maxTokens * 2) };
+    if (!first.thinkingOn && (retry.maxTokens === undefined || retry.maxTokens <= (first.maxTokens ?? 0))) return this.jsonResult(first);
+    return this.jsonResult(await this.jsonAttempt(endpoint, model, messages, format, retry));
+  }
+
+  /** 잘려서 읽지 못한 답은 LlmTruncatedError, 그 밖에 읽지 못한 답은 LlmJsonParseError */
+  private jsonResult(attempt: JsonAttempt): LlmJsonReply {
+    if (attempt.ok) return attempt.reply;
+    if (attempt.truncated) throw new LlmTruncatedError(LLM_TRUNCATED_MESSAGE, attempt.rawText, attempt.thinking);
+    throw new LlmJsonParseError(attempt.message, attempt.rawText, attempt.thinking);
+  }
+
+  /** JSON 형식을 강제해 한 번 부른다. 서버가 response_format을 몰라 400이면 형식 없이 다시 부른다 */
+  private async jsonAttempt(endpoint: LlmEndpoint, model: string, messages: ChatMessage[], format: LlmJsonSchema, options: LlmJsonOptions): Promise<JsonAttempt> {
+    const prepared = await this.requestFields(endpoint, model, options.profile, messages, options.maxTokens);
+    const base = { model, messages, stream: false, ...prepared.fields };
+    type Reply = { choices?: { finish_reason?: string | null; message?: { content?: string | null; reasoning_content?: string | null } }[] };
     let body: Reply;
     try {
       body = await this.request<Reply>(
@@ -338,16 +400,18 @@ export class LlmClient {
       if (!(error instanceof LlmRequestError) || error.status !== 400 || error.kind === 'NO_MODEL') throw error;
       body = await this.request<Reply>(endpoint, 'POST', '/chat/completions', base, options.timeoutMs, options.signal);
     }
-    const message = body.choices?.[0]?.message;
+    const choice = body.choices?.[0];
+    const message = choice?.message;
     // LM Studio의 추론 모델은 형식을 강제해도 JSON을 content가 아니라 reasoning_content에 담아 content를 비우기도 한다
     const fromContent = Boolean(message?.content?.trim());
     const split = splitThinking(fromContent ? (message?.content ?? '') : (message?.reasoning_content ?? ''));
     const reasoning = fromContent ? message?.reasoning_content?.trim() || null : null;
     const thinking = [reasoning, split.thinking].filter((t): t is string => Boolean(t)).join('\n\n') || null;
+    const meta = { truncated: choice?.finish_reason === 'length', thinkingOn: prepared.thinkingOn, maxTokens: prepared.maxTokens, room: prepared.room };
     try {
-      return { value: parseJsonText(split.text), rawText: split.text, thinking };
+      return { ok: true, reply: { value: parseJsonText(split.text), rawText: split.text, thinking }, ...meta };
     } catch (error) {
-      if (error instanceof LlmRequestError) throw new LlmJsonParseError(error.message, split.text, thinking);
+      if (error instanceof LlmRequestError) return { ok: false, message: error.message, rawText: split.text, thinking, ...meta };
       throw error;
     }
   }
@@ -493,6 +557,29 @@ export class LlmClient {
   }
 
   /**
+   * 샘플링·생각 필드에 max_tokens를 더한다. 생각 토큰을 max_tokens 안에서 세는 서버(LM Studio가 아닌 서버)에서 생각을 켰으면
+   * 생각 여유분을 더한다 (이슈 #502, reasoningMaxTokens). room은 문맥 안에서 줄 수 있는 가장 큰 max_tokens(모르면 null)
+   */
+  private async requestFields(
+    endpoint: LlmEndpoint,
+    model: string,
+    profile: LlmProfile,
+    messages: readonly ChatMessage[],
+    maxTokens: number | undefined,
+  ): Promise<{ fields: Record<string, unknown>; reasoningApplied: boolean; thinkingOn: boolean; maxTokens: number | undefined; room: number | null }> {
+    const profiled = await this.profileFields(endpoint, model, profile);
+    const effort = typeof profiled.fields.reasoning_effort === 'string' ? profiled.fields.reasoning_effort : null;
+    const thinkingOn = effort !== null && effort !== 'none';
+    if (maxTokens === undefined) return { ...profiled, thinkingOn, maxTokens, room: null };
+    const server = await this.serverInfo(endpoint);
+    const contextLength = await this.modelContextLength(endpoint, model);
+    const promptChars = messages.reduce((sum, message) => sum + message.content.length, 0);
+    const room = contextLength ? contextLength - promptChars - CONTEXT_MARGIN_TOKENS : null;
+    const sent = reasoningMaxTokens(maxTokens, effort, server.kind !== 'lmstudio', contextLength, promptChars);
+    return { fields: { ...profiled.fields, max_tokens: sent }, reasoningApplied: profiled.reasoningApplied, thinkingOn, maxTokens: sent, room };
+  }
+
+  /**
    * Unsloth Studio(auto-switch 꺼짐)에 고른 모델이 없으면 알기 쉬운 이유로 막는다. 기억해 둔 정보가 '없음'이면
    * 그사이 불러왔을 수 있어 한 번 다시 묻는다. auto-switch를 못 읽었으면 막지 않고 서버의 400을 바꿔 보인다.
    */
@@ -532,7 +619,7 @@ export class LlmClient {
     const key = `${path}|${root}|${model}`;
     const cached = this.unslothCheckCache.get(key);
     if (cached && Date.now() - cached.at < MODEL_INFO_TTL_MS) return cached.value;
-    const value = await this.request<Record<string, unknown>>({ ...endpoint, baseUrl: root }, 'GET', `/api/models/${path}/${encodeURIComponent(model)}`, undefined, MODELS_TIMEOUT_MS)
+    const value = await this.request<Record<string, unknown>>({ ...endpoint, baseUrl: root }, 'GET', `/api/models/${path}/${encodeURIComponent(model)}`, undefined, PROBE_TIMEOUT_MS)
       .then((body) => (typeof body[field] === 'boolean' ? (body[field] as boolean) : null))
       .catch(() => null);
     this.unslothCheckCache.set(key, { at: Date.now(), value });
@@ -567,11 +654,11 @@ export class LlmClient {
 
   /** Unsloth Studio의 불러온 모델·auto-switch·불러온 모델 정보. /v1/status가 Unsloth 모양이 아니면 null */
   private async unslothInfo(endpoint: LlmEndpoint, root: string): Promise<UnslothInfo | null> {
-    const status = await this.request<UnslothStatusWire>(endpoint, 'GET', '/status', undefined, MODELS_TIMEOUT_MS).catch(() => null);
+    const status = await this.request<UnslothStatusWire>(endpoint, 'GET', '/status', undefined, PROBE_TIMEOUT_MS).catch(() => null);
     if (!status || typeof status.supports_reasoning !== 'boolean' || typeof status.reasoning_style !== 'string') return null;
-    const models = await this.request<{ data?: { id: string; loaded?: unknown }[] }>(endpoint, 'GET', '/models', undefined, MODELS_TIMEOUT_MS).catch(() => ({ data: [] }));
+    const models = await this.request<{ data?: { id: string; loaded?: unknown }[] }>(endpoint, 'GET', '/models', undefined, PROBE_TIMEOUT_MS).catch(() => ({ data: [] }));
     const loaded = (models.data ?? []).filter((m) => m.loaded === true).map((m) => m.id);
-    const autoSwitch = await this.request<{ enabled?: unknown }>({ ...endpoint, baseUrl: root }, 'GET', '/api/settings/openai-auto-switch', undefined, MODELS_TIMEOUT_MS)
+    const autoSwitch = await this.request<{ enabled?: unknown }>({ ...endpoint, baseUrl: root }, 'GET', '/api/settings/openai-auto-switch', undefined, PROBE_TIMEOUT_MS)
       .then((body) => (typeof body.enabled === 'boolean' ? body.enabled : null))
       .catch(() => null);
     const active =
@@ -594,7 +681,7 @@ export class LlmClient {
           capabilities?: { vision?: boolean; reasoning?: { allowed_options?: string[] } };
         }[];
       };
-      const body = await this.request<Wire>({ ...endpoint, baseUrl: root }, 'GET', '/api/v1/models', undefined, MODELS_TIMEOUT_MS);
+      const body = await this.request<Wire>({ ...endpoint, baseUrl: root }, 'GET', '/api/v1/models', undefined, PROBE_TIMEOUT_MS);
       models = Array.isArray(body.models) ? new Map() : null;
       for (const m of body.models ?? []) {
         const info = { reasoningOptions: m.capabilities?.reasoning?.allowed_options ?? null, vision: m.capabilities?.vision === true, contextLength: contextLengthOf(m) };
@@ -618,6 +705,17 @@ export class LlmClient {
     }
   }
 
+  /** 응답 머리 300초 기본 제한에 걸리지 않게 이 요청의 제한 시간 + 여유로 기다리고, 메타데이터 주소로 풀리는 이름은 막는 Agent (이슈 #502·#497) */
+  private agentFor(timeoutMs: number): Agent {
+    let agent = this.agents.get(timeoutMs);
+    if (!agent) {
+      const wait = timeoutMs + AGENT_TIMEOUT_MARGIN_MS;
+      agent = createMetadataGuardedAgent({ headersTimeout: wait, bodyTimeout: wait });
+      this.agents.set(timeoutMs, agent);
+    }
+    return agent;
+  }
+
   /** 요청을 보내고 상태 코드까지 확인한다. 본문은 부르는 쪽이 JSON이나 스트림으로 읽는다 */
   private async send(endpoint: LlmEndpoint, method: 'GET' | 'POST', path: string, payload: unknown, signal: AbortSignal, timeoutMs: number): Promise<Response> {
     const url = `${normalizeBaseUrl(endpoint.baseUrl)}${path}`;
@@ -628,7 +726,7 @@ export class LlmClient {
     }
     let res: Response;
     try {
-      res = await fetch(url, {
+      res = await netFetch.run(url, {
         method,
         headers: {
           ...(payload === undefined ? {} : { 'content-type': 'application/json' }),
@@ -638,10 +736,16 @@ export class LlmClient {
         // 리다이렉트로 메타데이터 같은 다른 곳에 키·질문이 가지 않게 한다 (음성 서버 호출과 같다)
         redirect: 'error',
         signal,
+        // 이름이 메타데이터 주소로 풀려도 연결하지 않고(이슈 #497), 응답 머리·본문은 이 요청의 제한 시간만큼 기다린다(이슈 #502)
+        dispatcher: this.agentFor(timeoutMs),
       });
     } catch (error) {
       const known = readError(error, signal, timeoutMs);
       if (known instanceof LlmRequestError) throw known;
+      if (isBlockedLookupError(error)) {
+        this.logger.warn(`LLM 주소의 이름이 링크 로컬·클라우드 메타데이터 주소로 풀려 연결하지 않았어요: ${redactUrl(url)}`);
+        throw new LlmRequestError('AI 연결 설정의 주소가 가리키는 곳은 AI 서버로 쓸 수 없는 주소(링크 로컬·클라우드 메타데이터)예요. 주소를 바꿔 주세요', undefined, 'CONNECT');
+      }
       // 내부 LLM 주소(사설망·Tailscale)는 사용자에게 가는 문구에 넣지 않고 서버 로그에만 남긴다 (이슈 #497)
       this.logger.warn(`LLM 서버에 연결할 수 없어요: ${redactUrl(url)}${causeCodeOf(error)}`);
       throw new LlmRequestError('LLM 서버에 연결할 수 없어요. LLM 서버(LM Studio의 Developer 탭 서버, Unsloth Studio)를 켰는지, 설정한 주소가 맞는지 확인해 주세요', undefined, 'CONNECT');
@@ -671,11 +775,17 @@ function idleTimeout(): DOMException {
   return new DOMException('stream idle', 'TimeoutError');
 }
 
-/** fetch 실패의 원인 코드(error.cause.code, 예: ECONNREFUSED)를 서버 로그에 덧붙일 글로. 없으면 빈 글 */
+/**
+ * fetch 실패의 원인(error.cause)을 서버 로그에 덧붙일 글로: 원인 코드(예: ECONNREFUSED), 코드가 없으면 원인 글.
+ * 리다이렉트 거절(redirect: 'error')은 코드 없는 Error('unexpected redirect')라 글이 있어야 이유가 남는다. 없으면 빈 글
+ */
 function causeCodeOf(error: unknown): string {
-  const cause = error instanceof Error ? error.cause : undefined;
-  const code = typeof cause === 'object' && cause !== null ? (cause as { code?: unknown }).code : undefined;
-  return typeof code === 'string' ? ` (${code})` : '';
+  // instanceof Error는 쓰지 않는다: 다른 실행 공간(jest 등)에서 온 오류는 Error가 아니라고 나온다
+  const cause = typeof error === 'object' && error !== null ? (error as { cause?: unknown }).cause : undefined;
+  if (typeof cause !== 'object' || cause === null) return '';
+  const { code, message } = cause as { code?: unknown; message?: unknown };
+  if (typeof code === 'string') return ` (${code})`;
+  return typeof message === 'string' && message ? ` (${message})` : '';
 }
 
 /** fetch·읽기 실패를 화면에 보일 이유로 바꾼다. 시간 초과·멈춤이 아니면 원래 오류를 돌려준다 */

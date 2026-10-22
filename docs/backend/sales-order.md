@@ -42,7 +42,7 @@
 **등록**([04] 13.1·13.2)
 
 1. 수량: `orderedQty`가 정수가 아니거나 1 미만이거나 없으면 `SO-002`("수량은 1 이상의 정수로 입력해 주세요"). 반올림·톤 → 매수 환산 금지(4.1).
-   - 품목 한 줄 최대 **9,999매**(🟡 가정값 `MAX_ORDERED_QTY`, `shared/src/sales-order.ts`, 2026-10-22 이슈 #496). 넘으면 `SO-002`에 "수량은 품목 한 줄에 9,999까지 입력할 수 있어요". 문서에 상한이 없는데, 21억을 넘으면 DB 정수 범위 밖 오류(COM-999)가 나고 100만 매 같은 오타는 거대한 생산계획을 만들어서 막는다. 화면 수주 폼(`salesOrderForm.ts`), 철강맨AI 수주 실행 카드(제안 단계에서 미확정 칸으로 보이고 실행은 이 service를 지난다), Message → ERP 수주 초안(추출·수정·실행이 같은 상한, 실행은 `createInTx`에서 한 번 더 검사)이 같은 값을 쓴다.
+   - 품목 한 줄 최대 **9,999매**(🟡 가정값 `MAX_ORDERED_QTY`, `shared/src/sales-order.ts`, 2026-10-22 이슈 #496). 넘으면 `SO-002`에 "수량은 품목 한 줄에 9,999까지 입력할 수 있어요". 문서에 상한이 없는데, 21억을 넘으면 DB 정수 범위 밖 오류(COM-999)가 나고 100만 매 같은 오타는 거대한 생산계획을 만들어서 막는다. 화면 수주 폼(`salesOrderForm.ts`), 철강맨AI 수주 실행 카드(제안 단계에서 미확정 칸으로 보이고 실행은 이 service를 지난다), Message → ERP 수주 초안(추출·수정·실행이 같은 상한, 실행은 `createInTx`에서 한 번 더 검사)이 같은 값을 쓴다. 초안 수정과 철강맨AI 카드도 상한을 넘으면 같은 코드·문구로 알린다(초안 수정은 `SO-002` + 위 문구, 카드는 "n번째 줄의 매수는 1 이상 9,999 이하의 정수여야 해요"를 서버 제안·화면 수정이 같이 쓰고 실행 버튼을 막는다, #509).
    - 전역 ValidationPipe 실패는 `COM-004`가 된다. 14.3이 `SO-002`를 요구하므로 수량은 DTO에서 `@Allow()` 정도만 두고 service에서 검사해 `AppException('SO-002')`를 던진다.
 2. `itemId`가 없거나 SLAB·COIL이 아니면 `SO-001`. `customerId` 없으면 `COM-003`. 담당 영업 = 로그인 사원.
 3. `NumberingService.nextDocumentNumber(tx, 'SALES_ORDER')`로 번호를 받고 수주·품목 저장(톤 저장 안 함).
@@ -108,6 +108,7 @@
 | 호출됨 | shipment | 출고 확정 후 `recalcItemStatus(tx, salesOrderItemId)` |
 | 호출됨 | inventory(자동 예약)·production(재생산) | `getUnsecuredQty(tx, salesOrderItemId)`(현재 미확보 매수) |
 | 읽힘 | messenger | 업무방 상단 수주 요약(REQ-MSG-001) |
+| 읽힘 | ai-assistant | 아침 브리핑(이슈 #506)이 `listDueRisk()`로 진행 중 수주 중 납기 위험 수주를 납기 빠른 순으로 읽는다(`openSalesOrderFulfillments`의 `isDueRisk`, 대시보드와 같은 기준) |
 
 트랜잭션은 이 모듈 service가 `this.prisma.$transaction(async (tx) => …)`로 열고 다른 모듈 service 함수에 `tx`를 넘긴다(중첩 트랜잭션 금지). 각 모듈은 service를 `exports`에 넣고, 이 모듈이 `imports`한다. 순환 의존이 생기면(예: inventory ↔ sales-order) 계산 함수를 한쪽에 두거나 `forwardRef`를 쓴다.
 

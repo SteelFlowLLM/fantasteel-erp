@@ -1,7 +1,7 @@
 // 수주 등록 초안 (REQ-ACT-005, BP-ACT-02, 업무 프로세스 12.3). 확정 주체는 초안을 만든 사원(수주 등록 사용 권한)이고,
 // 실행하면 수주 등록과 같이 합격 재고 우선 예약·부족분 생산계획이 생긴다 (BP-SO-01).
 import { Injectable } from '@nestjs/common';
-import { ACTION_TYPE, MAX_ORDERED_QTY, PERMISSION, type ActionDraftResultView, type AuthUser, type SalesOrderDraftLine, type SalesOrderDraftPayload } from '@fantasteel/shared';
+import { ACTION_TYPE, MAX_ORDERED_QTY, ORDERED_QTY_OVER_MESSAGE, PERMISSION, type ActionDraftResultView, type AuthUser, type SalesOrderDraftLine, type SalesOrderDraftPayload } from '@fantasteel/shared';
 import { AppException } from '../../../common/errors/app.exception';
 import type { Tx } from '../../../prisma/prisma.service';
 import { SalesOrderService } from '../../sales-order/sales-order.service';
@@ -124,6 +124,8 @@ export class SalesOrderAction implements ActionDefinition<SalesOrderDraftPayload
         const n = index + 1;
         const itemId = idPatch(line.itemId, `품목 ${n}의 규격을 골라 주세요`) ?? null;
         if (itemId !== null && !productIds.has(itemId)) throw new AppException('SO-001', `품목 ${n}의 규격을 찾을 수 없어요`);
+        // 상한만 넘은 매수는 수주 등록과 같은 코드·문구로 알린다 (#509)
+        if (typeof line.orderedQty === 'number' && Number.isInteger(line.orderedQty) && line.orderedQty > MAX_ORDERED_QTY) throw new AppException('SO-002', ORDERED_QTY_OVER_MESSAGE);
         return {
           itemId,
           orderedQty: qtyPatch(line.orderedQty, `품목 ${n}의 매수는 1 이상의 정수(${MAX_ORDERED_QTY.toLocaleString('ko-KR')}매까지)로 입력해 주세요`, MAX_ORDERED_QTY),
