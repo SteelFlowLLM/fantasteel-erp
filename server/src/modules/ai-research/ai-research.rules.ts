@@ -1,4 +1,4 @@
-import { AI_RESEARCH_LIMITS, AI_RESEARCH_STATUS, type AiResearchAudit, type AiResearchBudget, type AiResearchPlan, type AiResearchSeed, type AiResearchState, type AiResearchStatus } from '@fantasteel/shared';
+import { AI_RESEARCH_LIMITS, AI_RESEARCH_STATUS, type AiResearchAudit, type AiResearchBudget, type AiResearchPlan, type AiResearchReportFallback, type AiResearchReportFallbackReason, type AiResearchSeed, type AiResearchState, type AiResearchStatus } from '@fantasteel/shared';
 import { parseJsonContent } from '../llm/llm.client';
 import { cutText, internalReferenceIn, partnerNamesIn, redactQuery, stripInvisible, urlKey } from '../ai-assistant/web/web-text';
 import { RESEARCH_CAPS, researchLimits, type ResearchLimits } from './ai-research.config';
@@ -87,6 +87,21 @@ export interface StoredAudit extends AiResearchAudit {
   reportTruncated: boolean;
   /** 조사를 다 마치지 못하고 모은 것으로 보고서를 쓴 이유 (시간 상한·LLM 실패). 다 마쳤으면 null */
   incompleteReason?: string | null;
+  /** 보고서가 대체본이면 그 까닭·시도 횟수 (이슈 #521). 보고서 LLM이 썼으면 null */
+  reportFallback?: AiResearchReportFallback | null;
+  /** 점검 LLM이 다시 시도해도 실패해 점검 없이 보고서로 넘어간 까닭 (이슈 #521) */
+  auditFailure?: AiResearchReportFallbackReason | null;
+}
+
+const FALLBACK_REASONS: readonly AiResearchReportFallbackReason[] = ['TIMEOUT', 'NO_MODEL', 'CONNECT', 'ERROR', 'EMPTY'];
+
+const fallbackReasonOf = (value: unknown): AiResearchReportFallbackReason | null => (FALLBACK_REASONS.includes(value as AiResearchReportFallbackReason) ? (value as AiResearchReportFallbackReason) : null);
+
+/** 저장된 대체본 표시 (모양이 틀리면 null) */
+export function storedReportFallback(value: unknown): AiResearchReportFallback | null {
+  const reason = isRecord(value) ? fallbackReasonOf(value.reason) : null;
+  if (!isRecord(value) || !reason) return null;
+  return { reason, previous: value.previous === true, attempts: typeof value.attempts === 'number' && Number.isInteger(value.attempts) && value.attempts > 0 ? value.attempts : 1 };
 }
 
 const SUMMARY_MAX = 1500;
@@ -406,6 +421,8 @@ export function storedAudit(value: unknown): StoredAudit | null {
     ok: value.ok !== false,
     reportTruncated: value.reportTruncated === true,
     incompleteReason: typeof value.incompleteReason === 'string' ? value.incompleteReason : null,
+    reportFallback: storedReportFallback(value.reportFallback),
+    auditFailure: fallbackReasonOf(value.auditFailure),
   };
 }
 

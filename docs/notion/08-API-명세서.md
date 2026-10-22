@@ -58,6 +58,19 @@ API 1개 = 행 1개입니다. 행을 열면 상세 명세(요청 → 응답 → 
 - 취소·마감된 발주에는 입고하지 않는다(입고 확정 PUR-007).
 - 응답: 발주(`PurchaseOrderView`)에 `totalClosedTon`·품목 `closedTon`(닫은 양, 취소·마감한 발주는 미입고량 0)과 `statusChange`(사유·사원·시각), 입고(`GoodsReceiptView`)에 `reversedGoodsReceiptId`·`reversedGoodsReceiptNo`(취소 행)·`reversalGoodsReceiptNo`(취소된 원래 입고)·`cancelReason`과 `purchaseOrderStatus`·`lotStatus`·`isCancellable`(지금 입고 취소할 수 있는지, 화면 단추용).
 
+## 심층 조사 반복·PDF·Notion 다시 내보내기 (문서 밖 기능, 이슈 #521)
+
+철강맨AI 심층 조사(`/ai-research`, 규칙 전체는 `docs/backend/ai-research.md`)에 반복 실행·보고서 PDF·Notion 다시 내보내기를 더했다(2026-10-22). API는 목록의 API-290~294. 모두 로그인만 보고 자기 조사만 다룬다(남의 조사는 `RES-001`). 🟡 `RES-` 코드는 9.3에 없다.
+
+| 코드 | HTTP | 언제 |
+| --- | --- | --- |
+| RES-007 | 409 | 지금 다른 곳에서 이 조사를 Notion으로 내보내는 중이거나 직전 결과를 확인하지 못함(5분). 다시 내보내기가 생겨 '이미 내보낸 조사'에서 뜻이 바뀌었다 |
+| RES-009 | 409 | 켜진 반복이 이미 5개(가정값) |
+| RES-010 | 500 | 보고서 PDF를 만들지 못함(서버 글꼴을 읽지 못함 등) |
+
+- 반복(`PUT /ai-research/runs/:id/schedule`)은 `{ frequency: DAILY|WEEKLY, weekdays: 1(월)~7(일)[], time: "HH:MM" }`, 시각은 Asia/Seoul. 차례가 되면 서버가 새 조사를 만들어 계획 확인 없이 조사하고 끝나면 알림을 보낸다(API 없음, 서버 안 스케줄).
+- PDF(`GET /ai-research/runs/:id/pdf?version=`) 응답은 공통 응답 포맷이 아니라 파일이다(`application/pdf`, `Content-Disposition: attachment`). 실패는 다른 API와 같은 JSON 오류다.
+
 ## 메신저 실시간 이벤트 (WebSocket)
 
 REQ-MSG-002. socket.io namespace `/messenger`. 연결할 때 로그인 쿠키(`access_token`)로 사원을 확인하고, 실패하면 서버가 연결을 끊는다. 보내기·읽음 등 저장은 HTTP API로 하고, 서버는 저장(커밋)이 끝난 뒤 아래 이벤트를 보낸다. 소켓은 사원 채널(`employee:{id}`)에 들어간다. 자세한 규칙은 `docs/backend/messenger.md` (2026-10-07~08 추가, 문서에 없는 기능 포함)

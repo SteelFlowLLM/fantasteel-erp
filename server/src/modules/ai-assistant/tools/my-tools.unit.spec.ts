@@ -550,6 +550,8 @@ const run = (id: number, status: AiResearchRunSummaryView['status'], extra: Part
   createdAt: '2026-10-22T01:00:00.000Z',
   updatedAt: '2026-10-22T01:10:00.000Z',
   finishedAt: null,
+  repeating: false,
+  fromSchedule: false,
   ...extra,
 });
 

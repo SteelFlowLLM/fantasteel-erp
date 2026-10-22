@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { AI_RESEARCH_STATUS, type AiResearchEventPayloads, type AiResearchEventType, type AiResearchStatus } from '@fantasteel/shared';
-import { Prisma } from '../../generated/prisma/client';
-import { claimAiResearchRun, findClaimableAiResearchRuns, listAiResearchRuns, lockAiResearchEmployee, renewAiResearchLease } from '../../generated/prisma/sql';
+import { AI_RESEARCH_STATUS, type AiResearchEventPayloads, type AiResearchEventType, type AiResearchSeed, type AiResearchStatus } from '@fantasteel/shared';
+import { Prisma, type AiResearchSchedule } from '../../generated/prisma/client';
+import { claimAiResearchRun, claimAiResearchSchedule, findClaimableAiResearchRuns, findDueAiResearchSchedules, listAiResearchRuns, lockAiResearchEmployee, renewAiResearchLease } from '../../generated/prisma/sql';
+import { seedSources, storedPlan } from './ai-research.rules';
 import type { Tx } from '../../prisma/prisma.service';
 
 /** 진행 중(끝나지 않은) 상태. 사원별 동시 진행 수를 셀 때 쓴다 */
@@ -20,6 +21,15 @@ export async function retryOnSeqConflict<T>(work: () => Promise<T>, tries = 3): 
     }
   }
 }
+
+/** seed와 그 출처를 저장할 열로 (없으면 빈 객체: 열 기본값을 쓴다) */
+export function seedColumns(seed: AiResearchSeed | null): { seed?: Prisma.InputJsonObject; sources?: Prisma.InputJsonArray } {
+  if (!seed) return {};
+  return { seed: seed as unknown as Prisma.InputJsonObject, sources: seedSources(seed) as unknown as Prisma.InputJsonArray };
+}
+
+/** 반복과 반복을 건 조사의 제목 (계획 제목, 없으면 질문) */
+export type ScheduleWithRun = AiResearchSchedule & { title: string };
 
 @Injectable()
 export class AiResearchRepository {
@@ -94,22 +104,25 @@ export class AiResearchRepository {
     return (await tx.$queryRawTyped(renewAiResearchLease(id, owner, leaseMs))).length === 1;
   }
 
-  /** Notion 내보내기 잡기: 완료한 내 조사이고 아직 주소가 없고, 아무도 잡지 않았거나 잡은 지 오래됐을 때만 */
+  /** Notion 내보내기 잡기 (이슈 #521부터 다시 내보낼 수 있다): 완료한 내 조사이고, 아무도 잡지 않았거나 잡은 지 오래됐을 때만 */
   claimNotionExport(tx: Tx, id: number, employeeId: number, claimedAt: Date, staleBefore: Date) {
     return tx.aiResearchRun.updateMany({
-      where: { id, employeeId, status: AI_RESEARCH_STATUS.COMPLETED, notionPageUrl: null, OR: [{ notionExportedAt: null }, { notionExportedAt: { lt: staleBefore } }] },
-      data: { notionExportedAt: claimedAt },
+      where: { id, employeeId, status: AI_RESEARCH_STATUS.COMPLETED, OR: [{ notionExportClaimedAt: null }, { notionExportClaimedAt: { lt: staleBefore } }] },
+      data: { notionExportClaimedAt: claimedAt },
     });
   }
 
-  /** 내가 잡은 내보내기만 끝낸다 */
-  finishNotionExport(tx: Tx, id: number, claimedAt: Date, notionPageUrl: string, exportedAt: Date) {
-    return tx.aiResearchRun.updateMany({ where: { id, notionPageUrl: null, notionExportedAt: claimedAt }, data: { notionPageUrl, notionExportedAt: exportedAt } });
+  /** 내가 잡은 내보내기만 끝낸다: 마지막 페이지 주소·시각·판을 남기고 잡기를 푼다 */
+  finishNotionExport(tx: Tx, id: number, claimedAt: Date, done: { notionPageUrl: string; exportedAt: Date; version: number | null }) {
+    return tx.aiResearchRun.updateMany({
+      where: { id, notionExportClaimedAt: claimedAt },
+      data: { notionPageUrl: done.notionPageUrl, notionExportedAt: done.exportedAt, notionExportedVersion: done.version, notionExportClaimedAt: null },
+    });
   }
 
   /** 내보내기가 실패하면 잡은 것을 푼다 */
   releaseNotionExport(tx: Tx, id: number, claimedAt: Date) {
-    return tx.aiResearchRun.updateMany({ where: { id, notionPageUrl: null, notionExportedAt: claimedAt }, data: { notionExportedAt: null } });
+    return tx.aiResearchRun.updateMany({ where: { id, notionExportClaimedAt: claimedAt }, data: { notionExportClaimedAt: null } });
   }
 
   /** 보고서 판 목록 (본문 없이, 오래된 것부터, 이슈 #418) */
@@ -133,6 +146,66 @@ export class AiResearchRepository {
   /** 사원별 잠금 (트랜잭션이 끝날 때까지). 진행 중 수를 세고 만드는 사이에 다른 요청이 끼지 못하게 */
   async lockEmployee(tx: Tx, employeeId: number): Promise<void> {
     await tx.$queryRawTyped(lockAiResearchEmployee(employeeId));
+  }
+
+  // ───────────────────────────── 반복 (이슈 #521) ─────────────────────────────
+
+  /** 반복이 차례에 만든 조사: 계획 확인 없이(이미 승인한 계획) 바로 차례를 기다린다 */
+  createScheduled(
+    tx: Tx,
+    data: { employeeId: number; question: string; budget: Prisma.InputJsonObject; plan: Prisma.InputJsonObject; researchState: Prisma.InputJsonObject; scheduleId: number; seed?: Prisma.InputJsonObject; sources?: Prisma.InputJsonArray },
+  ) {
+    return tx.aiResearchRun.create({ data: { ...data, status: AI_RESEARCH_STATUS.QUEUED, planRevision: 1 } });
+  }
+
+  async findScheduleById(tx: Tx, id: number): Promise<ScheduleWithRun | null> {
+    const row = await tx.aiResearchSchedule.findUnique({ where: { id } });
+    return row ? (await this.withTitles(tx, [row]))[0] : null;
+  }
+
+  async findScheduleByRunId(tx: Tx, runId: number): Promise<ScheduleWithRun | null> {
+    const row = await tx.aiResearchSchedule.findUnique({ where: { runId } });
+    return row ? (await this.withTitles(tx, [row]))[0] : null;
+  }
+
+  /** 내 반복 (켜진 것 먼저, 다음 차례가 빠른 것부터) */
+  async listSchedules(tx: Tx, employeeId: number): Promise<ScheduleWithRun[]> {
+    return this.withTitles(tx, await tx.aiResearchSchedule.findMany({ where: { employeeId }, orderBy: [{ enabled: 'desc' }, { nextRunAt: 'asc' }, { id: 'asc' }] }));
+  }
+
+  countEnabledSchedules(tx: Tx, employeeId: number) {
+    return tx.aiResearchSchedule.count({ where: { employeeId, enabled: true } });
+  }
+
+  async upsertSchedule(tx: Tx, runId: number, data: { employeeId: number; frequency: string; weekdays: number[]; runTime: string; nextRunAt: Date }): Promise<ScheduleWithRun> {
+    const values = { ...data, enabled: true };
+    return (await this.withTitles(tx, [await tx.aiResearchSchedule.upsert({ where: { runId }, create: { runId, ...values }, update: values })]))[0];
+  }
+
+  async updateSchedule(tx: Tx, id: number, data: Prisma.AiResearchScheduleUncheckedUpdateInput): Promise<ScheduleWithRun> {
+    return (await this.withTitles(tx, [await tx.aiResearchSchedule.update({ where: { id }, data })]))[0];
+  }
+
+  /** 반복을 건 조사의 제목을 붙인다 (반복과 조사는 Prisma 관계로 잇지 않았다: schema의 AiResearchSchedule.runId 참고) */
+  private async withTitles(tx: Tx, rows: AiResearchSchedule[]): Promise<ScheduleWithRun[]> {
+    const runs = await tx.aiResearchRun.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.runId))] } }, select: { id: true, plan: true, question: true } });
+    const titles = new Map(runs.map((r) => [r.id, storedPlan(r.plan)?.title ?? r.question]));
+    return rows.map((row) => ({ ...row, title: titles.get(row.runId) ?? '' }));
+  }
+
+  /** 퇴사하지 않은 사원인지 (반복은 퇴사한 사원 대신 돌지 않는다) */
+  async isEmployeeActive(tx: Tx, employeeId: number): Promise<boolean> {
+    return (await tx.employee.findUnique({ where: { id: employeeId }, select: { isActive: true } }))?.isActive === true;
+  }
+
+  /** 차례가 된 반복 (오래된 차례부터). 시각은 DB의 now() */
+  findDueSchedules(tx: Tx, take: number) {
+    return tx.$queryRawTyped(findDueAiResearchSchedules(take));
+  }
+
+  /** 다음 차례가 본 값 그대로일 때만 next로 넘긴다. 다른 서버가 먼저 차지했으면 null */
+  async claimSchedule(tx: Tx, id: number, expected: Date, next: Date): Promise<claimAiResearchSchedule.Result | null> {
+    return (await tx.$queryRawTyped(claimAiResearchSchedule(id, expected, next)))[0] ?? null;
   }
 
 }

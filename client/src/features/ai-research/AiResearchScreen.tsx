@@ -15,7 +15,9 @@ import { AiResearchDetail } from '@/features/ai-research/AiResearchDetail';
 import { AiResearchStatusBadge } from '@/features/ai-research/AiResearchStatusBadge';
 import { useUrlParams } from '@/features/purchasing/hooks/useUrlParams';
 import { useAction } from '@/hooks/useAction';
-import { useAiResearchList } from '@/hooks/useAiResearch';
+import { useAiResearchList, useAiResearchSchedules } from '@/hooks/useAiResearch';
+import { fmtRunAt } from '@/lib/aiResearch';
+import { Badge } from '@/components/Badge';
 import { budgetOfScope, RESEARCH_SCOPE_OPTIONS, type ResearchScope } from '@/lib/aiResearchChart';
 import { cn } from '@/lib/cn';
 import { fmtMDHM } from '@/lib/format';
@@ -23,6 +25,9 @@ import { fmtMDHM } from '@/lib/format';
 function RunMaster({ currentId, onNew }: { currentId: number | null; onNew: () => void }) {
   const { set } = useUrlParams();
   const list = useAiResearchList();
+  const schedules = useAiResearchSchedules();
+  // 서버가 켜진 것·다음 차례가 빠른 것부터 준다
+  const enabledSchedules = (schedules.data ?? []).filter((schedule) => schedule.enabled);
   return (
     <MasterPane
       head={
@@ -50,6 +55,15 @@ function RunMaster({ currentId, onNew }: { currentId: number | null; onNew: () =
                   >
                     <span className="flex items-center gap-1.5">
                       <AiResearchStatusBadge status={row.status} />
+                      {row.repeating ? (
+                        <Badge tone="run" title="이 조사에 반복이 켜져 있어요">
+                          반복
+                        </Badge>
+                      ) : row.fromSchedule ? (
+                        <Badge tone="outline" title="반복이 정한 시각에 만든 조사예요">
+                          반복 실행
+                        </Badge>
+                      ) : null}
                       <span className="ml-auto text-cap text-ink-3 tabular-nums">{fmtMDHM(row.createdAt)}</span>
                     </span>
                     <span className="line-clamp-2 text-sm font-semibold break-words">{row.title ?? row.question}</span>
@@ -57,7 +71,11 @@ function RunMaster({ currentId, onNew }: { currentId: number | null; onNew: () =
                 </li>
               ))}
             </ul>
-            <p className="px-4 py-2.5 text-cap text-ink-3">최근 순 · 내 조사만 보여요</p>
+            <p className="px-4 py-2.5 text-cap text-ink-3">
+              최근 순 · 내 조사만 보여요
+              {enabledSchedules.length ? ` · 켜진 반복 ${enabledSchedules.length}/${AI_RESEARCH_LIMITS.maxSchedulesPerEmployee}` : ''}
+              {enabledSchedules[0]?.nextRunAt ? ` · 다음 반복 ${fmtRunAt(enabledSchedules[0].nextRunAt)}` : ''}
+            </p>
           </>
         )}
       </QueryBoundary>

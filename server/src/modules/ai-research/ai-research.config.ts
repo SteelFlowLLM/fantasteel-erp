@@ -98,3 +98,12 @@ export function researchLimits(env: NodeJS.ProcessEnv = process.env): ResearchLi
     reportSources: intEnv(env.AI_RESEARCH_REPORT_SOURCES, DEFAULT_RESEARCH_LIMITS.reportSources, 1, RESEARCH_CAPS.reportSources),
   };
 }
+
+/** 보고서 LLM 한 번의 시간 제한 기본값(분). 로컬 LLM이 긴 보고서를 5분 안에 다 쓰지 못하는 일이 잦았다(#493 실측) — 회의 분석(#470)과 같은 10분 */
+export const DEFAULT_REPORT_TIMEOUT_MINUTES = 10;
+const REPORT_TIMEOUT_MINUTES_MAX = 60;
+
+/** 보고서 LLM 한 번의 시간 제한(ms). AI_RESEARCH_REPORT_TIMEOUT_MINUTES(1~60분, 비었거나 숫자가 아니면 10분, 넘으면 60분) */
+export function reportTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  return intEnv(env.AI_RESEARCH_REPORT_TIMEOUT_MINUTES, DEFAULT_REPORT_TIMEOUT_MINUTES, 1, REPORT_TIMEOUT_MINUTES_MAX) * 60_000;
+}
