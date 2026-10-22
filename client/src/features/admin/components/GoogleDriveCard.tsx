@@ -11,6 +11,7 @@ import { Button } from '@/components/Button';
 import { Card, CardBody, CardFoot, CardHead } from '@/components/Card';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Field } from '@/components/Field';
+import { IntegrationHealthNotes, IntegrationStatusBadges } from '@/features/admin/components/IntegrationHealth';
 import { Input } from '@/components/Input';
 import { KvList } from '@/components/KvList';
 import { useAction } from '@/hooks/useAction';
@@ -18,8 +19,6 @@ import { useIntegrationTest } from '@/hooks/useIntegrations';
 import { fmtDateTime } from '@/lib/format';
 import {
   DRIVE_SERVICE_ACCOUNT_NOTE,
-  INTEGRATION_STATUS_LABEL,
-  INTEGRATION_STATUS_TONE,
   driveConnectBlockReason,
   driveFolderLink,
   driveSettingsPatch,
@@ -66,7 +65,7 @@ export function GoogleDriveCard({ connection, canEdit }: { connection: Integrati
 
   return (
     <Card petKey={`card:integrations.${providerKey}`}>
-      <CardHead title={connection.displayName} meta={<Badge tone={INTEGRATION_STATUS_TONE[status]}>{INTEGRATION_STATUS_LABEL[status]}</Badge>} />
+      <CardHead title={connection.displayName} meta={<IntegrationStatusBadges connection={connection} />} />
       <CardBody>
         {serviceAccount ? (
           <KvList items={[{ label: '연결 방식', value: '서비스 계정 (서버 .env)' }]} />
@@ -92,12 +91,7 @@ export function GoogleDriveCard({ connection, canEdit }: { connection: Integrati
             <b>연결이 끊겼어요.</b> 허용이 만료되었거나 취소되었어요. 관리자가 다시 연결해 주세요.
           </Banner>
         ) : null}
-        {connection.lastError ? (
-          <Banner tone="danger" icon="alert">
-            <span className="text-cap font-medium">마지막 오류</span>
-            <div className="break-words">{connection.lastError}</div>
-          </Banner>
-        ) : null}
+        <IntegrationHealthNotes connection={connection} />
 
         {serviceAccount ? <ServiceAccountGuide /> : <SetupGuide />}
 

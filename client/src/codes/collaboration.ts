@@ -65,7 +65,7 @@ export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
   DONE: '완료',
 };
 
-/** 공통 코드 정의서 2장 NOTIFICATION_TYPE. DUE_RISK·QUALITY_RATE_RISE·AGENT_CANDIDATE는 Agent 알림(2026-10-21). */
+/** 공통 코드 정의서 2장 NOTIFICATION_TYPE. DUE_RISK·QUALITY_RATE_RISE·AGENT_CANDIDATE는 Agent 알림(2026-10-21), INTEGRATION_FAULT·INTEGRATION_RECOVERED는 외부 연결 장애·복구 알림(2026-10-22). */
 export const NOTIFICATION_TYPE = {
   MENTION: 'MENTION',
   WORK_ROOM_MESSAGE: 'WORK_ROOM_MESSAGE',
@@ -77,6 +77,8 @@ export const NOTIFICATION_TYPE = {
   DUE_RISK: 'DUE_RISK',
   QUALITY_RATE_RISE: 'QUALITY_RATE_RISE',
   AGENT_CANDIDATE: 'AGENT_CANDIDATE',
+  INTEGRATION_FAULT: 'INTEGRATION_FAULT',
+  INTEGRATION_RECOVERED: 'INTEGRATION_RECOVERED',
 } as const;
 export type NotificationType = (typeof NOTIFICATION_TYPE)[keyof typeof NOTIFICATION_TYPE];
 export const NOTIFICATION_TYPE_LABEL: Record<NotificationType, string> = {
@@ -90,6 +92,8 @@ export const NOTIFICATION_TYPE_LABEL: Record<NotificationType, string> = {
   DUE_RISK: '납기 위험',
   QUALITY_RATE_RISE: '불합격률 상승',
   AGENT_CANDIDATE: '대응 후보',
+  INTEGRATION_FAULT: '연동 장애',
+  INTEGRATION_RECOVERED: '연동 복구',
 };
 
 /** 공통 코드 정의서 2장 CASE_CATEGORY (EX 과거 사례) */
