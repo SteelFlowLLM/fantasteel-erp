@@ -245,14 +245,44 @@ describe('구매·입고·출하·밀시트 도구', () => {
       totalOrderedTon: '8.000',
       totalReceivedTon: '5.000',
       totalRemainingTon: '3.000',
+      totalClosedTon: '0.000',
+      statusChange: null,
       createdAt: '2026-10-13T05:00:00.000Z',
       updatedAt: '2026-10-13T05:00:00.000Z',
-      items: [{ purchaseOrderItemId: 1, purchaseRequisitionId: 1, purchaseRequisitionNo: 'PR-2610-0005', itemId: 4, itemCode: 'SMN01', itemName: '망간 합금철', orderedTon: '8.000', expectedReceiptDate: '2026-10-15', receivedTon: '5.000', remainingTon: '3.000' }],
+      items: [
+        { purchaseOrderItemId: 1, purchaseRequisitionId: 1, purchaseRequisitionNo: 'PR-2610-0005', itemId: 4, itemCode: 'SMN01', itemName: '망간 합금철', orderedTon: '8.000', expectedReceiptDate: '2026-10-15', receivedTon: '5.000', remainingTon: '3.000', closedTon: '0.000' },
+      ],
     };
     const tool = purchaseOrderTool({ listPurchaseOrders: async () => page([order]) } as unknown as PurchasingService);
     const output = await tool.run({ keyword: '망간' }, user(ROLE.PURCHASE));
     expect(output.label).toBe('발주·입고예정 · 망간');
     expect(output.data).toMatchObject({ 발주: [{ '발주 번호': 'PO-2610-0009', '미입고 톤': '3.000', 품목: [{ 입고예정일: '2026-10-15', '미입고 톤': '3.000' }] }] });
+  });
+
+  it('발주·입고: 잔량 마감은 마감 톤·사유를, 입고 취소는 취소 줄과 취소된 입고를 보인다 (이슈 #500)', async () => {
+    const closed = {
+      purchaseOrderNo: 'PO-2610-0010',
+      purchaseOrderStatus: 'CLOSED',
+      supplierName: '한국광물',
+      totalOrderedTon: '8.000',
+      totalReceivedTon: '5.000',
+      totalRemainingTon: '0.000',
+      totalClosedTon: '3.000',
+      statusChange: { reason: '잔량 납품 포기', employeeName: '정다은', at: '2026-10-22T05:00:00.000Z' },
+      items: [],
+    } as unknown as PurchaseOrderView;
+    const orders = purchaseOrderTool({ listPurchaseOrders: async () => page([closed]) } as unknown as PurchasingService);
+    expect((await orders.run({}, user(ROLE.PURCHASE))).data).toMatchObject({ 발주: [{ 상태: '잔량 마감', '미입고 톤': '0.000', '마감 톤': '3.000', '취소·마감 사유': '잔량 납품 포기' }] });
+
+    const original = { goodsReceiptNo: 'GR-2610-0001', receivedTon: '5.000', reversedGoodsReceiptId: null, reversedGoodsReceiptNo: null, reversalGoodsReceiptNo: 'GR-2610-0002', cancelReason: '오입고' } as GoodsReceiptView;
+    const reversal = { goodsReceiptNo: 'GR-2610-0002', receivedTon: '-5.000', reversedGoodsReceiptId: 1, reversedGoodsReceiptNo: 'GR-2610-0001', reversalGoodsReceiptNo: null, cancelReason: '오입고' } as GoodsReceiptView;
+    const receipts = goodsReceiptTool({ listGoodsReceipts: async () => page([reversal, original]) } as unknown as PurchasingService);
+    expect((await receipts.run({}, user(ROLE.PURCHASE))).data).toMatchObject({
+      입고: [
+        { '입고 번호': 'GR-2610-0002', 구분: '입고 취소', '입고 톤': '-5.000', '취소한 입고 번호': 'GR-2610-0001', '취소 사유': '오입고' },
+        { '입고 번호': 'GR-2610-0001', 구분: '입고', '취소 번호': 'GR-2610-0002' },
+      ],
+    });
   });
 
   it('입고·밀시트: 거를 말이 있으면 100건을 읽어 거르고, 없으면 최신 15건만', async () => {

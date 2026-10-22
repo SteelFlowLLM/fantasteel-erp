@@ -35,7 +35,7 @@ npm run dev          # 로컬 DB(54322) · shared · 서버(8787) · 화면(5173
 | `npm run test:voice` | 음성 서버(`tools/voice-sidecar`) API 키 시험. 파이썬 3만 있으면 된다 |
 | `npm run typecheck` | shared·server·client 타입 검사 |
 | `npm run check-orphans -w @fantasteel/server` | 고아 데이터 점검 (시드 후·PR 전, 컨벤션 7-2) |
-| `npm run check-invariants -w @fantasteel/server` | 업무 불변식 점검: 재고 수량·원료/용선 잔량·실적 순서·설비 겹침·예약 (읽기만, 위반 있으면 종료 코드 1, `-- --all`로 위반 행 모두) |
+| `npm run check-invariants -w @fantasteel/server` | 업무 불변식 점검: 재고 수량·원료/용선 잔량·실적 순서·설비 겹침·예약·입고 취소 (읽기만, 위반 있으면 종료 코드 1, `-- --all`로 위반 행 모두) |
 | `npm run generate:sql -w @fantasteel/server` | `prisma/sql/*.sql` TypedSQL 타입 생성 (DB 필요) |
 | `npm run codes -w @fantasteel/shared` | 공통 코드 정의서 2장 → `shared/src/codes/index.ts` 다시 만들기 |
 
@@ -69,7 +69,7 @@ server/
 | 인증·권한 | `auth/` | 모든 API는 로그인 필요(전역 가드). `@Public()`은 로그인만. `@RequirePermission(PERMISSION.SALES_ORDER_CREATE, 'USE')` (조회는 `'VIEW'`). 로그인 사원은 `@CurrentUser() user: AuthUser` |
 | 부서장 확인 | `auth/department-head.ts` | 구매요청 승인·반려: `assertDepartmentHead(user, requester.departmentId)` (권한 코드 아님, REQ-AUTH-004) |
 | 작업 로그 | `business-event/business-event.recorder.ts` | 본 거래와 같은 tx에서 `businessEventRecorder.record(tx, { type, actor: user 또는 'SYSTEM', target: { table, id }, salesOrderId, lotIds, before, after, reason })` |
-| 채번 | `numbering/` | `numbering.nextDocumentNumber(tx, 'SALES_ORDER')` · `nextLotNumber(tx, 'HEAT', 'BOF1')` · `nextMillSheetNumber(tx, id, no)` · 슬래브·코일은 `formatSlabNumber`·`formatCoilNumber` |
+| 채번 | `numbering/` | `numbering.nextDocumentNumber(tx, 'SALES_ORDER')` · `nextLotNumber(tx, 'HEAT', 'BOF1')` · `nextMillSheetNumber(tx, id, no)` · 슬래브·코일은 `formatSlabNumber`·`formatCoilNumber` · 잠금 순서를 맞출 때만 `lockDocumentNumber(tx, 'BUSINESS_EVENT')`(번호 없이 앞부분 잠금만, 예: 원료 LOT보다 작업 로그 잠금을 먼저 — 제선 실적이 EV → 원료 LOT 순이다) |
 | 날짜 | `time/seoul-date.ts` | `seoulToday()`, `seoulDateOnly()` — "오늘"·채번 날짜는 Asia/Seoul. 사람이 고른 시각 글은 `seoulDateTimeOf()`(시간대가 없으면 서울 시각, `new Date(글)` 금지) |
 | 파일 | `storage/storage.service.ts` | `save(folder, fileName, buffer)` → 경로, `read(path)`. 지금은 로컬 폴더, Supabase Storage로 옮길 때 이 파일만 바꾼다 |
 | 메신저 소켓 인증 | `auth/auth-token.service.ts` | handshake에서 `verifyCookieHeader(socket.handshake.headers.cookie)` |

@@ -134,8 +134,8 @@ AI(모델)는 조회·설명·카드 제안만 하고 업무 데이터를 바꾸
 | `get_rejected_lots` | `RejectedLotService.listRejectedLots` (GET lots/rejected) | SERVICE: 불합격 처리 또는 검사 등록 VIEW | 없음. 불합격 상태·사유, 기준을 벗어난 항목만 |
 | `get_quality_reject_rate` | `QualityService.listQualityInspections` (GET quality-inspections?status=done을 100건씩, 판정 시각 최신순이라 기간 시작일 전이 나오면 멈춤, 5,000건까지) | 검사 등록 VIEW | `days`(1~365, 기본 30), `steelGradeCode`. 강종별·강종 안 공정별 판정 수·불합격 수·불합격률(소수 1자리 %). 대시보드 강종별 불합격률 위젯과 같은 기준(판정 시각 서울 날짜가 기간 안인 합격·불합격 중 불합격) |
 | `get_purchase_requisitions` | `PurchasingService.listRequisitions` (GET purchase-requisitions) | SERVICE: 구매요청 등록 VIEW 또는 부서장 | `status`, `keyword`(번호·원료) |
-| `get_purchase_orders` | `PurchasingService.listPurchaseOrders` (GET purchase-orders) | 발주 확정 VIEW | `status`, `keyword`(번호·공급업체·원료). 품목별 입고예정일·미입고 톤(= 입고예정) |
-| `get_goods_receipts` | `PurchasingService.listGoodsReceipts` (GET goods-receipts) | 입고 확정 VIEW | `keyword`(입고·발주 번호·원료). 거를 말이 없으면 최신 15건 |
+| `get_purchase_orders` | `PurchasingService.listPurchaseOrders` (GET purchase-orders) | 발주 확정 VIEW | `status`, `keyword`(번호·공급업체·원료). 품목별 입고예정일·미입고 톤(= 입고예정)·마감 톤, 발주 취소·잔량 마감 사유 (취소·마감한 발주는 미입고 톤 0) |
+| `get_goods_receipts` | `PurchasingService.listGoodsReceipts` (GET goods-receipts) | 입고 확정 VIEW | `keyword`(입고·발주 번호·원료). 거를 말이 없으면 최신 15건. 입고 취소는 `구분` = 입고 취소(음수 입고 톤)와 취소한 입고 번호·사유로 보인다 |
 | `get_mrp_requirements` | `MrpService.requirements` (GET mrp/requirements, API-206) | 구매요청 등록·MRP VIEW | `from`·`to`(YYYY-MM-DD, 기본 오늘 ~ 오늘 + 30일 = Factory Agent 원료 부족 기간). 원료별 소요·잔량·입고예정·순소요 톤과 처음 부족한 필요일, 구매요청으로 이어질 줄 15줄 |
 | `get_shipment_requests` | `ShipmentService.list` (GET shipment-requests) | SERVICE: 출하요청 관리 또는 출고 확정 VIEW | `status`, `shipmentRequestNo`, `customerName`(API는 고객사 id만 받아 100건을 읽어 이름으로 거름) |
 | `get_mill_sheets` | `ShipmentService.listMillSheets` (GET mill-sheets) | 밀시트 조회 VIEW | `keyword`(밀시트·출하요청·수주번호) |
