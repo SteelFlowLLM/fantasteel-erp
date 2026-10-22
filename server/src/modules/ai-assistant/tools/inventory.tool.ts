@@ -1,6 +1,6 @@
 import { ITEM_TYPE_LABEL } from '@fantasteel/shared';
 import type { InventoryService } from '../../inventory/inventory.service';
-import { limitRows, looseIncludes, OPEN_ACCESS, optionalEnum, optionalString, type AssistantTool } from './assistant-tool';
+import { limitRows, looseIncludes, OPEN_ACCESS, optionalEnum, optionalString, qtyUnitOf, type AssistantTool } from './assistant-tool';
 
 const CATEGORIES = ['PRODUCT', 'RAW_MATERIAL', 'SURPLUS'] as const;
 
@@ -45,6 +45,7 @@ export function inventoryTool(inventory: InventoryService): AssistantTool {
                   규격: r.itemCode,
                   품목: r.itemName,
                   품목유형: ITEM_TYPE_LABEL[r.itemType],
+                  '수량 단위': qtyUnitOf(r.itemType),
                   강종: r.steelGradeCode,
                   '합격 재고 매수': r.onHandQty,
                   '예약 매수': r.reservedQty,
