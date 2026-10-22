@@ -99,6 +99,21 @@ describe('mergeReview', () => {
     expect(r.candidates[1].issues).toEqual([`${REVIEW_ISSUE.concernPrefix}담당자가 달라 보여요`, `${REVIEW_ISSUE.concernPrefix}${'가'.repeat(120)}`]);
   });
 
+  it('빼야 한다는 지적(exclude 또는 사적 약속·중복 같은 이유)은 후보를 기본 제외로 두고, 고치면 되는 지적은 그대로 둔다 (이슈 #530)', () => {
+    const r = mergeReview(
+      firstPass(),
+      { missed: [], concerns: [{ key: 'c1', reason: '팀 점심은 사적 약속이라 빼야 해요' }, { key: 'c2', reason: '담당자가 틀렸어요', exclude: false }] },
+      ctx,
+    );
+    expect(r.candidates.map((c) => c.decision)).toEqual(['EXCLUDED', 'PENDING']);
+    expect(r.candidates[0].issues.at(-1)).toBe(REVIEW_ISSUE.excluded);
+    const flagged = mergeReview(firstPass(), { missed: [], concerns: [{ key: 'c2', reason: '이미 끝난 일이에요', exclude: true }] }, ctx);
+    expect(flagged.candidates[1].decision).toBe('EXCLUDED');
+    // 사람이 이미 정한 후보는 바꾸지 않는다
+    const decided = firstPass().map((c) => ({ ...c, decision: 'APPROVED' as const }));
+    expect(mergeReview(decided, { missed: [], concerns: [{ key: 'c1', reason: '사적 약속', exclude: true }] }, ctx).candidates[0].decision).toBe('APPROVED');
+  });
+
   it('스스로 문제가 아니라고 적은 지적은 버린다', () => {
     const r = mergeReview(firstPass(), { missed: [], concerns: [{ key: 'c1', reason: '요일이 맞음. (오류 아님)' }, { key: 'c2', reason: '문제 없어 보여요' }, { key: 'c2', reason: '담당자가 달라요' }] }, ctx);
     expect(r.review).toEqual({ ok: true, missedCount: 0, concernCount: 1 });

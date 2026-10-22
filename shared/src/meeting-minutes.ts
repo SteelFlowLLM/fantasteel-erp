@@ -201,6 +201,12 @@ export interface MeetingCandidate {
   notionSync?: boolean;
   /** PURCHASE 구매요청 초안 값 */
   purchase: PurchaseRequisitionDraftPayload | null;
+  /**
+   * PURCHASE 초안의 요청자(확정 주체, 이슈 #530). 없으면 회의록 작성자. 작성자에게 구매요청 등록 권한이 없으면(예: 영업) 구매 담당 사원을 골라 넘긴다.
+   * 확정하면 이 사원이 요청자인 구매요청 초안이 만들어지고, 이 사원이 초안을 확인해 구매요청으로 확정한다
+   */
+  purchaseRequesterId?: number | null;
+  purchaseRequesterName?: string | null;
   /** 말한 품목 이름 그대로 */
   itemName: string | null;
   relatedSalesOrderNo: string | null;
@@ -293,6 +299,8 @@ export interface MeetingCandidateUpdateInput {
   attendeeIds?: number[];
   /** EVENT를 Notion에도 넣을지 */
   notionSync?: boolean;
+  /** PURCHASE 초안의 요청자 (구매요청 등록 권한이 있는 사원). null이면 작성자로 되돌린다 */
+  purchaseRequesterId?: number | null;
   purchase?: {
     itemId?: number;
     requestedTon?: string;

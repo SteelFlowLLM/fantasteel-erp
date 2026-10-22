@@ -43,7 +43,7 @@ import { buildResearchContext, citedResearchSources, type ResearchContext } from
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import type { ExecuteAiActionCardDto } from './dto/ai-assistant.dto';
 import { parseAssistantAnswer } from './assistant.answer';
-import { buildAssistantMessages, recentHistory } from './assistant.prompt';
+import { buildAssistantMessages, missingImageNote, recentHistory } from './assistant.prompt';
 import { searchGlossary } from './knowledge/glossary.search';
 import { KnowledgeReads } from './knowledge/knowledge.reads';
 import { findManualGuides } from './knowledge/manual.search';
@@ -401,12 +401,13 @@ export class AiAssistantService {
     });
     const profile = assistantProfile(input.reasoning);
     const questionImages: AiAssistantImageInput[] = [...(input.images ?? []), ...(attached?.images ?? [])];
-    const questionText = attached?.text ? `${input.question}\n\n${attached.text}` : input.question;
+    const imageNote = missingImageNote(input.question, questionImages.length);
+    const questionText = [input.question, attached?.text, imageNote].filter(Boolean).join('\n\n');
     if (questionImages.length) {
       // 사진을 못 보는 모델은 사진을 무시하고 답을 지어내므로 보내기 전에 막는다. 모르면(외부 LLM) 보낸다
       if ((await this.llm.modelCapabilities(endpoint, model)).vision === false) throw new AppException('COM-004', NO_VISION, HttpStatus.BAD_REQUEST);
       messages[messages.length - 1] = { role: 'user', content: questionText, images: questionImages };
-    } else if (attached?.text) {
+    } else if (attached?.text || imageNote) {
       messages[messages.length - 1] = { role: 'user', content: questionText };
     }
     // 답하는 중에 덧붙인 말 중 모델에 넘긴 것. 저장한 질문 아래에 남긴다 (이슈 #430)

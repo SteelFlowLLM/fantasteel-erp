@@ -162,7 +162,7 @@ describe('수주 등록 초안 (SALES_ORDER_CREATE)', () => {
 
     const events = await eventsOf(created.id);
     expect(events.map((e) => [e.businessEventType, e.isAiAssisted])).toEqual([
-      [BUSINESS_EVENT_TYPE.DRAFT_CREATED, false],
+      [BUSINESS_EVENT_TYPE.DRAFT_CREATED, true],
       [BUSINESS_EVENT_TYPE.DRAFT_CONFIRMED, true],
       [BUSINESS_EVENT_TYPE.SALES_ORDER_CREATED, true],
       [BUSINESS_EVENT_TYPE.DRAFT_EXECUTED, true],

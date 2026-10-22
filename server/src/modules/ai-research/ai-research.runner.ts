@@ -63,6 +63,7 @@ import {
   type StoredRevision,
   type StoredSource,
   type StoredState,
+  relevantToQuery,
 } from './ai-research.rules';
 
 export const RESEARCH_NO_MODEL_REASON = '사용할 AI 모델이 정해지지 않았어요. AI 연결 설정에서 모델을 골라 주세요';
@@ -627,6 +628,8 @@ export class AiResearchRunner implements OnApplicationBootstrap, OnModuleDestroy
       const title = cutText(stripInvisible(result.title), SOURCE_TITLE_MAX);
       const snippet = cutText(stripInvisible(result.snippet ?? ''), SNIPPET_MAX);
       if (!key) continue;
+      // 검색어와 상관없는 결과(엔진이 낱말 일부만 맞춘 게임·연예 글 등)는 출처로도 근거로도 넣지 않는다 (이슈 #530)
+      if (!relevantToQuery(outcome.query, title, snippet)) continue;
       const existing = known.get(key);
       if (existing !== undefined || webCount >= maxSources) {
         results.push({ sourceId: existing ?? null, title, url: result.url, snippet });

@@ -108,6 +108,8 @@ export class MessageActionService {
         target: { table: 'action_draft', id: draft.id },
         salesOrderId: message.chatRoom.salesOrderId,
         after: { draftStatus: draft.draftStatus, actionType: definition.actionType, requesterId: draft.requesterId, payload: toJson(payload) },
+        // AI가 칸을 채운 초안은 생성 로그부터 AI 경유로 남긴다: 회의록·철강맨AI 초안과 같은 기준 (이슈 #530)
+        isAiAssisted: isAiAssisted(filled),
         actionDraftId: draft.id,
         messageId: message.id,
       });
@@ -152,11 +154,11 @@ export class MessageActionService {
   }
 
   /**
-   * 회의록 확정 트랜잭션 안에서 구매요청 초안을 만든다 (REQ-VOC-004). 만드는 사람 = 회의록 작성자 = 요청자.
+   * 회의록 확정 트랜잭션 안에서 구매요청 초안을 만든다 (REQ-VOC-004). 만드는 사람 = 회의록 작성자(creator), 요청자 = 후보에 정한 사원(없으면 작성자, 이슈 #530).
    * 사람이 허가한 후보만 부르므로 AI_GENERATED는 거치지 않고 바로 요청자 확인 대기로 둔다. 요청자가 나중에 확정할 수 없는 초안은 만들지 않는다.
    */
-  async createFromMeeting(tx: Tx, requester: AuthUser, meetingMinutesId: number, payload: PurchaseRequisitionDraftPayload, salesOrderId: number | null): Promise<number> {
-    return this.createAiDraft(tx, requester, { meetingMinutesId }, payload, salesOrderId);
+  async createFromMeeting(tx: Tx, requester: AuthUser, meetingMinutesId: number, payload: PurchaseRequisitionDraftPayload, salesOrderId: number | null, creator: AuthUser = requester): Promise<number> {
+    return this.createAiDraft(tx, requester, { meetingMinutesId }, payload, salesOrderId, creator);
   }
 
   /**
@@ -167,7 +169,7 @@ export class MessageActionService {
     return this.createAiDraft(tx, requester, {}, payload, null);
   }
 
-  private async createAiDraft(tx: Tx, requester: AuthUser, origin: { meetingMinutesId?: number }, payload: PurchaseRequisitionDraftPayload, salesOrderId: number | null): Promise<number> {
+  private async createAiDraft(tx: Tx, requester: AuthUser, origin: { meetingMinutesId?: number }, payload: PurchaseRequisitionDraftPayload, salesOrderId: number | null, creator: AuthUser = requester): Promise<number> {
     await this.assertCanRequestFromMeeting(tx, requester);
     const actionType = ACTION_TYPE.PURCHASE_REQUISITION_CREATE;
     const { meetingMinutesId } = origin;
@@ -181,7 +183,8 @@ export class MessageActionService {
     });
     await this.businessEventRecorder.record(tx, {
       type: BUSINESS_EVENT_TYPE.DRAFT_CREATED,
-      actor: requester,
+      // 초안을 만든 사람(회의록 작성자). 요청자는 after.requesterId에 남는다
+      actor: creator,
       target: { table: 'action_draft', id: draft.id },
       salesOrderId,
       after: {

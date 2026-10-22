@@ -604,3 +604,24 @@ function stringList(value: unknown, max = LIST_MAX): string[] {
 }
 
 const oneLine = (text: string): string => stripInvisible(text).replace(/\s+/g, ' ').trim();
+
+/**
+ * 🟡 검색어에서 관련성을 볼 때 빼는 낱말: 계획이 붙이는 자료 종류·시점 낱말이라 어느 결과에나 있을 수 있다 (이슈 #530)
+ */
+const GENERIC_QUERY_WORDS = new Set(['통계', '공식', '발표', '보고서', '규격', '논문', '최근', '최신', '현황', '전망', '비교', '차이', '자료', '한계', '비판', '반론', '위험', '사례', 'vs', 'and', 'or', 'of', 'the']);
+
+const relevanceText = (text: string) => text.normalize('NFKC').toLowerCase();
+
+/**
+ * 검색 결과가 검색어와 상관있는지: 검색어의 낱말(자료 종류·시점 낱말·한 글자·연도는 빼고) 중 하나라도 제목·요약에 있으면 상관있다.
+ * 볼 낱말이 없으면 판단하지 않고 남긴다. 예: "SS275 SM355A 차이"에 '판타지 토탈 워 SS - 나무위키'는 상관없다 (이슈 #530)
+ */
+export function relevantToQuery(query: string, title: string, snippet: string): boolean {
+  const words = relevanceText(query)
+    .split(/[\s,.;:!?()[\]{}"'·/|~\-]+/)
+    .filter((w) => w.length >= 2 && !GENERIC_QUERY_WORDS.has(w) && !/^(19|20)\d{2}(년)?$/.test(w));
+  if (words.length === 0) return true;
+  const haystack = relevanceText(`${title} ${snippet}`);
+  const squeezed = haystack.replace(/\s+/g, '');
+  return words.some((w) => haystack.includes(w) || squeezed.includes(w));
+}

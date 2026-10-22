@@ -14,7 +14,7 @@ import { buildChartMessages } from './ai-research.prompt';
 import { toRunView } from './ai-research.view';
 import type { AiResearchRun } from '../../generated/prisma/client';
 import { buildResearchContext, citedResearchSources } from '../ai-assistant/assistant-research.context';
-import { canExtend, checkResearchQuery, decideAction, defaultBudget, extendedBudget, fallbackPlan, parseLenientJson, readAudit, readPlan, readState, readTurn, queryKey, normalizeSeed, revisionNeedsStep, revisionStart, seedSources, storedAudit, storedSeed, storedState, type StoredSource, type StoredState } from './ai-research.rules';
+import { canExtend, checkResearchQuery, relevantToQuery, decideAction, defaultBudget, extendedBudget, fallbackPlan, parseLenientJson, readAudit, readPlan, readState, readTurn, queryKey, normalizeSeed, revisionNeedsStep, revisionStart, seedSources, storedAudit, storedSeed, storedState, type StoredSource, type StoredState } from './ai-research.rules';
 import { proposeResearchCard } from '../ai-assistant/ai-research-card.service';
 import { ToolArgumentError } from '../ai-assistant/tools/assistant-tool';
 import { ACTION_CARD_TOOLS } from '../ai-assistant/tools/action-card.tool';
@@ -945,5 +945,15 @@ describe('우리 ERP 자료 (이슈 #435)', () => {
       // 인용이 없으면 모은 출처 모두
       expect(finalizeReport('본문', [erp(1), web], false).report).toContain('- [1] ERP 조회(get_inventory)');
     });
+  });
+});
+
+describe('검색 결과 관련성 (이슈 #530)', () => {
+  it('검색어 낱말이 제목·요약에 하나도 없으면 상관없다고 본다 (자료 종류·연도 낱말은 보지 않는다)', () => {
+    expect(relevantToQuery('SS275 SM355A 차이', '판타지 토탈 워 SS - 나무위키', '게임 정보')).toBe(false);
+    expect(relevantToQuery('SS275 SM355A 차이', '트릭스터(게임) - 나무위키', '')).toBe(false);
+    expect(relevantToQuery('SS275 SM355A 차이', '일반구조용 압연강재 SS275 규격', '')).toBe(true);
+    expect(relevantToQuery('탄소 배출 통계 2024', '철강업 탄소배출 현황', '')).toBe(true);
+    expect(relevantToQuery('통계 2024', '아무 글', '')).toBe(true);
   });
 });

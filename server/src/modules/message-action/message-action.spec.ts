@@ -238,7 +238,7 @@ describe('AI 추출 (SPEC 5장 결정 2, 모듈 문서 10장)', () => {
     expect(llm.calls).toHaveLength(1);
   });
 
-  it('AI가 채운 초안은 사람이 고쳐도 확정·구매요청 생성·실행 작업 로그가 AI 경유로 남는다 (REQ-AST-010)', async () => {
+  it('AI가 채운 초안은 사람이 고쳐도 생성·확정·구매요청 생성·실행 작업 로그가 AI 경유로 남는다 (REQ-AST-010, 생성 로그는 이슈 #530)', async () => {
     useLlm(async () => '{"itemCode": "ORE01", "requestedTon": "8", "desiredReceiptDate": "2026-11-20"}');
     const message = await send(purchaser, '철광석 8톤 11월 20일');
     const { id } = await service.create(purchaser, message.id);
@@ -247,7 +247,7 @@ describe('AI 추출 (SPEC 5장 결정 2, 모듈 문서 10장)', () => {
     expect((await service.confirm(purchaser, id, {})).executed).toBe(true);
     const events = await prisma.businessEvent.findMany({ where: { actionDraftId: id }, orderBy: { id: 'asc' } });
     expect(events.map((e) => [e.businessEventType, e.isAiAssisted])).toEqual([
-      [BUSINESS_EVENT_TYPE.DRAFT_CREATED, false],
+      [BUSINESS_EVENT_TYPE.DRAFT_CREATED, true],
       [BUSINESS_EVENT_TYPE.DRAFT_CONFIRMED, true],
       [BUSINESS_EVENT_TYPE.PURCHASE_REQUISITION_CREATED, true],
       [BUSINESS_EVENT_TYPE.DRAFT_EXECUTED, true],
