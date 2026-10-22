@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsIn, IsInt, IsNotEmpty, IsObject, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsIn, IsInt, IsNotEmpty, IsObject, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
 import { MEETING_KEYWORD_MAX, MEETING_MINUTES_STATUS, MEETING_SUMMARY_MAX, MEETING_TITLE_MAX, MEETING_TRANSCRIPT_MAX } from '@fantasteel/shared';
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -150,6 +150,14 @@ export class UpdateMeetingCandidateDto {
   @ValidateNested()
   @Type(() => MeetingCandidatePurchaseDto)
   purchase?: MeetingCandidatePurchaseDto;
+
+  /** 구매요청 후보의 요청자 (이슈 #530). null이면 작성자로 되돌린다. 실행 카드는 실행한 사람이 요청자라 쓰지 않는다 */
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsInt({ message: '요청자가 올바르지 않아요' })
+  @Min(1)
+  @Max(2147483647)
+  purchaseRequesterId?: number | null;
 
   @IsOptional()
   @IsIn(['PENDING', 'APPROVED', 'EXCLUDED'], {

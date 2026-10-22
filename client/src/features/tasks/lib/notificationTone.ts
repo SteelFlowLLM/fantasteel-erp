@@ -13,4 +13,6 @@ export const NOTIFICATION_TYPE_TONE: Record<NotificationType, BadgeTone> = {
   DUE_RISK: 'danger',
   QUALITY_RATE_RISE: 'danger',
   AGENT_CANDIDATE: 'wait',
+  INTEGRATION_FAULT: 'danger',
+  INTEGRATION_RECOVERED: 'ok',
 };

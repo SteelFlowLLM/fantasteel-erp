@@ -5,6 +5,7 @@ import { AI_IMAGE_MEDIA_TYPES, INTEGRATION_PROVIDER } from '@fantasteel/shared';
 import { AppException } from '../../../common/errors/app.exception';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { IntegrationConnectionRepository } from '../integration-connection.repository';
+import { IntegrationFaultException } from '../integration-fault.rules';
 import { IntegrationTokenStore } from '../integration-token.store';
 import { oauthCallbackUrl } from '../integration-urls';
 import { readDriveFile, type DriveFileMeta } from './google-drive.query';
@@ -38,10 +39,6 @@ function messageOf(error: unknown): string {
   if (error instanceof Error && error.name === 'TimeoutError') return `${HTTP_TIMEOUT_MS / 1000}초 안에 응답이 없어요`;
   if (error instanceof Error && error.name === 'AbortError') return '요청이 중단됐어요';
   return error instanceof Error ? error.message : String(error);
-}
-
-function errorMessage(error: AppException): string {
-  return (error.getResponse() as { message: string }).message;
 }
 
 /** 브라우저가 떠나 요청을 끊었는지 (시간 초과로 끊은 것은 아니다) */
@@ -319,6 +316,30 @@ export class GoogleDriveClient {
     }
   }
 
+  // ───────── 주기 확인 ─────────
+
+  /**
+   * 연결 상태를 확인한다 (이슈 #518, IntegrationHealthMonitor가 주기로 부른다): 토큰을 쓸 수 있는지(서비스 계정 키, 리프레시 토큰)와
+   * Drive API가 켜져 있는지를 가벼운 `about` 요청으로 본다. 아무도 Drive를 쓰지 않는 동안 7일 만료나 키 삭제가 모르는 사이에 지나가지 않게 한다.
+   * 연결한 적도 키를 넣은 적도 없으면 확인할 것이 없다. 실패는 fail()이 마지막 오류와 장애로 남기므로 여기서는 던지지 않는다.
+   */
+  async checkHealth(): Promise<void> {
+    if (!this.serviceAccount.isActive()) {
+      const state = await this.store.connectionState(KEY);
+      if (!state.hasTokens) {
+        // 토큰이 없다: 연결한 적이 없으면 확인할 것이 없고, 연결했다가 끊겼으면 다시 연결이 필요한 장애다
+        if (state.wasConnected) await this.fail(new AppException('INT-003', 'Google Drive 연결이 끊겼어요. 관리자가 다시 연결해 주세요'));
+        return;
+      }
+    }
+    try {
+      const res = await this.driveGet('/about', { fields: 'user(permissionId)' }, AbortSignal.timeout(HTTP_TIMEOUT_MS));
+      await res.body?.cancel().catch(() => undefined);
+    } catch (error) {
+      if (!(error instanceof AppException)) this.logger.warn(`Google Drive 연결 확인 실패: ${messageOf(error)}`);
+    }
+  }
+
   // ───────── Drive API ─────────
 
   /** 파일·폴더 메타데이터. 없거나 볼 수 없으면 INT-012. signal을 주면(호출한 쪽이 끊는 짧은 제한) 시간 초과가 연결 문제로 기록되지 않는다 */
@@ -464,14 +485,17 @@ export class GoogleDriveClient {
       }
     }
     return this.store.exclusive(KEY, async () => {
-      const stored = await this.store.readTokens<unknown>(KEY);
+      // 키가 바뀌어 저장된 토큰을 풀 수 없을 때도 다시 연결이 필요한 장애다 (이슈 #518)
+      const stored = await this.store.readTokens<unknown>(KEY).catch(async (error: unknown) => {
+        throw error instanceof AppException ? await this.fail(error) : error;
+      });
       if (!isGoogleTokens(stored)) {
         if (stored !== undefined) {
           await this.store.clear(KEY, 'tokens');
           throw await this.fail(new AppException('INT-003', RECONNECT_MESSAGE));
         }
         const state = await this.store.connectionState(KEY);
-        if (state.wasConnected) throw new AppException('INT-003', 'Google Drive 연결이 끊겼어요. 관리자가 다시 연결해 주세요');
+        if (state.wasConnected) throw await this.fail(new AppException('INT-003', 'Google Drive 연결이 끊겼어요. 관리자가 다시 연결해 주세요'));
         throw new AppException('INT-002', 'Google Drive가 연결되어 있지 않아요. 관리자가 먼저 연결해 주세요');
       }
       const stale = rejected !== undefined ? stored.accessToken === rejected : !isAccessTokenFresh(stored, Date.now());
@@ -500,7 +524,7 @@ export class GoogleDriveClient {
         throw await this.fail(new AppException('INT-003', RECONNECT_MESSAGE));
       }
       if (failure.kind === 'invalid_client') {
-        throw await this.fail(new AppException('INT-004', 'Google이 OAuth 클라이언트를 거절했어요. 연결 설정의 client id·secret을 확인해 주세요'));
+        throw await this.fail(new IntegrationFaultException('INT-004', 'Google이 OAuth 클라이언트를 거절했어요. 연결 설정의 client id·secret을 확인해 주세요', 'CREDENTIAL_ERROR'));
       }
       this.logger.warn(`Google 토큰 갱신 실패 HTTP ${response.status}`);
       throw await this.fail(new AppException('INT-004', `Google 인증 토큰을 갱신하지 못했어요. 잠시 뒤 다시 시도해 주세요 (HTTP ${response.status})`));
@@ -540,7 +564,7 @@ export class GoogleDriveClient {
         await res.body?.cancel().catch(() => undefined);
         if (this.serviceAccount.isActive()) {
           this.serviceAccount.forget(token);
-          throw await this.fail(new AppException('INT-004', 'Google이 서비스 계정 토큰을 거절했어요. Cloud Console에서 서비스 계정과 키가 사용 중인지 확인해 주세요'));
+          throw await this.fail(new IntegrationFaultException('INT-004', 'Google이 서비스 계정 토큰을 거절했어요. Cloud Console에서 서비스 계정과 키가 사용 중인지 확인해 주세요', 'CREDENTIAL_ERROR'));
         }
         // 갱신한 토큰도 거절됨: 그 사이 새로 연결해 바뀐 토큰은 지우지 않는다
         await this.store.exclusive(KEY, async () => {
@@ -551,7 +575,8 @@ export class GoogleDriveClient {
       }
     }
     if (!res.ok) throw await this.driveError(res);
-    await this.repository.clearLastError(this.prisma, KEY).catch(() => undefined);
+    // 지난 실패 이유를 지우고 연결 장애를 푼다 (이슈 #518)
+    await this.store.recordSuccess(KEY);
     return res;
   }
 
@@ -571,7 +596,7 @@ export class GoogleDriveClient {
     if (res.status === 404) return new AppException('INT-012');
     if (res.status === 416) return new AppException('COM-004', '요청한 범위가 파일 크기를 벗어났어요', 416);
     if (reason === 'accessNotConfigured' || /SERVICE_DISABLED|has not been used|is disabled/i.test(detail)) {
-      return this.fail(new AppException('INT-004', 'Google Cloud 프로젝트에서 Google Drive API가 꺼져 있어요. Cloud Console의 API 및 서비스에서 Google Drive API를 사용 설정해 주세요'));
+      return this.fail(new IntegrationFaultException('INT-004', 'Google Cloud 프로젝트에서 Google Drive API가 꺼져 있어요. Cloud Console의 API 및 서비스에서 Google Drive API를 사용 설정해 주세요', 'CREDENTIAL_ERROR'));
     }
     // Drive는 10MB를 넘는 Google 문서를 PDF로 내보내지 못한다
     if (reason === 'exportSizeLimitExceeded') {
@@ -582,7 +607,7 @@ export class GoogleDriveClient {
       // 서비스 계정은 다시 연결할 것이 없다: 폴더가 그 계정에 공유되지 않은 것이다
       const email = this.serviceAccount.isActive() ? this.serviceAccount.email() : null;
       if (email) return new AppException('INT-012', serviceAccountShareMessage(email));
-      return this.fail(new AppException('INT-004', 'Google Drive 권한이 부족해요. 관리자가 다시 연결하면서 Drive 권한을 모두 허용해 주세요'));
+      return this.fail(new IntegrationFaultException('INT-004', 'Google Drive 권한이 부족해요. 관리자가 다시 연결하면서 Drive 권한을 모두 허용해 주세요', 'RECONNECT_REQUIRED'));
     }
     if (res.status === 429 || /rateLimitExceeded/i.test(reason)) {
       return this.fail(new AppException('INT-004', 'Google Drive 요청이 너무 많아요. 잠시 뒤 다시 시도해 주세요'));
@@ -591,12 +616,15 @@ export class GoogleDriveClient {
     return this.fail(new AppException('INT-004', `Google Drive 요청이 실패했어요 (${detail})`.slice(0, 300)));
   }
 
-  /** 연결 문제(INT-003·INT-004)는 last_error에 남긴다. 비밀값은 문구에 없다 */
+  /**
+   * 연결 문제(INT-003·INT-004, 서비스 계정 설정 INT-015)는 last_error에 남기고 장애로 기록한다(알림 포함, 이슈 #518). 비밀값은 문구에 없다.
+   * 장애 종류는 오류 코드로 가르고, 코드만으로 모호한 것은 IntegrationFaultException이 직접 정한다.
+   */
   private async fail(error: AppException): Promise<AppException> {
-    if (error.code !== 'INT-003' && error.code !== 'INT-004') return error;
+    if (error.code !== 'INT-003' && error.code !== 'INT-004' && error.code !== 'INT-015') return error;
     // 서비스 계정은 연결 행 없이도 쓰므로, 관리 화면에 이유가 보이게 행을 만든다
     if (this.serviceAccount.isActive()) await this.repository.ensure(this.prisma, KEY, null).catch(() => undefined);
-    await this.store.recordError(KEY, errorMessage(error)).catch(() => undefined);
+    await this.store.recordFailure(KEY, error);
     return error;
   }
 }

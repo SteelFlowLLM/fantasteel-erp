@@ -263,6 +263,13 @@ describe('도구 모음: 묶은 숫자 도구의 권한', () => {
       {} as never,
       {} as never,
       {} as never,
+      // 알림·Agent·초안·기준정보·회의 검색·심층 조사 조회와 브리핑 (이슈 #506): 이 시험에서는 부르지 않는다
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
     );
   };
 

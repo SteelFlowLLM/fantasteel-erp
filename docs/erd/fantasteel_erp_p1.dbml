@@ -682,8 +682,9 @@ Table goods_receipt {
   id int [pk, increment]
   goods_receipt_no varchar [unique, not null, note: 'GR-YYMM-NNNN']
   purchase_order_item_id int [not null, ref: > purchase_order_item.id]
-  received_ton decimal(12,3) [not null]
-  received_date date [not null, note: '원료 FIFO 기준']
+  received_ton decimal(12,3) [not null, note: '입고 취소 행은 음수']
+  received_date date [not null, note: '원료 FIFO 기준. 입고 취소 행은 취소한 날']
+  reversed_goods_receipt_id int [unique, ref: - goods_receipt.id, note: '입고 취소(반대 거래)면 취소한 원래 입고']
   created_at timestamptz [not null, default: `now()`]
   updated_at timestamptz [not null]
 
@@ -692,8 +693,9 @@ Table goods_receipt {
   }
 
   Note: '''
-CHECK received_ton > 0
+CHECK (reversed_goods_receipt_id IS NULL AND received_ton > 0) OR (reversed_goods_receipt_id IS NOT NULL AND received_ton < 0)
 service: 입고 합계 <= ordered_ton (발주 품목 행 잠금). 등록이 곧 확정, 원료 LOT 생성
+입고 취소는 원래 입고를 그대로 두고 같은 발주 품목에 음수 입고 1행을 더한다(원료 LOT은 만들지 않고 원래 LOT을 RECEIPT_CANCELLED·잔량 0으로). 입고 합계는 취소 행까지 더한 값 (2026-10-22, 이슈 #500)
 '''
 }
 
@@ -778,6 +780,7 @@ Table meeting_minutes {
   analysis_result jsonb [note: 'AI 분석 결과·검토 중 수정본 (결정사항, 할 일·일정·구매 후보와 허가·제외 여부)']
   failure_reason varchar [note: '전사·분석 실패 사유 (FAILED일 때)']
   analysis_progress jsonb [note: 'AI 정리 진행 {phase: ANALYSIS·MERGE·REVIEW, current, total} (2026-10-21, 긴 전사 조각 분석). ANALYZING일 때만 읽는다']
+  transcription_progress jsonb [note: '음성 전사 진행 {phase: DIARIZE·TRANSCRIBE, current, total} (2026-10-22, 긴 회의 나눠 전사). TRANSCRIBING일 때만 읽는다']
   creator_id int [not null, ref: > employee.id, note: '회의록 작성자. 후보 항목을 허가하는 사람']
   confirmed_at timestamptz [note: '확정 시각. 확정 후 수정·재분석 불가']
   notion_page_url varchar [note: 'Notion으로 내보낸 페이지 주소 (2026-10-16, 이슈 #358). 한 번만 내보낸다']
@@ -1016,6 +1019,7 @@ Table integration_connection {
   connected_by_id int [ref: > employee.id, note: '마지막으로 연결을 시작한 관리자']
   connected_at timestamptz [note: '연결 완료 시각. 토큰이 없는데 값이 있으면 다시 연결해야 한다']
   last_error varchar [note: '마지막 실패 이유 (비밀값 없음)']
+  last_error_at timestamptz [note: 'last_error를 남긴 시각 (2026-10-22, 이슈 #518). last_error를 지우면 함께 비운다']
   created_at timestamptz [not null, default: `now()`]
   updated_at timestamptz [not null]
 
@@ -1027,6 +1031,53 @@ Table integration_connection {
 외부 서비스 연결 (2026-10-16 추가, 이슈 #358·#361). 회사 계정 하나로 연결하고 모든 사원이 함께 쓴다 (사원별 연결 없음).
 Notion은 원격 MCP 서버(OAuth 동적 등록 + PKCE), Google Drive는 REST API v3 + 일반 OAuth 2.0(관리자가 넣은 client id·secret, PKCE)으로 같은 행 모양을 쓴다.
 토큰·클라이언트 정보·code verifier는 서버 환경변수 INTEGRATION_SECRET_KEY로 암호화해 저장한다.
+'''
+}
+
+Table integration_fault {
+  id int [pk, increment]
+  provider_key varchar [not null, note: '연결 대상 (notion, google-drive). integration_connection.provider_key']
+  fault_kind varchar [not null, note: 'RECONNECT_REQUIRED(연결 만료·끊김)·CREDENTIAL_ERROR(키·설정 오류)·REQUEST_FAILED(요청이 계속 실패)·SYNC_FAILED(Notion 반영 실패). CHECK integration_fault_kind_check. 공통 코드 아님']
+  failure_count int [not null, default: 1, note: '해결되기 전까지 이어진 실패 횟수. CHECK failure_count >= 1']
+  last_message varchar [not null, note: '마지막 실패 이유 (500자, 비밀값 없음)']
+  first_failed_at timestamptz [not null, default: `now()`, note: '이 장애가 처음 난 시각']
+  last_failed_at timestamptz [not null, default: `now()`]
+  notified_at timestamptz [note: '장애 알림을 마지막으로 보낸 시각. 비었으면 아직 알리지 않았다. 알린 뒤 하루가 지나도 풀리지 않으면 다시 알린다']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null]
+
+  indexes {
+    (provider_key, fault_kind) [unique]
+  }
+
+  Note: '''
+외부 연결 장애 (2026-10-22 추가, 이슈 #518). 해결되지 않은 장애마다 (연결 대상, 종류) 한 줄이다. 풀리면 줄을 지운다 (이력 없음).
+알림은 notified_at을 조건부 UPDATE로 먼저 적은 서버만 보낸다: 서버가 여러 대여도 같은 장애 알림이 두 번 가지 않는다.
+notified_at이 있는 장애가 풀리면 복구 알림을 한 번 보낸다. 알림 대상은 연동 관리 권한자(ORG_MANAGE 사용)다.
+'''
+}
+
+Table notion_sync_failure {
+  id int [pk, increment]
+  target_type varchar [not null, note: '반영에 실패한 행의 테이블명: schedule_event, meeting_minutes, task. CHECK notion_sync_failure_target_type_check']
+  target_id int [not null, note: '그 행의 id (FK 없음: 행이 지워져도 다음 반영이 이 줄을 치운다)']
+  failure_count int [not null, default: 1, note: '이어서 실패한 횟수. CHECK failure_count >= 1']
+  last_error varchar [not null, note: '마지막 실패 이유 (500자)']
+  is_result_unknown boolean [not null, default: false, note: 'Notion에 만들어졌는지 알 수 없는 실패(시간 초과·페이지 id 없는 성공 답). 다시 시도하면 Notion에 같은 페이지가 둘 생길 수 있다. 한 번 true가 되면 그 뒤 오류 답으로 또 실패해도 성공해서 줄이 지워질 때까지 true로 둔다']
+  retry_after timestamptz [not null, note: '자동 반영이 이 시각 전에는 이 행을 건너뛴다 (1분에서 두 배씩 1시간까지, 결과를 알 수 없으면 30분)']
+  first_failed_at timestamptz [not null, default: `now()`]
+  last_failed_at timestamptz [not null, default: `now()`]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null]
+
+  indexes {
+    (target_type, target_id) [unique]
+    retry_after
+  }
+
+  Note: '''
+Notion 업무 공간 반영 실패 목록 (2026-10-22 추가, 이슈 #518). 일정·회의록·할 일 한 행이 반영에 실패하면 한 줄을 남기고, 반영에 성공하거나 그 행이 더 반영할 것이 없으면 지운다.
+서버를 다시 띄워도 남고, 관리 > 외부 연결 화면이 목록과 [다시 시도]에 쓴다.
 '''
 }
 
@@ -1045,8 +1096,11 @@ Table ai_research_run {
   audit jsonb [note: '보고서 전 점검 {thesis, outline[], supportedClaims[{claim, sourceIds[]}], contradictions[], missingDimensions[], ok, reportTruncated, incompleteReason}']
   report text [note: '보고서 (마크다운, 인용 [n] = sources.id, 끝에 출처 목록). 고쳤으면 마지막 판과 같다 (ai_research_report_version)']
   charts jsonb [note: '출처의 숫자로 만든 차트 [{title, type(line·bar), unit, xLabel, series:[{name, points:[{x, y, sourceId}]}]}] (2개까지). 점마다 y가 그 출처 글에 있는지 서버가 확인 (이슈 #384)']
-  notion_page_url varchar [note: 'Notion으로 내보낸 페이지 주소 (이슈 #384)']
-  notion_exported_at timestamptz [note: '내보낸 시각. notion_page_url이 없으면 내보내는 중(잡은 시각, 오래되면 다시 잡음)']
+  notion_page_url varchar [note: 'Notion으로 마지막에 내보낸 페이지 주소 (이슈 #384). 다시 내보내면 새 페이지 주소로 바뀐다 (이슈 #521)']
+  notion_exported_at timestamptz [note: '마지막으로 내보낸 시각']
+  notion_exported_version int [note: '마지막으로 내보낸 보고서 판 (이슈 #521). 판이 없던 보고서를 내보냈으면 null']
+  notion_export_claimed_at timestamptz [note: 'Notion 내보내기를 잡은 시각 (내보내는 중). 끝나거나 실패하면 지운다. 결과를 알 수 없으면 남기고 5분 지나면 다시 잡는다 (이슈 #521)']
+  schedule_id int [ref: > ai_research_schedule.id, note: '반복(ai_research_schedule)이 만든 조사면 그 반복 (이슈 #521). 사용자가 만든 조사는 null']
   failure_reason varchar [note: 'FAILED일 때 사유']
   lease_owner varchar [note: '맡은 서버 표시 (작업 중일 때)']
   lease_expires_at timestamptz [note: '맡은 표시 만료 시각. 지나면 다른 서버나 다시 뜬 서버가 이어서 맡는다']
@@ -1070,7 +1124,7 @@ Table ai_research_event {
   id int [pk, increment]
   run_id int [not null, ref: > ai_research_run.id]
   seq int [not null, note: '조사 안의 순번 (1부터). 화면은 ?afterSeq=로 새 것만 받는다']
-  type varchar [not null, note: 'plan.ready·step.started·search.done·source.added·page.read·state.updated·audit.ready·report.ready·failed·cancelled·budget.exhausted·charts.ready·revision.requested·revision.ready (CHECK ai_research_event_type_check)']
+  type varchar [not null, note: 'plan.ready·step.started·search.done·source.added·page.read·state.updated·audit.ready·report.ready·failed·cancelled·budget.exhausted·charts.ready·revision.requested·revision.ready·report.retry (CHECK ai_research_event_type_check)']
   payload jsonb [not null, default: `'{}'`, note: '짧은 내용 (웹에서 온 제목은 글로만 보인다)']
   created_at timestamptz [not null, default: `now()`]
 
@@ -1099,6 +1153,33 @@ Table ai_research_report_version {
 심층 조사 보고서의 판 (2026-10-20 추가, 이슈 #418, 문서에 없는 기능). 완료한 조사의 보고서를 말로 고치면(POST revisions)
 처음 한 번 그때 보고서를 1판으로 남기고, 일꾼이 고친 보고서를 COMPLETED로 저장하는 같은 트랜잭션에서 다음 판을 넣는다.
 판이 생긴 뒤에는 더 조사하기로 다시 쓴 보고서도 판으로 남긴다. 지우거나 고치지 않는다. docs/backend/ai-research.md
+'''
+}
+
+Table ai_research_schedule {
+  id int [pk, increment]
+  run_id int [not null, unique, ref: > ai_research_run.id, note: '반복을 건 조사 (완료한 조사). 차례가 오면 이 조사의 질문·계획·예산·먼저 알아본 것을 복사해 새 조사를 만든다']
+  employee_id int [not null, ref: > employee.id, note: '반복을 건 사원 (조사를 만든 사원). 켜진 반복은 사원당 5개까지(가정값)']
+  frequency varchar [not null, note: 'DAILY(매일)·WEEKLY(매주 고른 요일) (CHECK ai_research_schedule_frequency_check). 공통 코드 아님']
+  weekdays "int[]" [not null, default: `'{}'`, note: 'WEEKLY의 요일 (1=월 … 7=일, 1~7개). DAILY는 빈 배열 (CHECK ai_research_schedule_weekdays_check)']
+  run_time varchar [not null, note: '실행 시각 HH:MM (Asia/Seoul, CHECK ai_research_schedule_run_time_check)']
+  enabled boolean [not null, default: true, note: '켜져 있는지. 끄면 next_run_at을 지운다']
+  next_run_at timestamptz [note: '다음 차례 시각 (켜져 있을 때만). 시각이 지나면 조건부 UPDATE(TypedSQL)로 한 서버만 차지하고 다음 시각으로 넘긴다']
+  last_run_at timestamptz [note: '마지막으로 차례가 온 시각 (건너뛰었어도)']
+  last_run_id int [ref: > ai_research_run.id, note: '마지막으로 만든 조사']
+  last_skip_reason varchar [note: '마지막 차례를 건너뛴 이유 (진행 중 조사 상한·앞 반복 조사가 아직 진행 중·AI 모델 없음). 조사를 만들었으면 null']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null]
+
+  indexes {
+    (employee_id, enabled)
+    (enabled, next_run_at)
+  }
+
+  Note: '''
+심층 조사 반복 실행 (2026-10-22 추가, 이슈 #521, 문서에 없는 기능). 완료한 조사를 매일 또는 매주 고른 요일의 정한 시각(Asia/Seoul)에
+같은 질문·승인된 계획으로 다시 조사한다. 차례마다 새 조사(ai_research_run.schedule_id = 이 반복)를 계획 확인 없이 QUEUED로 만들고, 끝나면 평소처럼 완료 알림이 간다.
+서버가 여러 대여도 next_run_at 조건부 UPDATE로 한 번만 실행한다. 놓친 차례(서버가 꺼져 있던 동안)는 한 번만 하고 다음 미래 시각으로 넘긴다. docs/backend/ai-research.md
 '''
 }
 
@@ -1238,12 +1319,15 @@ TableGroup log_collab_action {
 
 TableGroup integration {
   integration_connection
+  integration_fault
+  notion_sync_failure
 }
 
 TableGroup ai_research {
   ai_research_run
   ai_research_event
   ai_research_report_version
+  ai_research_schedule
 }
 
 TableGroup ai_chat {

@@ -65,18 +65,28 @@ export function openableWebSources(sources: readonly AiWebSource[] | undefined):
   return result;
 }
 
-/** 출처 한 줄의 종류: 회사 Drive 파일, Notion 페이지, 그 밖의 웹 페이지 */
-function sourceKindOfHost(host: string): 'Drive' | 'Notion' | '웹' {
-  if (host === 'drive.google.com') return 'Drive';
-  if (host === 'notion.so' || host.endsWith('.notion.so') || host.endsWith('.notion.site')) return 'Notion';
-  return '웹';
+/** 답 아래 출처 묶음: 회사 Drive·Notion에서 읽은 것은 웹 검색 출처와 따로 보인다 (이슈 #530) */
+export type AnswerSourceGroup = 'drive' | 'notion' | 'web';
+
+export const ANSWER_SOURCE_GROUP_LABEL: Record<AnswerSourceGroup, string> = { drive: '회사 Drive', notion: 'Notion', web: '웹 출처' };
+
+export function answerSourceGroupOf(href: string): AnswerSourceGroup {
+  let host: string;
+  try {
+    host = new URL(href).hostname.toLowerCase();
+  } catch {
+    return 'web';
+  }
+  if (host === 'drive.google.com' || host === 'docs.google.com') return 'drive';
+  if (host === 'notion.so' || host.endsWith('.notion.so') || host.endsWith('.notion.site')) return 'notion';
+  return 'web';
 }
 
-/** 답 아래 출처 줄 제목: 모두 Drive 파일이면 'Drive 출처', 모두 Notion 페이지면 'Notion 출처', 웹 페이지뿐이면 '웹 출처', 섞였으면 '출처' */
-export function webSourcesHeading(items: readonly { host: string }[]): string {
-  const kinds = new Set(items.map((item) => sourceKindOfHost(item.host)));
-  const only = kinds.size === 1 ? [...kinds][0] : null;
-  return only ? `${only} 출처` : '출처';
+/** 출처를 묶음별로 (회사 Drive → Notion → 웹 순, 빈 묶음은 뺀다). 묶음 안 순서는 그대로 */
+export function groupAnswerSources<T extends { href: string }>(items: readonly T[]): { group: AnswerSourceGroup; items: T[] }[] {
+  return (['drive', 'notion', 'web'] as const)
+    .map((group) => ({ group, items: items.filter((item) => answerSourceGroupOf(item.href) === group) }))
+    .filter((entry) => entry.items.length > 0);
 }
 
 export type AnswerToken = { kind: 'text'; text: string } | { kind: 'link'; text: string; href: string };

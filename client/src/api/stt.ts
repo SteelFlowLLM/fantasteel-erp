@@ -1,6 +1,6 @@
 // 음성 인식(STT) 연결 설정 (문서에 없는 기능, Voice2ERP 1단계). LLM 연결(api/llm.ts)과 같은 구조:
 // 브라우저가 Whisper 서버를 직접 부르지 않고 ERP 서버를 거친다.
-import type { SteelmanWakeSettingsInput, SteelmanWakeSettingsView, SttConnectionTestInput, SttConnectionView, SttLocalServerView, SttSettingsInput, SttSettingsView, SttTranscribeTestView, SttWakeClipMode, SttWakeClipView } from '@fantasteel/shared';
+import type { SteelmanWakeSettingsInput, SteelmanWakeSettingsView, SttConnectionTestInput, SttConnectionView, SttLocalServerActionInput, SttLocalServerActionView, SttLocalServerView, SttSettingsInput, SttSettingsView, SttTranscribeTestView, SttWakeClipMode, SttWakeClipView } from '@fantasteel/shared';
 import { serverRequest, serverUpload } from '@/api/http';
 
 export const sttKeys = {
@@ -33,6 +33,7 @@ export const sttApi = {
   },
   /** ERP 서버와 같은 Mac의 음성 서버(자동 켜기 등록분) 상태·켜기·끄기 (이슈 #450) */
   getLocalServer: (): Promise<SttLocalServerView> => serverRequest('GET', '/stt/local-server'),
-  startLocalServer: (): Promise<SttLocalServerView> => serverRequest('POST', '/stt/local-server/start'),
-  stopLocalServer: (): Promise<SttLocalServerView> => serverRequest('POST', '/stt/local-server/stop'),
+  /** 받아쓰는 중이면 confirmBusy 없이는 하지 않고 needsConfirm·warning을 돌려준다 (이슈 #522) */
+  startLocalServer: (input: SttLocalServerActionInput = {}): Promise<SttLocalServerActionView> => serverRequest('POST', '/stt/local-server/start', { body: input }),
+  stopLocalServer: (input: SttLocalServerActionInput = {}): Promise<SttLocalServerActionView> => serverRequest('POST', '/stt/local-server/stop', { body: input }),
 };

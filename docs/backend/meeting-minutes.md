@@ -7,15 +7,15 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| REQ | REQ-VOC-002 (회의록 저장·목록·상세). REQ-VOC-003 AI 분석(이번 단계). REQ-VOC-004 업무 등록은 다음 단계 |
+| REQ | REQ-VOC-002 (회의록 저장·목록·상세). REQ-VOC-003 AI 분석. REQ-VOC-004 허가한 후보의 확정·등록(`POST :id/register`, 8장) |
 | BP | BP-VOC-01 ([04]). 원본 전사와 AI 요약을 따로 둔다 |
-| 이번 단계 | 글·음성 전사(Voice2ERP 2~3단계) + **AI 분석(4단계)**: 전사 → 요약·결정사항·**등록 후보**. 후보는 아직 아무것도 등록하지 않는다(승인·등록은 5단계) |
+| 단계 | 글·음성 전사(Voice2ERP 2~3단계) + **AI 분석(4단계)**: 전사 → 요약·결정사항·**등록 후보**. AI는 후보만 만들고 스스로 등록하지 않는다. 작성자가 후보를 허가하면 **확정하고 등록(5단계)**이 업무·일정·구매요청 초안을 만든다 |
 
 ## 2. 테이블
 
 | 구분 | 테이블 | 핵심 규칙 |
 | --- | --- | --- |
-| 쓰기 | `meeting_minutes` | `meeting_minutes_status`(MEETING_MINUTES_STATUS), `transcript`(원본 전사 그대로), `transcript_segments` jsonb `[{start, end, text}]`, `analysis_progress` jsonb(AI 정리 진행, 2026-10-21), `creator_id` = 로그인 사원 |
+| 쓰기 | `meeting_minutes` | `meeting_minutes_status`(MEETING_MINUTES_STATUS), `transcript`(원본 전사 그대로), `transcript_segments` jsonb `[{start, end, text}]`, `analysis_progress` jsonb(AI 정리 진행, 2026-10-21), `transcription_progress` jsonb(음성 전사 진행, 2026-10-22 이슈 #522), `creator_id` = 로그인 사원 |
 | 쓰기 | `ai_chat_thread`·`ai_chat_message` | 회의 질문 대화 (`meeting_minutes_id`가 있는 대화, 2026-10-21). 회의록을 지울 때 함께 지운다 |
 | 쓰기 | `meeting_attendee` | `(meeting_minutes_id, employee_id)` unique |
 | 읽기 | `employee`, `department`, `role` | 참석자 확인·표시 |
@@ -55,8 +55,11 @@
 - multipart: `file`(audio/*·video/webm·video/mp4, 또는 MIME이 비었거나 `application/octet-stream`이면 확장자 m4a·mp3·wav·webm·aac·ogg·mp4·flac, **500MB** 이하 = 공통 상수 `MEETING_AUDIO_MAX_BYTES`, `FileInterceptor` limits), 글 칸 `meetingMinutesTitle`, `meetingDate`, `attendeeIds`(JSON 배열 문자열 `"[2,3]"`). 제목·회의일·참석자 검증과 한 트랜잭션 저장은 글 만들기와 같은 코드(`createRecord`)를 쓴다. 파일이 없거나 오디오가 아니면 `COM-004`.
 - 상태 `TRANSCRIBING`, `transcript`·`transcript_segments` null로 만들어 상세를 **전사를 기다리지 않고** 바로 돌려준다(201). 화면은 2초마다 상세를 다시 읽어 상태가 바뀔 때까지 기다린다.
 - **백그라운드 전사** (`MeetingTranscriptionRunner`): 응답 뒤 서버 프로세스 안에서 STT 설정(`SttSettingsStore`)을 읽고 `SttClient.transcribe`를 부른다. 작업은 줄을 세워 **한 번에 하나**만 돈다(whisper 서버 하나를 겹쳐 부르지 않는다).
-  - 성공: `transcript` = 구간 글을 `\n`으로 이은 것(구간이 없으면 전체 글), `transcript_segments` = `[{start, end, text, speaker?}]`(초 단위 유지; `speaker`는 화자 분리를 하는 STT 서버만 준다), 상태 `TRANSCRIBED`, `failure_reason` null.
+  - 성공: `transcript` = 구간 글을 `\n`으로 이은 것(구간이 없으면 전체 글), `transcript_segments` = `[{start, end, text, speaker?}]`(초 단위 유지; `speaker`는 화자 분리를 하는 STT 서버만 준다), 상태 `TRANSCRIBED`, `failure_reason` null, `transcription_progress` 지움.
   - 실패: 상태 `FAILED`, `failure_reason` = `SttRequestError` 문구 또는 `전사 중 오류가 났어요`.
+  - **말소리 없음** (이슈 #522): 받아쓴 글이 비면(구간 글이 모두 공백이고 전체 글도 비면) 빈 회의록으로 두지 않고 `FAILED` + `말소리를 찾지 못했어요. 녹음에 목소리가 담겼는지 확인하고 다시 올려 주세요`(`NO_SPEECH_REASON`). whisper는 무음에도 "감사합니다." 같은 글을 지어내므로, 음성 서버(사이드카)가 먼저 말소리를 찾아 없으면 빈 결과를 준다([stt.md](stt.md) '화자 분리 사이드카').
+  - **요청 칸** (이슈 #522): 참석자 수(`speakerCount`)를 **최대 화자 수**(`maxSpeakers` → 사이드카 `max_speakers`)로 보낸다. 말하지 않은 참석자가 있어도 한 사람이 둘로 쪼개지지 않게 하려는 것이다(정확한 수로 주면 남는 몫만큼 한 사람이 나뉜다). 옛 사이드카를 위해 같은 값을 `num_speakers`(정확값)로도 보낸다([stt.md](stt.md)). 그리고 사이드카 모델일 때만 **용어 힌트**(`prompt`, whisper initial prompt)를 만들어 보낸다(외부 음성 API로 회사 이름이 나가지 않게): `참석자 김도윤, 박서영. 강종 SM355A, …. 원료 철광석 ORE01, …. 고객사 …. 공급업체 …. 용어 제선, ….`(`buildSttPrompt`, `meeting-stt-prompt.ts`). 참석자 → 강종 코드 → 원료 이름·코드 → 고객사 → 공급업체 → 용어 사전에서 고른 공정 용어(`STT_GLOSSARY_TERMS`) 순서로 넣고 🟡 **200자**(`STT_PROMPT_MAX_CHARS`)를 넘는 낱말은 뺀다(whisper는 앞 문맥을 224토큰까지만 본다). 재료는 DB에서 읽고(종류마다 50행까지, `findSttHints`) 읽지 못하면 힌트 없이 받아쓴다. 힌트는 저장하지 않는다.
+  - **진행 상황** (`meeting_minutes.transcription_progress` jsonb, 마이그레이션 `20261021211027_meeting_transcription_progress`, 이슈 #522): 음성 서버가 진행을 알려 주면(사이드카, `SttClient`의 `onProgress`) `{ phase: DIARIZE | TRANSCRIBE, current, total }`를 `WHERE status = TRANSCRIBING` 조건부로 적는다(같은 UPDATE가 `updated_at`도 바꿔 살아 있다는 표시를 겸한다). 쓰기는 차례로 하나씩이고, 앞의 쓰기가 끝나기 전에 온 값은 마지막 것만 쓴다(`ProgressWriter`, 실패해도 전사는 이어 간다). 결과를 적기 전에 남은 쓰기를 기다리고, 성공·실패·말소리 없음 모두 칸을 지운다. 상세 응답 `transcriptionProgress`는 `TRANSCRIBING`일 때만 값이 있고, 화면은 "음성을 글로 바꾸는 중… (받아쓰는 중 3/7)"·"(화자를 나누는 중)"으로 보인다. whisper.cpp·OpenAI처럼 진행을 주지 않는 서버는 칸이 비어 예전 문구만 보인다.
   - 결과 반영은 `updateMany where status = TRANSCRIBING`이다. 그 사이 다른 상태가 됐으면 버린다. 로그에는 음성·전사 내용을 남기지 않는다.
 - **원본 음성은 저장하지 않는다** (BP-VOC-01): 업로드 버퍼는 메모리에만 있고 디스크·DB에 쓰지 않으며, 작업이 끝나면 참조를 놓는다.
 - **멈춘 작업 정리** (`MeetingJobLease`, 전사·분석 공통): 공용 DB(Supabase)에서는 여러 서버가 같은 표를 쓰므로, 켤 때 진행 중 행을 모두 실패로 돌리면 다른 팀원 서버가 처리 중인 작업까지 실패가 된다. 그래서 작업을 맡은 서버가 **줄을 선 순간부터 2분마다** 그 행의 `updated_at`을 갱신하고(`touchInProgress`), 정리는 **마지막 갱신이 10분 넘게 지난 행만**(이 서버가 맡은 행은 빼고) `FAILED`로 바꾼다(`failStale`). 정리는 서버가 켜질 때와 2분마다 돈다. 전사는 음성이 메모리와 함께 사라졌으므로 `failure_reason` = `전사하던 서버가 멈춰 전사가 중단됐어요. 음성을 다시 올려 주세요`. 실패한 회의록은 다시 돌릴 수 없고 음성을 새로 올려야 한다.
@@ -118,9 +121,9 @@
 - 1차 분석·검증 직후 같은 모델을 한 번 더 부른다(`chatJson`, 제한 시간 10분). 입력은 1차와 같은 번호 붙은 전사(화자 이름 포함)와 1차 후보 목록(key·종류·제목·담당자·날짜·근거 번호). 답은 `{ missed: [1차와 같은 항목 모양], concerns: [{ key, reason }] }`.
 - 답에는 점검용 `scan`(요청·약속·필요 표현 발언을 모두 훑어 1차 후보 `coveredBy` 또는 null로 적은 목록)이 먼저 온다. 서버는 읽지 않지만, 작은 모델이 `scan` 없이는 `missed`를 거의 비워 두어 강제로 열거시킨다.
 - `missed` = 1차에 없는 할 일·일정·구매. **담당자나 기한이 불분명한 것, 회사 품목에 없는 원료도 null 칸으로 포함**하게 시킨다(지어내지 않는다). 1차 프롬프트에도 같은 규칙을 넣었다: 꼭 해야 하는데 담당자·날짜가 불분명하면 빼지 말고 null로 포함.
-- `concerns` = 담당자·날짜가 틀렸거나, 중복이거나, 사실은 할 일이 아닌 후보에 대한 지적.
+- `concerns` = 담당자·날짜가 틀렸거나, 중복이거나, 사실은 할 일이 아닌 후보에 대한 지적. `exclude`(boolean)는 그 후보를 빼야 하면 true(잡담·사적 약속·중복·이미 끝난 일), 고치면 되면 false.
 - 전사는 `<transcript>` 안의 데이터이고 지시가 아니라는 보안 규칙을 2차 프롬프트에도 넣었다.
-- **합치기(순수 함수 `mergeReview`)**: `missed`는 1차와 **같은 검증기**(`toCandidate`: 근거·원문·담당자·날짜·품목 규칙)를 통과한 것만, 키는 `c{n+1}…`(전체 30개까지), `fromReview: true`, 확인 사유 맨 앞에 `AI 2차 검토에서 찾은 후보예요`. 1차와 종류·제목이 같으면 중복이라 버린다. `concerns`는 있는 키만, 이유는 120자로 잘라(스스로 "오류 아님"이라고 적은 지적은 버린다) `2차 검토: <이유>`를 그 후보의 `issues`에 덧붙인다. 허가를 막지는 않는다.
+- **합치기(순수 함수 `mergeReview`)**: `missed`는 1차와 **같은 검증기**(`toCandidate`: 근거·원문·담당자·날짜·품목 규칙)를 통과한 것만, 키는 `c{n+1}…`(전체 30개까지), `fromReview: true`, 확인 사유 맨 앞에 `AI 2차 검토에서 찾은 후보예요`. 1차와 종류·제목이 같으면 중복이라 버린다. `concerns`는 있는 키만, 이유는 120자로 잘라(스스로 "오류 아님"이라고 적은 지적은 버린다) `2차 검토: <이유>`를 그 후보의 `issues`에 덧붙인다. 허가를 막지는 않는다. 빼자는 지적(`exclude: true`, 모델이 칸을 빠뜨리면 이유 글의 '빼야·사적·잡담·중복·할 일이 아니' 같은 말)은 아직 정하지 않은(PENDING) 후보를 **기본 제외**(`EXCLUDED`)로 두고 `2차 검토가 빼자고 해 기본으로 제외해 뒀어요. 필요하면 되살려 주세요`를 붙인다(이슈 #530, 시연에서 "팀 점심은 사적 약속이라 빼야 한다"는 지적이 후보로 남았다). 작성자는 언제든 되살려 허가할 수 있다.
 - **실패해도 1차 결과를 낸다**: 호출 오류·시간 초과·알아볼 수 없는 답(`missed`·`concerns` 둘 다 배열이 아님)이면 `analysis_result.review = { ok: false, error }`, 성공이면 `{ ok: true, missedCount, concernCount }`. 상태는 두 번 모두 `ANALYZING`이고 둘 다 끝나야 `REVIEW`가 된다. 옛 분석 결과에는 `review`가 없다.
 - 🟡 **걸리는 시간**: LLM 호출이 두 번이라 로컬 모델(45분짜리 회의 기준)에서 분석이 대략 두 배로 늘어난다. 화면은 계속 "AI가 정리하는 중…"이다.
 
@@ -139,13 +142,14 @@
   - 검증은 분석과 같다: 날짜는 회의일부터 1년 안, 시각은 서울 `YYYY-MM-DDTHH:mm`(또는 `+09:00` ISO)이고 `endAt > startAt`, 톤은 0보다 크고 소수 3자리까지, `itemId`는 `RAW_MATERIAL`, 담당자·참석자는 **재직 중인 아무 사원**(회의 참석자가 아니어도 된다, 없으면 `VOC-002`).
   - EVENT 후보는 `notionSync`(boolean)로 Notion 업무 공간에도 넣을지 정한다(이슈 #434, 기본 넣음, 다른 종류에 보내면 `COM-004`). 확정 뒤에는 내 일정 화면에서 작성자가 `PATCH schedule-events/:id/notion-sync`로 바꾼다. 자세한 규칙은 [schedule-event.md](schedule-event.md) 'Notion에 넣을지'. `notionNotice`는 확정이 커밋된 뒤 상태를 읽어 만들고, 읽다 실패하면 null로 둔다(확정은 성공).
   - 직접 정한 칸은 AI가 붙인 확인 사유(`issues`)를 지운다: 담당자 → 담당자, 마감일 → 마감일·당일 경고, 끝 시각 → 가정 경고(`endAssumed` false), 참석자, 시작 시각, 원료·수량·희망 입고일. 끝 시각을 가정한 일정은 시작만 옮기면 끝도 1시간 뒤로 따라간다.
+  - **구매요청 후보의 요청자** (`purchaseRequesterId`, 이슈 #530, 문서에 없는 칸): 구매요청 초안은 Message → ERP 규칙대로 **요청자가 확정 주체**다([message-action.md](message-action.md)). 그래서 작성자에게 구매요청 등록 권한이 없으면(예: 영업이 쓴 회의록) 작성자가 후보의 요청자를 구매요청 권한이 있는 사원(예: 구매 담당 참석자)으로 정해 넘긴다. 요청자는 사용 중이고(`VOC-002`) 구매요청 등록 사용 권한과 승인권자(부서장)가 있어야 한다(`COM-002`·`PUR-001`, 정할 때·허가할 때·확정할 때 다시 본다). `null`이면 작성자로 되돌리고, 구매요청이 아닌 후보에 보내면 `COM-004`. 후보에는 `purchaseRequesterId`·`purchaseRequesterName`이 남는다. 요청자를 정하지 않은 채 권한 없는 작성자가 허가하면 `COM-002`("요청자를 구매요청 권한이 있는 사원으로 고른 뒤 허가해 주세요"). 시연에서 영업 작성자가 허가하면 403, 참석자 구매부장 화면에는 허가 단추가 없어 아무도 등록하지 못했다(작성자 혼자 정하는 2026-10-10 결정은 그대로 두고 요청자만 넘긴다). 화면: 후보 고치기의 '요청자' 고르기(비우면 작성자), 후보 카드의 '요청자' 줄.
   - **허가(`APPROVED`)** 는 필수 칸이 찬 후보만: TASK 제목·담당자·마감일 / EVENT 제목·시작·끝(시작보다 뒤)·참석자 1명 이상 / PURCHASE 원료·수량·희망 입고일. 모자라면 `VOC-006`(모자란 칸 이름을 문구에 담는다). 남은 경고(끝 시각 가정, 마감일 당일)는 막지 않는다: 허가가 곧 확인했다는 뜻이다.
   - 저장은 `WHERE status = REVIEW AND updated_at = 읽은 값`인 조건부 UPDATE다. 상태가 바뀌었으면 `VOC-004`, 같은 회의록을 동시에 고쳤으면 `COM-001`. `summary`도 같다(`summary` 칸과 `analysis_result.summary`를 같이 바꾼다).
 - **확정하고 등록** `POST register` → `{ meetingMinutes, taskIds, scheduleEventIds, actionDraftIds, excludedKeys, notionNotice }`. `notionNotice`는 Notion에 넣기로 한 일정이 있는데 Notion 업무 공간을 지금 쓸 수 없을 때의 이유(이슈 #434), 아니면 null. 남은(PENDING) 후보가 있으면 `VOC-007`, 허가 후보가 비었으면 `VOC-006`. 허가 0건이어도 확정은 된다. 아래를 **한 트랜잭션**으로 한다(하나라도 실패하면 전부 취소, 상태는 `REVIEW` 그대로):
   1. `WHERE status = REVIEW`인 조건부 UPDATE로 `CONFIRMED` + `confirmed_at`. 0건이면 `VOC-004`(더블 클릭 방지). 이어서 담당자·참석자·원료가 아직 유효한지 다시 본다.
   2. 허가 TASK → `task` (`creator` = 작성자, 상태 `OPEN`, `link_path` `/meetings?id=<id>`, `meeting_minutes_id`, 설명 = 후보 설명 + `근거 발언: "…" / "…"`). `TaskService.createInTx`(`POST /tasks`와 같은 경로)가 담당자에게 `TASK_ASSIGNED`(`업무 지정 · 제목`, 본인 제외)를 보낸다.
   3. 허가 EVENT → `schedule_event` + `schedule_event_attendee`(작성자·`link_path`·`meeting_minutes_id`, `notion_sync` = 후보의 `notionSync`, 칸이 없던 옛 후보는 true). 참석자(작성자 제외)에게 `SCHEDULE_EVENT_ASSIGNED`(`일정 등록 · 제목 · M/D HH:mm`, 알림 링크 `/schedule?week=<일정이 속한 주 월요일>`).
-  4. 허가 PURCHASE → `MessageActionService.createFromMeeting`: `action_draft`(`PURCHASE_REQUISITION_CREATE`, `meeting_minutes_id`, `message_id` null, 요청자 = 작성자) + `DRAFT_CREATED`(AI 보조, `action_draft_id`) → `WAITING_APPROVAL`. 작성자에게 구매요청 등록 권한이 없거나 승인권자가 없으면(`PUR-001`) 그 오류로 전체가 취소된다: 이때는 구매요청 후보를 제외하거나 구매 담당자가 확정해야 한다. 이후 기존 초안 흐름(확인 → 구매요청 → 부서장 승인)을 그대로 탄다. 초안 응답에 `meetingMinutes {id, title}`이 추가됐다(메시지 초안이면 null).
+  4. 허가 PURCHASE → `MessageActionService.createFromMeeting`: `action_draft`(`PURCHASE_REQUISITION_CREATE`, `meeting_minutes_id`, `message_id` null, 요청자 = 후보의 요청자, 없으면 작성자) + `DRAFT_CREATED`(행위자 = 작성자, after에 요청자, AI 보조, `action_draft_id`) → `WAITING_APPROVAL`. 요청자가 작성자가 아니면 요청자에게 `TASK_ASSIGNED`(`구매요청 초안 확인 · 제목`, 링크 `/action-drafts`, 맞는 알림 유형이 없어 업무 지정을 쓴다)를 보낸다. 요청자가 그 사이 퇴사했거나 권한·승인권자가 없어졌으면 그 오류로 전체가 취소된다. 이후 기존 초안 흐름(확인 → 구매요청 → 부서장 승인)을 그대로 탄다. 초안 응답에 `meetingMinutes {id, title}`이 추가됐다(메시지 초안이면 null).
   5. `MEETING_MINUTES_CONFIRMED`(행위자 작성자, 대상 `meeting_minutes`, AI 보조, after = `taskIds`·`scheduleEventIds`·`actionDraftIds`·`excludedKeys`).
   6. 참석자 전원(작성자 제외)에게 `MEETING_MINUTES_SHARED`(`회의록 공유 · 제목`).
   7. 허가 후보마다 결과를 `analysis_result.candidates[].registered = {type: task|schedule_event|action_draft, id}`로 적는다.
@@ -155,20 +159,25 @@
 ### 화자 분리·연결 (Voice2ERP 묶음 1, 문서에 없는 기능)
 - `transcript_segments`(jsonb 배열)의 구간에 `speaker`('SPEAKER_1' …, 처음 나온 순서)가 붙을 수 있다. STT 사이드카(`tools/voice-sidecar/`, [stt.md](stt.md))가 줄 때만 있고, 글로 넣은 회의록과 일반 whisper 전사는 칸이 없다. 스키마는 바꾸지 않았다.
 - **화자 연결** `PATCH meeting-minutes/:id/speakers` body `{ mapping: { "SPEAKER_1": employeeId | null, … } }`. 작성자만(`VOC-003`), `TRANSCRIBED`·`REVIEW`·전사(`transcript`)가 남은 `FAILED`만(그 밖은 `VOC-004`; 확정 뒤에는 못 바꾼다), 사원은 **이 회의의 참석자**여야 한다(`VOC-002`). 이 회의록에 없는 이름표·정수가 아닌 값·`mapping` 없음은 `COM-004`/400.
-- **AI 화자 추정** `POST meeting-minutes/:id/speakers/suggest` (이슈 #406, 문서에 없는 경로). 권한·상태는 화자 연결과 같고, 목소리로 나뉜 화자가 없으면 `VOC-004`. 참석자(번호·이름·부서·역할)와 전사 앞 24,000자를 LLM(`MEETING_SPEAKER` 프로필, 2분)에 주고 화자마다 참석자 번호와 근거를 받는다. 서버가 다시 걸러 목록 밖 번호·소수는 '모름', 같은 사람을 두 화자에 고르면 둘 다 '모름', 답에서 빠진 화자도 '모름'으로 채운다. 응답 `{ suggestions: [{ label, employeeId | null, reason }], failureReason }` — AI 실패·형식 오류·모델 없음은 오류가 아니라 200 + `failureReason`(과거 사례 초안과 같은 방식). **저장하지 않는다**: 화면이 선택 칸을 채우고 작성자가 화자 연결(PATCH)로 저장한다.
+- **AI 화자 추정** `POST meeting-minutes/:id/speakers/suggest` (이슈 #406, 문서에 없는 경로). 권한·상태는 화자 연결과 같고, 목소리로 나뉜 화자가 없으면 `VOC-004`. 참석자(번호·이름·부서·역할)와 번호 붙은 전사를 LLM(`MEETING_SPEAKER` 프로필, 2분)에 주고 화자마다 참석자 번호와 근거를 받는다. 서버가 다시 걸러 목록 밖 번호·소수는 '모름', 같은 사람을 두 화자에 고르면 둘 다 '모름', 답에서 빠진 화자도 '모름'으로 채운다. 응답 `{ suggestions: [{ label, employeeId | null, reason }], failureReason }` — AI 실패·형식 오류·모델 없음은 오류가 아니라 200 + `failureReason`(과거 사례 초안과 같은 방식). **저장하지 않는다**: 화면이 선택 칸을 채우고 작성자가 화자 연결(PATCH)로 저장한다.
 - 연결은 각 구간에 `speakerEmployeeId`·`speakerName`을 적어 저장한다(분석 결과가 아직 없을 수 있어 `analysis_result`에는 두지 않는다). 이름표 → 사원 표는 구간에서 다시 만들 수 있다. `null`은 '모름'(두 칸을 null로 되돌림), 보내지 않은 이름표는 그대로. `updatedAt` 조건부 `updateMany`라 동시에 고쳐도 한쪽이 사라지지 않는다(`COM-001`).
 - 상세 응답: `transcriptSegments[].speaker/speakerEmployeeId/speakerName`과 파생 값 `speakers: [{ label, employeeId, employeeName, segmentCount, firstTexts(첫 2개 발언) }]`(화자 칸이 없는 전사는 빈 배열).
 - **AI 분석 프롬프트**: 구간에 `speakerName`이 있으면 `[n] 이름: 글`, 이름표만 있으면 `[n] 화자1: 글`, 화자가 없으면 지금처럼 `[n] 글`. "화자1"은 사람 이름이 아니라는 규칙을 시스템 프롬프트에 넣었다. 검증기는 원문 구간 글로 근거·담당자를 맞춘다(이름 매칭은 참석자 이름 기준 그대로). 이름을 연결한 뒤에는 **다시 정리**해야 반영된다.
+- **AI 화자 추정 전사 길이** (이슈 #522): 모델 문맥 길이(`LlmClient.modelContextLength`: LM Studio·Unsloth가 알려 준 값, 모르면 #468 관리자 설정)의 절반(한국어라 1자 = 1토큰으로 센다)을 전사 몫으로 하고(`speakerTranscriptChars`, `meeting-context-budget.ts`), 🟡 **8만 자**(`SPEAKER_SUGGEST_MAX_CHARS`, 2분 안에 답하게)까지. 문맥 길이를 모르면 예전처럼 24,000자. 넘치면 앞부분(70%, 자기소개·호칭)을 넣고 남은 몫은 **화자마다 아직 보이지 않은 처음 발언**을 한 줄씩 돌아가며 넣는다(회의 중간에 처음 말한 화자도 근거가 보이게, `pickSpeakerLines`). 번호는 그대로라 건너뛴 곳이 보이고, 모델에게 "앞부분과 화자마다 처음 발언 몇 개만 보여요"를 알린다.
+- 화자 수 힌트·화자 분리 방식은 [stt.md](stt.md) '화자 분리 사이드카'. 합성 회의 점수는 `docs/voice2erp/test-meeting/README.md`.
 - 전사 요청 제한 시간은 60분(느린 엔진 대비), 연결 확인은 30초.
 
 ### 회의 질문하기 (Voice2ERP 묶음 3, 문서에 없는 기능)
 - 회의록 상세의 "이 회의에 대해 묻기" 카드가 `POST ai-assistant/messages`에 `meetingMinutesId`를 담아 보낸다. 서버는 [ai-assistant.md](ai-assistant.md) '회의 질문'대로 이 모듈의 `MeetingMinutesService.get`(읽기 전용, 모듈이 export)으로 회의를 읽어 시스템 지시에 넣는다. 이 모듈에 새 API·테이블은 없다.
-- 로그인한 누구나(전 역할이 상세를 열 수 있으므로) 묻는다. 회의 내용 블록은 30,000자까지이고 넘으면 전사만 앞에서부터 자른다.
+- 로그인한 누구나(전 역할이 상세를 열 수 있으므로) 묻는다. 회의 내용 블록 길이는 모델 문맥 길이의 35%(이슈 #522, 1자=1토큰, 모르면 30,000자, 8만 자까지)이고, 넘으면 전사만 앞부분(2/3)과 끝부분(1/3)을 넣고 가운데를 뺀다([ai-assistant.md](ai-assistant.md) '회의 질문').
 - **대화 저장** (2026-10-21): 철강맨AI 대화 표(`ai_chat_thread`·`ai_chat_message`, 이슈 #399)를 다시 쓴다. `ai_chat_thread.meeting_minutes_id`(nullable)를 더해 **사원·회의록마다 대화 하나**(`(employee_id, meeting_minutes_id)` unique)에 질문과 답을 쌓는다. 화면은 `saveThread: true`와 `meetingMinutesId`를 보내고 `history`·`threadId`는 보내지 않는다: 서버가 그 사원의 이 회의 대화를 찾아 지난 대화를 DB에서 읽고(패널 대화와 같은 문맥 길이 예산), 답이 끝나면 찾거나 만든 대화에 저장한다(두 답이 함께 끝나도 대화가 둘이 되지 않게 upsert 뒤 잠근다). 다른 대화 id를 함께 보내면 `AST-001`. 답을 기다리는 사이 회의록을 지웠으면 저장하지 않는다.
 - 저장 범위는 철강맨AI 패널 대화와 **같은 코드**(`AiChatThreadService.saveTurn`)라 같다([ai-assistant.md](ai-assistant.md) '대화 저장'): 질문·답 글, 출처, 답의 생각 글(8,000자)과 도구 동작 기록(줄인 것)은 저장하고, 도구 결과 글·사진·실패·멈춘 질문은 저장하지 않는다. 대화 제목은 첫 질문 앞 40자. 보관 기간 없음.
 - `GET ai-assistant/meeting-threads/:meetingMinutesId` → 내 대화(`AiChatThreadView`, 메시지 포함) 또는 아직 묻지 않았으면 `null`. 본인 대화만 보인다(다른 사원의 대화는 없다). 지우기는 패널과 같은 `DELETE ai-assistant/threads/:id`(메시지까지 완전히 지움). 회의 질문 대화는 철강맨AI 패널의 대화 목록에 나오지 않지만, 지난 대화 찾기(`search_chat_history`)에는 내 대화로 함께 잡힌다.
 - 회의록을 지우면(`DELETE meeting-minutes/:id`) 모든 사원이 그 회의에 물은 대화도 같은 트랜잭션에서 지운다. 확정한 회의록은 지울 수 없으므로 대화가 남는다.
 - 화면: 전사가 있고 `TRANSCRIBING`이 아닐 때만 카드를 보인다. 열 때 저장한 대화를 불러와 이어 보이고, "대화 지우기"(확인 창)로 내 대화를 지운다. 불러오기에 실패하면 이유와 "다시 불러오기"를 보이고, 다시 불러올 때까지 질문을 막는다(서버는 새 질문을 지난 대화에 이어 쌓으므로 빈 화면에서 묻지 않게). 답의 `#n`은 원본 전사 n번 발언으로 이동하는 칩이 된다(AI 분석의 근거 칩과 같은 `jumpToSegment`).
+
+### 철강맨AI 지난 회의 검색 (이슈 #506, 문서에 없는 기능)
+- 철강맨AI 도구 `search_meeting_minutes`가 `MeetingMinutesService.searchDigests({ meetingMinutesStatus?, from?, to?, page, size })`를 부른다. 목록(API-259)과 같은 범위(회의록은 전 역할이 열람)에 **요약**(`summary`, 없으면 AI 요약)과 **AI가 정리한 결정사항**(`analysis_result.decisions[].text`)을 더해 돌려준다. 전사 글(`transcript`·`transcript_segments`)은 읽지 않는다. 상태·회의일(양 끝 포함)은 DB에서 좁히고, 낱말로 거르기(제목·요약·결정사항, 공백으로 나눈 낱말이 모두 있어야 함)는 부르는 도구가 100건씩 쪽을 넘기며 한다(최대 1,000건, 다 못 읽으면 알림). API는 늘지 않았다.
 
 ### Notion으로 내보내기 (이슈 #358, 문서에 없는 기능)
 - `POST meeting-minutes/:id/notion-export` → `MeetingNotionExportResult { notionPageUrl, notionExportedAt, meetingMinutes }`. 회사 Notion 계정(관리자가 연결, [integration.md](integration.md))으로 관리자가 고른 **상위 페이지 아래** 새 페이지를 만든다.

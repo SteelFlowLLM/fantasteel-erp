@@ -55,6 +55,7 @@ export const LOT_STATUS_TONE: Record<LotStatus, BadgeTone> = {
   AVAILABLE: 'run',
   CONSUMED: 'neutral',
   SHIPPED: 'neutral',
+  RECEIPT_CANCELLED: 'neutral',
 };
 
 /** 구매요청 상태 (구매·메시지 초안 화면) */
@@ -63,4 +64,5 @@ export const PURCHASE_REQUISITION_STATUS_TONE: Record<PurchaseRequisitionStatus,
   APPROVED: 'run',
   REJECTED: 'danger',
   ORDERED: 'ok',
+  ORDER_CANCELLED: 'neutral',
 };

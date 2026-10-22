@@ -30,8 +30,19 @@ export const useToastStore = create<ToastState>((set, get) => ({
 }));
 
 /** 오류를 사람이 읽을 문구로 바꾼다. 업무 오류는 코드를 함께 보인다 (예: "해당 업무 권한 없음 · 기준정보 관리 사용 권한이 필요해요 (COM-002)"). */
+/**
+ * 9.3에 전용 코드가 없어 다른 코드를 빌려 쓰는 오류의 제목 (#531). 서버 덧붙임(detail)이 이 말로 시작하면 코드 제목 대신 쓴다.
+ * 예: 원료 LOT 잔량 부족은 INV-001('예약·배정 가능한 매수 부족')을 빌려 쓴다 (production.md 8장)
+ */
+const BORROWED_TITLES: { code: string; detailPrefix: string; title: string }[] = [{ code: 'INV-001', detailPrefix: '원료 LOT 잔량이 부족해요', title: '원료 재고 부족' }];
+
+/** 오류 안내 제목: 빌려 쓴 코드면 그 상황의 제목, 아니면 9.3 문구 */
+export function errorTitleOf(error: ApiError): string {
+  return BORROWED_TITLES.find((b) => b.code === error.code && error.detail?.startsWith(b.detailPrefix))?.title ?? error.message;
+}
+
 export function errorMessageOf(error: unknown): string {
-  if (error instanceof ApiError) return `${error.message}${error.detail ? ` · ${error.detail}` : ''} (${error.code})`;
+  if (error instanceof ApiError) return `${errorTitleOf(error)}${error.detail ? ` · ${error.detail}` : ''} (${error.code})`;
   if (error instanceof Error) return error.message;
   return '알 수 없는 오류가 생겼어요';
 }

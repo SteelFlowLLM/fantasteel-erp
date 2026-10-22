@@ -63,6 +63,21 @@ export interface MillSheetSummary {
   pdfPath: string | null;
 }
 
+/**
+ * 밀시트 목록 한 줄 (API-232): 요약 + 목록 화면이 쓰는 스냅샷 값.
+ * 화면이 밀시트마다 상세(스냅샷 전체)를 따로 부르지 않게 서버가 스냅샷에서 뽑아 준다(이슈 #498).
+ */
+export interface MillSheetListItem extends MillSheetSummary {
+  customerName: string;
+  totalQty: number;
+  totalWeightTon: string;
+  /** 밀시트에 찍힌 히트 번호 */
+  heatNos: string[];
+  /** 품목 유형(SLAB·COIL)과 규격 코드. 중복 없이 */
+  itemTypes: string[];
+  itemCodes: string[];
+}
+
 /** 밀시트에 찍는 검사 한 건 (슬래브·코일 또는 히트). 기준(min·max)은 발행 시점 값을 복사해 둔다 */
 export interface MillSheetInspectionSnapshot {
   lotNo: string;

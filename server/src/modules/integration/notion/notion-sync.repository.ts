@@ -7,6 +7,7 @@ import {
   markMeetingMinutesNotionSynced,
   markScheduleEventNotionSynced,
   markTaskNotionSynced,
+  recordNotionSyncFailure,
   resetScheduleEventCalendarSync,
   setScheduleEventCalendarEvent,
   setScheduleEventNotionPage,
@@ -66,6 +67,62 @@ export class NotionSyncRepository {
   /** 할 일 데이터베이스의 담당자 선택 항목 */
   findActiveEmployeeNames(tx: Tx) {
     return tx.employee.findMany({ where: { isActive: true }, select: { employeeName: true }, orderBy: { id: 'asc' } });
+  }
+
+  // ── 반영 실패 목록 (이슈 #518, notion_sync_failure) ──
+
+  /** 반영에 실패해 남은 행. 가장 최근에 실패한 것이 먼저 */
+  findFailures(tx: Tx) {
+    return tx.notionSyncFailure.findMany({ orderBy: [{ lastFailedAt: 'desc' }, { id: 'desc' }] });
+  }
+
+  countFailures(tx: Tx) {
+    return tx.notionSyncFailure.count();
+  }
+
+  /** 실패 한 번을 남긴다 (같은 행이 이어서 실패하면 횟수를 더하고 다음 시도를 미룬다) */
+  recordFailure(tx: Tx, input: { targetType: string; targetId: number; lastError: string; isResultUnknown: boolean; baseMs: number; maxMs: number; unknownMs: number }) {
+    return tx.$queryRawTyped(recordNotionSyncFailure(input.targetType, input.targetId, input.lastError, input.isResultUnknown, input.baseMs, input.maxMs, input.unknownMs));
+  }
+
+  deleteFailuresByTarget(tx: Tx, targetType: string, targetIds: number[]) {
+    return tx.notionSyncFailure.deleteMany({ where: { targetType, targetId: { in: targetIds } } });
+  }
+
+  deleteFailuresByIds(tx: Tx, ids: number[]) {
+    return tx.notionSyncFailure.deleteMany({ where: { id: { in: ids } } });
+  }
+
+  /** 다시 시도: 미룬 시각을 지금으로 당겨 다음 반영이 바로 이 행을 다시 하게 한다 */
+  makeFailuresDue(tx: Tx, ids: number[], now: Date) {
+    return tx.notionSyncFailure.updateMany({ where: { id: { in: ids } }, data: { retryAfter: now } });
+  }
+
+  /** 캘린더 설정을 다시 저장했다: 그 종류의 미룬 행을 모두 바로 다시 해 보게 한다 */
+  makeFailuresDueByType(tx: Tx, targetType: string, now: Date) {
+    return tx.notionSyncFailure.updateMany({ where: { targetType }, data: { retryAfter: now } });
+  }
+
+  /** 실패 목록에 보일 제목. 행이 지워졌으면 맵에 없다 */
+  async findTargetTitles(tx: Tx, ids: { scheduleEvent: number[]; meetingMinutes: number[]; task: number[] }): Promise<{ schedule_event: Map<number, string>; meeting_minutes: Map<number, string>; task: Map<number, string> }> {
+    // 한 연결에 쿼리를 겹쳐 보내지 않고 차례로 읽는다 (pg 다음 버전에서 오류, #478)
+    const events = await tx.scheduleEvent.findMany({ where: { id: { in: ids.scheduleEvent } }, select: { id: true, scheduleEventTitle: true } });
+    const meetings = await tx.meetingMinutes.findMany({ where: { id: { in: ids.meetingMinutes } }, select: { id: true, meetingMinutesTitle: true } });
+    const tasks = await tx.task.findMany({ where: { id: { in: ids.task } }, select: { id: true, taskTitle: true } });
+    return {
+      schedule_event: new Map(events.map((row) => [row.id, row.scheduleEventTitle])),
+      meeting_minutes: new Map(meetings.map((row) => [row.id, row.meetingMinutesTitle])),
+      task: new Map(tasks.map((row) => [row.id, row.taskTitle])),
+    };
+  }
+
+  /** 새로 만드는 중이라(잡기가 안 풀림) 이번 반영이 건너뛴 회의록. 실패 목록에서 반영할 것이 없어진 행으로 오해해 치우지 않으려고 본다 */
+  async findClaimedMeetingIds(tx: Tx, ids: number[], staleBefore: Date): Promise<number[]> {
+    const rows = await tx.meetingMinutes.findMany({
+      where: { id: { in: ids }, meetingMinutesStatus: MEETING_MINUTES_STATUS.CONFIRMED, notionPageId: null, notionPageUrl: null, notionExportedAt: { gte: staleBefore } },
+      select: { id: true },
+    });
+    return rows.map((row) => row.id);
   }
 
   // ── 일정 ──

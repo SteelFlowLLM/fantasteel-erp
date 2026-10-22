@@ -1,5 +1,5 @@
 import { Controller, Get, Param, ParseIntPipe, Query } from '@nestjs/common';
-import type { LotDetail, LotSummary, LotTrace, PageResult } from '@fantasteel/shared';
+import type { LotDetail, LotListItem, LotSummary, LotTrace, PageResult } from '@fantasteel/shared';
 import { ListLotsQuery, TraceLotQuery } from './dto/lot.query';
 import { LotService } from './lot.service';
 
@@ -15,7 +15,7 @@ export class LotController {
 
   /** API-235 LOT 목록 */
   @Get('lots')
-  list(@Query() query: ListLotsQuery): Promise<PageResult<LotSummary>> {
+  list(@Query() query: ListLotsQuery): Promise<PageResult<LotSummary | LotListItem>> {
     return this.service.list(query);
   }
 

@@ -38,12 +38,12 @@ import { AiActionCardService } from './ai-action-card.service';
 import { ACTION_CARD_TOOLS } from './tools/action-card.tool';
 import { READ_KNOWLEDGE_TOOL } from './tools/knowledge.tool';
 import { AiOpsCardService } from './ai-ops-card.service';
-import { buildMeetingContext } from './assistant-meeting.context';
+import { buildMeetingContext, meetingContextChars } from './assistant-meeting.context';
 import { buildResearchContext, citedResearchSources, type ResearchContext } from './assistant-research.context';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import type { ExecuteAiActionCardDto } from './dto/ai-assistant.dto';
 import { parseAssistantAnswer } from './assistant.answer';
-import { buildAssistantMessages, recentHistory } from './assistant.prompt';
+import { buildAssistantMessages, missingImageNote, recentHistory } from './assistant.prompt';
 import { searchGlossary } from './knowledge/glossary.search';
 import { KnowledgeReads } from './knowledge/knowledge.reads';
 import { findManualGuides } from './knowledge/manual.search';
@@ -330,8 +330,11 @@ export class AiAssistantService {
     if (!settings.model) throw noModelException();
     const model = settings.model;
 
+    const endpoint: LlmEndpoint = llmEndpointOf(settings);
+    // 모델 문맥 길이로 회의 내용·지난 대화 몫을 정한다 (이슈 #412·#522)
+    const contextLength = await this.llm.modelContextLength(endpoint, model);
     // 없는 회의록이면 VOC-001(404). 회의록은 전 역할이 볼 수 있어 따로 권한을 보지 않는다
-    const meetingContext = input.meetingMinutesId === undefined ? null : buildMeetingContext(await this.meetingMinutes.get(input.meetingMinutesId));
+    const meetingContext = input.meetingMinutesId === undefined ? null : buildMeetingContext(await this.meetingMinutes.get(input.meetingMinutesId), meetingContextChars(contextLength));
     // 심층 조사 보고서에 대한 질문 (이슈 #384): 내 완료한 조사만. 남의 조사는 없는 것처럼 RES-001
     const research = input.researchRunId === undefined ? null : await this.researchContext(user, input.researchRunId);
     // 저장하는 대화(이슈 #399, 실시간 답만)는 지난 대화를 화면이 보낸 것 대신 DB에서 읽는다. 내 대화가 아니면 AST-001. 새 대화는 지난 대화가 없다
@@ -340,9 +343,8 @@ export class AiAssistantService {
     const meetingThreadId = saving && input.meetingMinutesId !== undefined ? await this.chatThreads.meetingThreadId(user, input.meetingMinutesId) : undefined;
     if (saving && input.meetingMinutesId !== undefined && input.threadId !== undefined && input.threadId !== meetingThreadId) throw new AppException('AST-001');
     const threadId = input.meetingMinutesId !== undefined && saving ? meetingThreadId : input.threadId;
-    const endpoint: LlmEndpoint = llmEndpointOf(settings);
     // 지난 대화는 모델 문맥 길이만큼 (이슈 #412). 넘치는 옛 이야기는 지난 대화 찾기 도구로 읽는다
-    const budget = historyBudget(await this.llm.modelContextLength(endpoint, model));
+    const budget = historyBudget(contextLength);
     const history = recentHistory(saving ? (threadId === undefined ? [] : await this.chatThreads.historyFor(user, threadId, budget.maxTurns)) : (input.history ?? []), budget);
     const historySource = options.historySearch ?? (options.interactive === true ? this.chatThreads.searchSource(user) : null);
     const references = this.referencesFor(input.question, history);
@@ -405,12 +407,13 @@ export class AiAssistantService {
     });
     const profile = assistantProfile(input.reasoning);
     const questionImages: AiAssistantImageInput[] = [...(input.images ?? []), ...(attached?.images ?? [])];
-    const questionText = attached?.text ? `${input.question}\n\n${attached.text}` : input.question;
+    const imageNote = missingImageNote(input.question, questionImages.length);
+    const questionText = [input.question, attached?.text, imageNote].filter(Boolean).join('\n\n');
     if (questionImages.length) {
       // 사진을 못 보는 모델은 사진을 무시하고 답을 지어내므로 보내기 전에 막는다. 모르면(외부 LLM) 보낸다
       if ((await this.llm.modelCapabilities(endpoint, model)).vision === false) throw new AppException('COM-004', NO_VISION, HttpStatus.BAD_REQUEST);
       messages[messages.length - 1] = { role: 'user', content: questionText, images: questionImages };
-    } else if (attached?.text) {
+    } else if (attached?.text || imageNote) {
       messages[messages.length - 1] = { role: 'user', content: questionText };
     }
     // 답하는 중에 덧붙인 말 중 모델에 넘긴 것. 저장한 질문 아래에 남긴다 (이슈 #430)
@@ -602,7 +605,7 @@ export class AiAssistantService {
             reply = await call(round < maxRounds ? tools : []);
           }
 
-          const parsed = parseAssistantAnswer(reply.content, [...references, ...readKnowledge.terms], [...processSteps, ...readKnowledge.steps], [...manualGuides, ...readKnowledge.guides]);
+          const parsed = parseAssistantAnswer(reply.content, [...references, ...readKnowledge.terms], [...processSteps, ...readKnowledge.steps], [...manualGuides, ...readKnowledge.guides], readKnowledge.sections);
           // 카드가 없는데 만들었다고 말하면 사용자가 없는 카드를 기다리므로, 만들지 못했다고 바로잡는다.
           // 지난 대화를 찾아 읽은 답은 "그때 카드를 만들었어요"처럼 지난 일을 옮기는 것이라 바로잡지 않는다 (이슈 #412)
           const recalled = toolCalls.some((call) => historySearch?.has(call.name) === true);

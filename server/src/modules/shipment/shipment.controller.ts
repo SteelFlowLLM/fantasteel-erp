@@ -3,7 +3,7 @@ import {
   PERMISSION,
   type AuthUser,
   type MillSheetDetail,
-  type MillSheetSummary,
+  type MillSheetListItem,
   type PageResult,
   type ShipmentRequestDetail,
   type ShipmentRequestSummary,
@@ -78,7 +78,7 @@ export class ShipmentController {
   /** API-232 밀시트 목록 */
   @Get('mill-sheets')
   @RequirePermission(PERMISSION.MILL_SHEET_READ, 'VIEW')
-  listMillSheets(@Query() query: ListMillSheetsQuery): Promise<PageResult<MillSheetSummary>> {
+  listMillSheets(@Query() query: ListMillSheetsQuery): Promise<PageResult<MillSheetListItem>> {
     return this.service.listMillSheets(query);
   }
 

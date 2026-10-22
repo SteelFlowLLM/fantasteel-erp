@@ -1,6 +1,7 @@
 // 일정 Notion 상태·안내 (이슈 #434): 연결 없음 · 업무 공간 없음 · 준비됨 · 상태를 읽다 실패, 네 갈래를 DB 없이 본다.
 import type { PrismaService } from '../../../prisma/prisma.service';
 import type { IntegrationConnectionRepository } from '../integration-connection.repository';
+import type { IntegrationFaultService } from '../integration-fault.service';
 import type { McpClientService } from '../mcp/mcp.client';
 import type { NotionPageService } from './notion-page.service';
 import type { NotionSyncRepository } from './notion-sync.repository';
@@ -11,7 +12,7 @@ const READY = { notionWorkspace: { scheduleEvents: ref('c1'), meetingMinutes: re
 
 function serviceWith(find: () => Promise<unknown>): NotionWorkspaceService {
   const connections = { findByProviderKey: find } as unknown as IntegrationConnectionRepository;
-  return new NotionWorkspaceService({} as PrismaService, connections, {} as NotionSyncRepository, {} as McpClientService, {} as NotionPageService);
+  return new NotionWorkspaceService({} as PrismaService, connections, {} as NotionSyncRepository, {} as McpClientService, {} as NotionPageService, {} as IntegrationFaultService);
 }
 
 describe('일정 Notion 상태 (scheduleStatus·scheduleNotice)', () => {

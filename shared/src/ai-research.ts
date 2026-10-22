@@ -62,6 +62,8 @@ export const AI_RESEARCH_LIMITS = {
   revisionSteps: 4,
   /** 보고서 고치기에서 더 검색할 때 새 출처 자리 (모은 출처 + 이만큼, maxSourcesCap까지) */
   revisionSources: 10,
+  /** 사원 한 명의 켜진 반복 조사 수 (이슈 #521, 가정값) */
+  maxSchedulesPerEmployee: 5,
 } as const;
 
 export interface AiResearchPlanStep {
@@ -133,20 +135,23 @@ export const AI_RESEARCH_EVENT_TYPES = [
   'charts.ready',
   'revision.requested',
   'revision.ready',
+  'report.retry',
 ] as const;
 export type AiResearchEventType = (typeof AI_RESEARCH_EVENT_TYPES)[number];
 
 /** 이벤트마다의 짧은 내용. 웹에서 온 글(title)은 화면이 글로만 그린다 */
 export interface AiResearchEventPayloads {
-  /** copiedFrom: 다시 조사로 계획을 가져온 조사 id (새로 세운 계획이면 없다) */
-  'plan.ready': { title: string; stepCount: number; revision: number; fallback: boolean; copiedFrom?: number };
+  /** copiedFrom: 다시 조사로 계획을 가져온 조사 id (새로 세운 계획이면 없다). scheduled: 반복 차례에 가져온 계획 (이슈 #521) */
+  'plan.ready': { title: string; stepCount: number; revision: number; fallback: boolean; copiedFrom?: number; scheduled?: boolean };
   'step.started': { step: number; action: 'search' | 'read'; query: string | null; sourceId: number | null; fallback: boolean };
   'search.done': { query: string; engine: string | null; resultCount: number; added: number; error: string | null };
   'source.added': { sourceId: number; title: string; url: string };
   'page.read': { sourceId: number; title: string; chars: number; error: string | null };
   'state.updated': { summary: string; gapCount: number; unsupportedCount: number };
-  'audit.ready': { claimCount: number; contradictionCount: number; missingCount: number; ok: boolean };
-  'report.ready': { chars: number; truncated: boolean; citedCount: number; incomplete?: boolean };
+  /** failure: 점검 LLM이 다시 시도해도 실패해 점검 없이 보고서로 넘어간 까닭 (이슈 #521) */
+  'audit.ready': { claimCount: number; contradictionCount: number; missingCount: number; ok: boolean; failure?: AiResearchReportFallbackReason };
+  /** fallback: 보고서 LLM 대신 쓴 대체본이면 그 까닭 (이슈 #521) */
+  'report.ready': { chars: number; truncated: boolean; citedCount: number; incomplete?: boolean; fallback?: AiResearchReportFallbackReason };
   failed: { reason: string };
   cancelled: Record<string, never>;
   'budget.exhausted': { stepsUsed: number; maxSteps: number; gapCount: number; reason?: string };
@@ -156,6 +161,46 @@ export interface AiResearchEventPayloads {
   'revision.requested': { version: number; instruction: string; search: boolean; addedSteps: number };
   /** 고친 보고서를 version판으로 남겼다 */
   'revision.ready': { version: number; chars: number };
+  /** 점검·보고서 LLM이 잠깐 실패해(reason) waitSeconds초 쉬었다 다시 부탁한다. attempt는 다시 하는 차례(1부터) (이슈 #521) */
+  'report.retry': { phase: 'audit' | 'report'; reason: AiResearchLlmRetryReason; attempt: number; waitSeconds: number };
+}
+
+/** 다시 해 볼 만한 LLM 실패: 시간 초과 · 연결 실패 · 모델 없음(서버가 바빠 모델 목록을 못 읽음) · LLM 서버 5xx·429 */
+export type AiResearchLlmRetryReason = 'TIMEOUT' | 'CONNECT' | 'NO_MODEL' | 'SERVER';
+
+export const AI_RESEARCH_LLM_RETRY_LABEL: Record<AiResearchLlmRetryReason, string> = {
+  TIMEOUT: '시간 초과',
+  CONNECT: 'AI 서버 연결 실패',
+  NO_MODEL: 'AI 모델을 찾지 못함',
+  SERVER: 'AI 서버 오류',
+};
+
+/**
+ * 보고서 LLM이 쓴 보고서 대신 남긴 대체본의 까닭 (이슈 #521). 잠깐 실패(TIMEOUT·NO_MODEL·CONNECT)는 쉬었다 다시 해 본 뒤의 까닭이다.
+ * TIMEOUT 시간 초과 · NO_MODEL 모델 없음(서버가 바빠 모델 목록을 못 읽음 포함) · CONNECT 연결 실패 · ERROR 그 밖의 LLM 실패(잘못된 요청 등, 다시 하지 않음) · EMPTY 빈 답
+ */
+export type AiResearchReportFallbackReason = 'TIMEOUT' | 'NO_MODEL' | 'CONNECT' | 'ERROR' | 'EMPTY';
+
+export const AI_RESEARCH_REPORT_FALLBACK_LABEL: Record<AiResearchReportFallbackReason, string> = {
+  TIMEOUT: '보고서 생성 시간 초과',
+  NO_MODEL: 'AI 모델을 찾지 못함',
+  CONNECT: 'AI 서버 연결 실패',
+  ERROR: '보고서 생성 실패',
+  EMPTY: 'AI가 빈 보고서를 냄',
+};
+
+/** 대체본. previous면 조사 메모가 아니라 앞 판 보고서를 그대로 둔 것 (보고서 고치기). attempts는 보고서 LLM을 부른 횟수 */
+export interface AiResearchReportFallback {
+  reason: AiResearchReportFallbackReason;
+  previous: boolean;
+  attempts: number;
+}
+
+/** 대체본 표시 (이슈 #521): '대체본(보고서 생성 시간 초과 · 3번 시도)', 고치기에서 앞 판을 그대로 두었으면 '앞 판 그대로(…)' */
+export function aiResearchFallbackText(fallback: AiResearchReportFallback | null | undefined): string | null {
+  if (!fallback) return null;
+  const why = `${AI_RESEARCH_REPORT_FALLBACK_LABEL[fallback.reason]}${fallback.attempts > 1 ? ` · ${fallback.attempts}번 시도` : ''}`;
+  return fallback.previous ? `앞 판 그대로(${why})` : `대체본(${why})`;
 }
 
 /** 보고서 판 하나 (목록용, 본문 없음). instruction이 null이면 1판(처음 보고서)이거나 더 조사하기로 다시 쓴 판 */
@@ -204,6 +249,87 @@ export type AiResearchEventView = {
   [K in AiResearchEventType]: { seq: number; type: K; payload: AiResearchEventPayloads[K]; createdAt: string };
 }[AiResearchEventType];
 
+// ── 반복 실행 (이슈 #521) ──
+
+export const AI_RESEARCH_SCHEDULE_FREQUENCY = {
+  /** 매일 */
+  DAILY: 'DAILY',
+  /** 매주 고른 요일 */
+  WEEKLY: 'WEEKLY',
+} as const;
+export type AiResearchScheduleFrequency = (typeof AI_RESEARCH_SCHEDULE_FREQUENCY)[keyof typeof AI_RESEARCH_SCHEDULE_FREQUENCY];
+
+/** 요일 이름. 요일 번호(1=월 … 7=일) - 1로 찾는다 */
+export const AI_RESEARCH_WEEKDAY_LABEL = ['월', '화', '수', '목', '금', '토', '일'] as const;
+
+/** 실행 시각 HH:MM (Asia/Seoul, 24시간) */
+export const AI_RESEARCH_SCHEDULE_TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** 반복 규칙. weekdays는 WEEKLY의 요일(1=월 … 7=일), DAILY면 [] */
+export interface AiResearchScheduleRule {
+  frequency: AiResearchScheduleFrequency;
+  weekdays: number[];
+  time: string;
+}
+
+/** PUT ai-research/runs/:id/schedule 본문 */
+export type SetAiResearchScheduleInput = AiResearchScheduleRule;
+
+/** 반복 하나 (GET ai-research/schedules · 조사 상세의 schedule) */
+export interface AiResearchScheduleView extends AiResearchScheduleRule {
+  id: number;
+  /** 반복을 건 조사. 차례마다 이 조사의 질문·계획으로 새 조사를 만든다 */
+  runId: number;
+  /** 그 조사의 제목 (계획 제목, 없으면 질문) */
+  title: string;
+  enabled: boolean;
+  /** 다음 차례 시각 (꺼져 있으면 null) */
+  nextRunAt: string | null;
+  /** 마지막으로 차례가 온 시각 (건너뛰었어도) */
+  lastRunAt: string | null;
+  /** 마지막으로 만든 조사 */
+  lastRunId: number | null;
+  /** 마지막 차례를 건너뛴 이유 (만들었으면 null) */
+  lastSkipReason: string | null;
+}
+
+const SEOUL_OFFSET_MS = 9 * 60 * 60 * 1000;
+
+/** 요일을 고른 순서와 상관없이 1~7 안의 것만 한 번씩, 작은 것부터 */
+export function normalizeWeekdays(weekdays: readonly number[]): number[] {
+  return [...new Set(weekdays.filter((d) => Number.isInteger(d) && d >= 1 && d <= 7))].sort((a, b) => a - b);
+}
+
+/**
+ * after 뒤(같은 시각은 넘김) 첫 차례 시각. 시각·요일은 Asia/Seoul(서머타임 없음, +09:00)로 본다.
+ * 매주인데 요일이 없거나 시각이 형식에 맞지 않으면 null.
+ */
+export function nextAiResearchRunAt(rule: AiResearchScheduleRule, after: Date): Date | null {
+  const match = AI_RESEARCH_SCHEDULE_TIME_PATTERN.exec(rule.time);
+  const weekdays = normalizeWeekdays(rule.weekdays);
+  if (!match || (rule.frequency === AI_RESEARCH_SCHEDULE_FREQUENCY.WEEKLY && weekdays.length === 0)) return null;
+  const hour = Number(match[1]);
+  const minute = Number(rule.time.slice(3, 5));
+  const seoul = new Date(after.getTime() + SEOUL_OFFSET_MS);
+  for (let day = 0; day <= 7; day += 1) {
+    const date = Date.UTC(seoul.getUTCFullYear(), seoul.getUTCMonth(), seoul.getUTCDate() + day);
+    const at = date + (hour * 60 + minute) * 60_000 - SEOUL_OFFSET_MS;
+    if (at <= after.getTime()) continue;
+    // getUTCDay: 0=일 → 7, 1=월 → 1
+    const weekday = new Date(date).getUTCDay() || 7;
+    if (rule.frequency === AI_RESEARCH_SCHEDULE_FREQUENCY.DAILY || weekdays.includes(weekday)) return new Date(at);
+  }
+  return null;
+}
+
+/** '매일 09:00' · '매주 월·수·금 09:00' · '매주 평일 09:00' */
+export function aiResearchScheduleText(rule: AiResearchScheduleRule): string {
+  if (rule.frequency === AI_RESEARCH_SCHEDULE_FREQUENCY.DAILY) return `매일 ${rule.time}`;
+  const weekdays = normalizeWeekdays(rule.weekdays);
+  const days = weekdays.join(',') === '1,2,3,4,5' ? '평일' : weekdays.join(',') === '6,7' ? '주말' : weekdays.map((d) => AI_RESEARCH_WEEKDAY_LABEL[d - 1]).join('·');
+  return `매주 ${days} ${rule.time}`;
+}
+
 /** 목록 한 줄 (GET ai-research/runs) */
 export interface AiResearchRunSummaryView {
   id: number;
@@ -217,6 +343,10 @@ export interface AiResearchRunSummaryView {
   createdAt: string;
   updatedAt: string;
   finishedAt: string | null;
+  /** 이 조사에 켜진 반복이 있는지 (이슈 #521) */
+  repeating: boolean;
+  /** 반복이 만든 조사인지 */
+  fromSchedule: boolean;
 }
 
 /** 조사 하나 (GET ai-research/runs/:id). events는 afterSeq 다음 것만 */
@@ -236,6 +366,17 @@ export interface AiResearchRunView extends AiResearchRunSummaryView {
   reportTruncated: boolean;
   /** 조사를 다 마치지 못하고(30분 상한·LLM 실패) 그때까지 모은 출처로 보고서를 쓴 이유. 다 마쳤으면 null (보고서 맨 위에도 알림이 있다) */
   incompleteReason?: string | null;
+  /** 지금 보고서가 보고서 LLM이 쓴 것이 아니라 대체본이면 그 까닭(시간 초과·모델 없음·연결 실패…)과 시도 횟수 (이슈 #521). 아니면 null */
+  reportFallback: AiResearchReportFallback | null;
+  /** 근거 점검 LLM이 다시 시도해도 실패해 점검 없이 보고서를 쓴 까닭 (이슈 #521). 아니면 null */
+  auditFailure: AiResearchReportFallbackReason | null;
+  /**
+   * 이 조사의 반복 (이슈 #521). 반복을 건 조사면 그 반복, 반복이 만든 조사면 만든 반복(runId가 원래 조사).
+   * 끈 반복도 보인다(enabled false). 반복이 없으면 null
+   */
+  schedule: AiResearchScheduleView | null;
+  /** Notion으로 마지막에 내보낸 보고서 판 (판이 없던 보고서면 null) */
+  notionExportedVersion: number | null;
   failureReason: string | null;
   /** 단계를 다 써서 끝났고 아직 모르는 것이 남아 더 조사할 수 있는지 */
   canExtend: boolean;

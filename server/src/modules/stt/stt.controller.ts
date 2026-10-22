@@ -1,8 +1,8 @@
 import { Body, Controller, Get, HttpCode, Post, Put, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { PERMISSION, STT_WAKE_CLIP_LIMITS, type AuthUser, type SteelmanWakeSettingsView, type SttConnectionView, type SttLocalServerView, type SttSettingsView, type SttTranscribeTestView, type SttWakeClipView } from '@fantasteel/shared';
+import { PERMISSION, STT_WAKE_CLIP_LIMITS, type AuthUser, type SteelmanWakeSettingsView, type SttConnectionView, type SttLocalServerActionView, type SttLocalServerView, type SttSettingsView, type SttTranscribeTestView, type SttWakeClipView } from '@fantasteel/shared';
 import { CurrentUser, RequirePermission } from '../../common/auth/auth.decorators';
-import { TestSttConnectionDto, UpdateSteelmanWakeSettingsDto, UpdateSttSettingsDto, WakeClipDto } from './dto/stt-settings.dto';
+import { LocalServerActionDto, TestSttConnectionDto, UpdateSteelmanWakeSettingsDto, UpdateSttSettingsDto, WakeClipDto } from './dto/stt-settings.dto';
 import { SttLocalServerService } from './stt-local-server.service';
 import { SttService, type UploadedAudio } from './stt.service';
 
@@ -79,18 +79,19 @@ export class SttController {
     return this.localServer.status();
   }
 
+  /** 켜져 있으면 다시 켠다. 받아쓰는 중이면 confirmBusy 없이는 하지 않고 경고를 돌려준다 (이슈 #522) */
   @Post('stt/local-server/start')
   @HttpCode(200)
   @RequirePermission(PERMISSION.ORG_MANAGE, 'USE')
-  startLocalServer(): Promise<SttLocalServerView> {
-    return this.localServer.start();
+  startLocalServer(@Body() dto: LocalServerActionDto): Promise<SttLocalServerActionView> {
+    return this.localServer.start(dto);
   }
 
-  /** 지금만 끈다. 다음 로그인 때 다시 켜진다 */
+  /** 지금만 끈다. 다음 로그인 때 다시 켜진다. 받아쓰는 중이면 다시 켜기와 같이 확인을 받는다 */
   @Post('stt/local-server/stop')
   @HttpCode(200)
   @RequirePermission(PERMISSION.ORG_MANAGE, 'USE')
-  stopLocalServer(): Promise<SttLocalServerView> {
-    return this.localServer.stop();
+  stopLocalServer(@Body() dto: LocalServerActionDto): Promise<SttLocalServerActionView> {
+    return this.localServer.stop(dto);
   }
 }

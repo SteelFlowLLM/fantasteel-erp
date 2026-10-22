@@ -1,6 +1,7 @@
 import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { sign } from 'node:crypto';
 import { AppException } from '../../../common/errors/app.exception';
+import { IntegrationFaultException } from '../integration-fault.rules';
 import { loadServiceAccountConfig, serviceAccountSignature, type ServiceAccountConfig, type ServiceAccountKey } from './google-drive.env';
 import { classifyTokenFailure, googleEndpoints, GoogleTokenResponseError, TOKEN_REFRESH_MARGIN_MS } from './google-oauth';
 
@@ -150,9 +151,11 @@ export class GoogleServiceAccount implements OnModuleInit {
       const failure = classifyTokenFailure(res.status, body);
       this.logger.warn(`Google 서비스 계정 토큰 요청 실패 HTTP ${res.status}${failure.error ? ` ${failure.error}` : ''}`);
       if (failure.kind === 'invalid_grant' || failure.kind === 'invalid_client') {
-        throw new AppException(
+        // 서버 관리자가 키를 고쳐야 하는 장애로 알린다 (이슈 #518)
+        throw new IntegrationFaultException(
           'INT-004',
           `Google이 서비스 계정 키를 거절했어요 (${failure.error}). 키가 삭제·사용 중지됐거나 서버 시계가 맞지 않을 수 있어요. Cloud Console에서 키를 확인하고 필요하면 새 키를 .env에 넣어 주세요`,
+          'CREDENTIAL_ERROR',
         );
       }
       if (failure.kind === 'transient') throw new AppException('INT-004', `Google 서비스 계정 토큰을 받지 못했어요. 잠시 뒤 다시 시도해 주세요 (HTTP ${res.status})`);

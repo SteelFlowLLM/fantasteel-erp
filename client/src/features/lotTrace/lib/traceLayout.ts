@@ -49,12 +49,16 @@ export interface PeriodLabel {
   w: number;
   periodStartedAt: string | null;
   periodEndedAt: string | null;
+  /** 이 용선으로 들어간 원료 LOT이 하나뿐이면(원료 LOT에서 정추적할 때 등) 그 원료 차감량. 여럿이면 null (#531) */
+  inputTon: string | null;
 }
 
 export interface EdgeLabel {
   key: string;
   x: number;
   y: number;
+  /** 히트에 들어간 것: 용선 또는 합금철 (선 라벨에 무엇의 양인지 적는다, #531) */
+  inputKind: '용선' | '합금철';
   inputTon: string | null;
 }
 
@@ -201,6 +205,7 @@ export function layoutTrace(trace: Pick<LotTraceView, 'nodes' | 'edges' | 'shipm
     seen.add(key);
     const child = byKey.get(e.to);
     if (!child) continue;
+    const intoChild = edges.filter((x) => x.to === e.to && x.relation?.lotRelationEvidence === 'PERIOD_BASED');
     periodLabels.push({
       key,
       x: child.x - PERIOD_GAP + 8,
@@ -208,10 +213,13 @@ export function layoutTrace(trace: Pick<LotTraceView, 'nodes' | 'edges' | 'shipm
       w: PERIOD_GAP - 16,
       periodStartedAt: e.relation.periodStartedAt,
       periodEndedAt: e.relation.periodEndedAt,
+      inputTon: intoChild.length === 1 ? (e.relation.inputTon ?? null) : null,
     });
   }
   const edgeLabels: EdgeLabel[] = showInputLabels
-    ? edges.filter((e) => isInputToHeat(e, byKey)).map((e) => ({ key: e.key, x: (e.x1 + e.x2) / 2, y: (e.y1 + e.y2) / 2, inputTon: e.relation?.inputTon ?? null }))
+    ? edges
+        .filter((e) => isInputToHeat(e, byKey))
+        .map((e) => ({ key: e.key, x: (e.x1 + e.x2) / 2, y: (e.y1 + e.y2) / 2, inputKind: byKey.get(e.from)?.lot?.lotType === 'HOT_METAL' ? ('용선' as const) : ('합금철' as const), inputTon: e.relation?.inputTon ?? null }))
     : [];
   const heads: ColumnHead[] = columns.map((c) => ({ column: c, x: columnX.get(c) ?? 0, title: columnTitle(c, columnNodes.get(c) ?? []), count: columnNodes.get(c)?.length ?? 0 }));
   return { nodes: sequence, edges, periodLabels, edgeLabels, heads, width, height };

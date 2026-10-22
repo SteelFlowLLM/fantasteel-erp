@@ -3,18 +3,18 @@ import type { AiResearchPlan } from '@fantasteel/shared';
 import { AUDIT_JSON_SCHEMA, buildAuditMessages, buildPlanMessages, buildPlanReviseMessages, buildReportMessages, buildTurnMessages, MODEL_NOTE_LABEL, PROMPT_CHAR_BUDGET, PLAN_JSON_SCHEMA, REPORT_CONTINUE_PROMPT, REVISION_REPORT_RULE, SEED_PLAN_RULE } from './ai-research.prompt';
 import { askResearchJson } from './ai-research.llm';
 import { LLM_PROFILE } from '../llm/llm-profiles';
-import { LlmJsonParseError, LlmRequestError, type LlmClient } from '../llm/llm.client';
+import { LlmAbortedError, LlmJsonParseError, LlmRequestError, type LlmClient } from '../llm/llm.client';
 import { evenEvidence, notesFor, renderNote, sourceCatalog } from './ai-research.evidence';
-import { continuationMessages, mergeContinuation } from './ai-research.runner';
+import { continuationMessages, fallbackReasonFor, mergeContinuation, retryReasonOf } from './ai-research.runner';
 import { finalizeReport, incompleteNotice, REPORT_TRUNCATED_NOTICE, reportBodyForRevision } from './ai-research.report';
 import { checkCharts, numbersIn } from './ai-research.charts';
-import { DEFAULT_RESEARCH_LIMITS, modelBudget, researchLimits } from './ai-research.config';
+import { DEFAULT_RESEARCH_LIMITS, modelBudget, reportTimeoutMs, researchLimits } from './ai-research.config';
 import { buildResearchNotionMarkdown, chartToNotionTable, reportToNotion } from './ai-research.notion';
 import { buildChartMessages } from './ai-research.prompt';
 import { toRunView } from './ai-research.view';
 import type { AiResearchRun } from '../../generated/prisma/client';
 import { buildResearchContext, citedResearchSources } from '../ai-assistant/assistant-research.context';
-import { canExtend, checkResearchQuery, decideAction, defaultBudget, extendedBudget, fallbackPlan, parseLenientJson, readAudit, readPlan, readState, readTurn, queryKey, normalizeSeed, revisionNeedsStep, revisionStart, seedSources, storedAudit, storedSeed, storedState, type StoredSource, type StoredState } from './ai-research.rules';
+import { canExtend, checkResearchQuery, relevantToQuery, decideAction, defaultBudget, extendedBudget, fallbackPlan, parseLenientJson, readAudit, readPlan, readState, readTurn, queryKey, normalizeSeed, revisionNeedsStep, revisionStart, seedSources, storedAudit, storedSeed, storedState, type StoredSource, type StoredState } from './ai-research.rules';
 import { proposeResearchCard } from '../ai-assistant/ai-research-card.service';
 import { ToolArgumentError } from '../ai-assistant/tools/assistant-tool';
 import { ACTION_CARD_TOOLS } from '../ai-assistant/tools/action-card.tool';
@@ -96,6 +96,40 @@ describe('행동 확인과 대신하기', () => {
   it('출처가 꽉 차면 새 검색을 하지 않는다', () => {
     const sources = [source(1, { readText: 'x' }), source(2, { readText: 'y' })];
     expect(decideAction(readTurn({ action: 'search', query: '새 검색' }), { ...ctx, sources, maxSources: 2 })).toEqual({ kind: 'finish', fallback: true });
+  });
+});
+
+describe('보고서 시간 제한과 대체본 표시 (이슈 #521)', () => {
+  it('기본 10분, AI_RESEARCH_REPORT_TIMEOUT_MINUTES로 1~60분', () => {
+    expect(reportTimeoutMs({})).toBe(10 * 60_000);
+    expect(reportTimeoutMs({ AI_RESEARCH_REPORT_TIMEOUT_MINUTES: '20' })).toBe(20 * 60_000);
+    expect(reportTimeoutMs({ AI_RESEARCH_REPORT_TIMEOUT_MINUTES: '0' })).toBe(60_000);
+    expect(reportTimeoutMs({ AI_RESEARCH_REPORT_TIMEOUT_MINUTES: '999' })).toBe(60 * 60_000);
+    for (const bad of ['', ' ', '십분', '5.5', '-3']) expect(reportTimeoutMs({ AI_RESEARCH_REPORT_TIMEOUT_MINUTES: bad })).toBe(10 * 60_000);
+  });
+
+  it('저장된 대체본 표시는 알려진 까닭만 읽고, 없으면 null', () => {
+    expect(storedAudit({ thesis: '답', reportFallback: { reason: 'TIMEOUT', previous: false, attempts: 3 } })?.reportFallback).toEqual({ reason: 'TIMEOUT', previous: false, attempts: 3 });
+    expect(storedAudit({ thesis: '답', reportFallback: { reason: 'NO_MODEL', previous: true } })?.reportFallback).toEqual({ reason: 'NO_MODEL', previous: true, attempts: 1 });
+    expect(storedAudit({ thesis: '답', reportFallback: { reason: 'NOPE' } })?.reportFallback).toBeNull();
+    expect(storedAudit({ thesis: '답' })?.reportFallback).toBeNull();
+    expect(storedAudit({ thesis: '답', auditFailure: 'CONNECT' })?.auditFailure).toBe('CONNECT');
+    expect(storedAudit({ thesis: '답', auditFailure: 'x' })?.auditFailure).toBeNull();
+  });
+
+  it('잠깐 실패(시간 초과·연결·모델 없음·5xx·429)만 다시 하고, 멈춤·읽지 못한 답·4xx는 다시 하지 않는다', () => {
+    expect(retryReasonOf(new LlmRequestError('t', undefined, 'TIMEOUT'))).toBe('TIMEOUT');
+    expect(retryReasonOf(new LlmRequestError('c', undefined, 'CONNECT'))).toBe('CONNECT');
+    expect(retryReasonOf(new LlmRequestError('m', undefined, 'NO_MODEL'))).toBe('NO_MODEL');
+    expect(retryReasonOf(new LlmRequestError('s', 503))).toBe('SERVER');
+    expect(retryReasonOf(new LlmRequestError('r', 429))).toBe('SERVER');
+    expect(retryReasonOf(new LlmRequestError('b', 400))).toBeNull();
+    expect(retryReasonOf(new LlmRequestError('u'))).toBeNull();
+    expect(retryReasonOf(new LlmAbortedError())).toBeNull();
+    expect(retryReasonOf(new LlmJsonParseError('j', '', null))).toBeNull();
+    expect(retryReasonOf(new Error('x'))).toBeNull();
+    expect(fallbackReasonFor(new LlmRequestError('m', undefined, 'NO_MODEL'))).toBe('NO_MODEL');
+    expect(fallbackReasonFor(new LlmRequestError('s', 503))).toBe('ERROR');
   });
 });
 
@@ -945,5 +979,15 @@ describe('우리 ERP 자료 (이슈 #435)', () => {
       // 인용이 없으면 모은 출처 모두
       expect(finalizeReport('본문', [erp(1), web], false).report).toContain('- [1] ERP 조회(get_inventory)');
     });
+  });
+});
+
+describe('검색 결과 관련성 (이슈 #530)', () => {
+  it('검색어 낱말이 제목·요약에 하나도 없으면 상관없다고 본다 (자료 종류·연도 낱말은 보지 않는다)', () => {
+    expect(relevantToQuery('SS275 SM355A 차이', '판타지 토탈 워 SS - 나무위키', '게임 정보')).toBe(false);
+    expect(relevantToQuery('SS275 SM355A 차이', '트릭스터(게임) - 나무위키', '')).toBe(false);
+    expect(relevantToQuery('SS275 SM355A 차이', '일반구조용 압연강재 SS275 규격', '')).toBe(true);
+    expect(relevantToQuery('탄소 배출 통계 2024', '철강업 탄소배출 현황', '')).toBe(true);
+    expect(relevantToQuery('통계 2024', '아무 글', '')).toBe(true);
   });
 });

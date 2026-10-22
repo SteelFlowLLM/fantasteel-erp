@@ -1,7 +1,7 @@
 'use client';
 
 // Voice2ERP 회의록 /meetings[?id=<회의록 id>|?new=1] (REQ-VOC-002, BP-VOC-01). 글로 붙여 넣은 전사와 음성(녹음·파일)의 저장·목록·상세다.
-// 음성은 서버가 백그라운드로 전사한다. AI 분석은 아직 없다. 목록은 서버 쪽으로 거르고 쪽을 넘긴다 (api/server/meetingMinutes.ts).
+// 음성은 서버가 백그라운드로 전사한다. AI 정리·후보 등록은 상세 화면의 AI 분석 카드가 한다. 목록은 서버 쪽으로 거르고 쪽을 넘긴다 (api/server/meetingMinutes.ts).
 import { MEETING_KEYWORD_MAX, MEETING_MINUTES_STATUS, MEETING_MINUTES_STATUS_LABEL, type MeetingMinutesStatus } from '@fantasteel/shared';
 import { useState } from 'react';
 import type { MeetingMinutesListItem, MeetingMinutesView } from '@/api/meetingMinutes';

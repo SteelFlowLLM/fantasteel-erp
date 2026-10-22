@@ -125,7 +125,7 @@ export class McpClientService {
   /**
    * 저장된 토큰으로 MCP 서버에 붙어 fn을 실행하고 닫는다. 같은 연결 대상의 토큰 작업과 한 줄로 선다(store.exclusive).
    * 액세스 토큰이 만료됐으면 SDK가 리프레시 토큰으로 갱신한다. 리프레시 토큰이 거절되면 SDK가 토큰을 지우고 INT-003(다시 연결 필요),
-   * 갱신 요청이 일시적으로 실패하면 토큰을 그대로 두고 INT-004를 던진다. 연결 문제는 last_error에 남기고, 성공하면 지운다.
+   * 갱신 요청이 일시적으로 실패하면 토큰을 그대로 두고 INT-004를 던진다. 연결 문제는 last_error에 남기고(장애 알림 기록도 함께, 이슈 #518), 성공하면 지운다.
    */
   withSession<T>(providerKey: string, fn: (session: McpSession) => Promise<T>): Promise<T> {
     return this.store.exclusive(providerKey, () => this.runSession(providerKey, fn));
@@ -136,7 +136,12 @@ export class McpClientService {
     const serverUrl = mcpServerUrlOf(preset);
     const state = await this.store.connectionState(providerKey);
     if (!state.hasTokens) {
-      if (state.wasConnected) throw new AppException('INT-003', `${preset.displayName} 연결이 끊겼어요. 관리자가 다시 연결해 주세요`);
+      if (state.wasConnected) {
+        // 연결했다가 토큰이 없어졌다: 호출이 닿을 때마다 다시 연결이 필요한 장애로 센다 (이슈 #518)
+        const failure = new AppException('INT-003', `${preset.displayName} 연결이 끊겼어요. 관리자가 다시 연결해 주세요`);
+        await this.store.recordFailure(providerKey, failure);
+        throw failure;
+      }
       throw new AppException('INT-002', `${preset.displayName}이(가) 연결되어 있지 않아요. 관리자가 먼저 연결해 주세요`);
     }
 
@@ -167,8 +172,8 @@ export class McpClientService {
     } finally {
       await client.close().catch(() => undefined);
     }
-    // 결과(예: 만든 페이지 주소)를 받은 뒤에는 기록 실패로 결과를 잃지 않게 한다
-    await this.store.recordError(providerKey, null).catch(() => undefined);
+    // 결과(예: 만든 페이지 주소)를 받은 뒤에는 기록 실패로 결과를 잃지 않게 한다. 지난 실패 이유를 지우고 연결 장애를 푼다 (이슈 #518)
+    await this.store.recordSuccess(providerKey);
     return result;
   }
 
@@ -194,7 +199,7 @@ export class McpClientService {
       this.logger.warn(`${providerKey} MCP 요청 실패: ${messageOf(error)}`);
       failure = new AppException('INT-004', `${displayName} 서버 요청이 실패했어요: ${messageOf(error)}`.slice(0, 300));
     }
-    if (isConnectionError(failure)) await this.store.recordError(providerKey, (failure.getResponse() as { message: string }).message).catch(() => undefined);
+    if (isConnectionError(failure)) await this.store.recordFailure(providerKey, failure);
     return failure;
   }
 }

@@ -13,8 +13,10 @@ export interface AssistantTool {
    * - TOOLBOX: 도구 모음이 먼저 확인한다(permissions 중 하나라도 VIEW 이상). permissions가 비면 로그인한 전 역할
    * - SERVICE: "VIEW 또는 부서장"처럼 데코레이터로 못 쓰는 권한이라 service가 사용자로 확인하고 COM-002를 던진다.
    *   permissions·note는 막혔을 때 담당 역할 안내에만 쓴다
+   * - scoped: 인자(argument)의 값마다 화면 권한이 다른 도구(대시보드 위젯). 값별 권한을 쓰고, 값에 없으면 permissions를 쓴다.
+   *   값별 목록이 비면 그 값은 전 역할이 본다. 한 도구 이름 단위로 "하나라도 있으면 통과"로 두면 위젯 하나의 권한으로 다른 위젯 숫자까지 열린다 (이슈 #506)
    */
-  access: { checkedBy: 'TOOLBOX' | 'SERVICE'; permissions: readonly Permission[]; note?: string };
+  access: { checkedBy: 'TOOLBOX' | 'SERVICE'; permissions: readonly Permission[]; note?: string; scoped?: { argument: string; permissions: Readonly<Record<string, readonly Permission[]>> } };
   /** 사원 본인의 것(내 일정·업무)이라 철강맨AI 패널에서만 알리는 도구. 사내 채팅 @AI 답은 방 멤버 모두가 봐서 쓰지 않는다 */
   panelOnly?: boolean;
   run(args: Record<string, unknown>, user: AuthUser): Promise<ToolOutput>;

@@ -1,6 +1,6 @@
 import { Transform, Type } from 'class-transformer';
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsDateString, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, MaxLength, Min } from 'class-validator';
-import { PAST_CASE_CATEGORY, type CreatePastCaseInput, type PastCaseCategory, type PastCaseSearchInput, type UpdatePastCaseInput } from '@fantasteel/shared';
+import { PAST_CASE_CATEGORY, PAST_CASE_QUERY_MAX, type CreatePastCaseInput, type PastCaseCategory, type PastCaseSearchInput, type UpdatePastCaseInput } from '@fantasteel/shared';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 const CATEGORIES = Object.values(PAST_CASE_CATEGORY);
@@ -10,7 +10,7 @@ export class SearchPastCasesDto implements PastCaseSearchInput {
   @IsOptional()
   @Transform(trim)
   @IsString()
-  @MaxLength(200)
+  @MaxLength(PAST_CASE_QUERY_MAX)
   q?: string;
 
   @IsOptional()

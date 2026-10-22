@@ -1,7 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
   AI_RESEARCH_LIMITS,
+  AI_RESEARCH_SCHEDULE_FREQUENCY,
   AI_RESEARCH_STATUS,
+  aiResearchFallbackText,
+  nextAiResearchRunAt,
+  normalizeWeekdays,
   type AiResearchCapabilities,
   type AiResearchNotionExportResult,
   type AiResearchPlan,
@@ -9,28 +13,30 @@ import {
   type AiResearchReportVersionView,
   type AiResearchRunSummaryView,
   type AiResearchRunView,
-  type AiResearchSeed,
+  type AiResearchScheduleView,
   type AiResearchStatus,
   type AuthUser,
   type PageResult,
 } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
-import type { AiResearchRun, Prisma } from '../../generated/prisma/client';
+import type { AiResearchReportVersion, AiResearchRun, Prisma } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { MCP_REQUEST_TIMEOUT_MS } from '../integration/mcp/mcp.client';
 import { NotionPageService } from '../integration/notion/notion-page.service';
 import { llmFailureException } from '../llm/llm-failure';
 import { LlmClient, LlmJsonParseError, LlmRequestError } from '../llm/llm.client';
 import { llmEndpointOf, LlmSettingsStore } from '../llm/llm-settings.store';
-import type { AiResearchPlanDto, CreateAiResearchRunDto, ListAiResearchRunsQuery, SuggestAiResearchPlanDto } from './dto/ai-research.dto';
-import { AiResearchRepository, retryOnSeqConflict } from './ai-research.repository';
+import type { AiResearchPlanDto, CreateAiResearchRunDto, ListAiResearchRunsQuery, SetAiResearchScheduleDto, SuggestAiResearchPlanDto } from './dto/ai-research.dto';
+import { AiResearchRepository, retryOnSeqConflict, seedColumns, type ScheduleWithRun } from './ai-research.repository';
 import { askResearchJson } from './ai-research.llm';
 import { buildPlanReviseMessages, PLAN_JSON_SCHEMA } from './ai-research.prompt';
-import { canExtend, checkResearchQuery, defaultBudget, EMPTY_STATE, erpPartnerNames, extendedBudget, isInternalSource, normalizeSeed, queryKey, readBudget, readPlan, revisionStart, seedSources, storedPlan, storedSeed, storedSources, storedState } from './ai-research.rules';
+import { canExtend, checkResearchQuery, defaultBudget, EMPTY_STATE, erpPartnerNames, extendedBudget, isInternalSource, normalizeSeed, queryKey, readBudget, readPlan, revisionStart, storedPlan, storedSeed, storedSources, storedState } from './ai-research.rules';
 import { AiResearchRunner, DEFAULT_RUNNER_CONFIG } from './ai-research.runner';
 import { researchLimits } from './ai-research.config';
 import { buildResearchNotionMarkdown, researchNotionTitle } from './ai-research.notion';
-import { hasVersionRoom, toRunSummary, toRunView, toVersionView } from './ai-research.view';
+import { renderResearchPdf, researchPdfFileName } from './ai-research.pdf';
+import { storedCharts } from './ai-research.charts';
+import { hasVersionRoom, toRunSummary, toRunView, toScheduleView, toVersionView } from './ai-research.view';
 
 /** 계획이 세워진 뒤의 상태 (제목을 바꿀 수 있다). 그 사이 일꾼이 상태를 넘겨도(QUEUED → RUNNING) 막지 않는다 */
 const PLANNED_STATUSES: AiResearchStatus[] = Object.values(AI_RESEARCH_STATUS).filter((status) => status !== AI_RESEARCH_STATUS.PLANNING);
@@ -259,6 +265,37 @@ export class AiResearchService {
     return toVersionView(row);
   }
 
+  /**
+   * 보고서 PDF (이슈 #521): 내 조사의 보고서(version을 주면 그 판, 없으면 지금 보고서)를 제목·질문·작성일·본문·차트(숫자 표)·출처로 그린다.
+   * 남의 조사·없는 판은 RES-001, 보고서가 없으면 RES-002, PDF를 그리지 못하면(글꼴) RES-010.
+   */
+  async reportPdf(user: AuthUser, id: number, version?: number): Promise<{ fileName: string; content: Buffer }> {
+    const run = await this.owned(this.prisma, user, id);
+    const { picked, latest } = await this.pickVersion(id, version);
+    const report = picked ? picked.report : run.report;
+    if (!report) throw new AppException('RES-002', '보고서가 있는 조사만 PDF로 내려받을 수 있어요');
+    const view = toRunView(run, [], 0);
+    const shownVersion = picked?.version ?? latest;
+    const input = {
+      id,
+      title: researchNotionTitle(view),
+      question: run.question,
+      writtenAt: picked?.createdAt ?? run.finishedAt ?? run.updatedAt,
+      versionLabel: shownVersion ? `${shownVersion}판` : null,
+      // 대체본 표시는 지금 보고서의 것이다 (앞 판에는 남기지 않았다)
+      fallbackLabel: picked ? null : aiResearchFallbackText(view.reportFallback),
+      report,
+      charts: picked ? storedCharts(picked.charts) : view.charts,
+      sources: view.sources.map((s) => ({ id: s.id, title: s.title, url: s.url })),
+    };
+    try {
+      return { fileName: researchPdfFileName(input), content: await renderResearchPdf(input) };
+    } catch (error) {
+      this.logger.error(`조사 ${id} PDF를 만들지 못했어요: ${error instanceof Error ? error.message : 'unknown'}`);
+      throw new AppException('RES-010');
+    }
+  }
+
   /** 취소: 끝나지 않은 조사만 */
   async cancel(user: AuthUser, id: number): Promise<AiResearchRunView> {
     const view = await retryOnSeqConflict(() =>
@@ -277,41 +314,99 @@ export class AiResearchService {
   }
 
   /**
-   * 완료한 조사의 보고서를 회사 Notion의 상위 페이지(회의록 내보내기와 같은 곳) 아래 새 페이지로 내보낸다. 내 조사만, 한 번만.
-   * 회의록 내보내기와 같이 도구를 부르기 바로 전에 잡고(notion_exported_at), 결과를 알 수 없으면(INT-009) 잡기를 남겨 중복 페이지를 막는다.
+   * 완료한 조사의 보고서를 회사 Notion의 상위 페이지(회의록 내보내기와 같은 곳) 아래 새 페이지로 내보낸다. 내 조사만.
+   * version을 주면 그 판, 없으면 지금(마지막) 판. 다시 내보내면 새 페이지를 만들고 조사에는 마지막 페이지 주소·판을 남긴다(이슈 #521).
+   * 회의록 내보내기와 같이 도구를 부르기 바로 전에 잡고(notion_export_claimed_at), 결과를 알 수 없으면(INT-009) 잡기를 남겨 중복 페이지를 막는다.
+   * 잡혀 있으면(다른 곳에서 내보내는 중·5분 안에 결과를 모름) RES-007.
    */
-  async exportToNotion(user: AuthUser, id: number): Promise<AiResearchNotionExportResult> {
+  async exportToNotion(user: AuthUser, id: number, version?: number): Promise<AiResearchNotionExportResult> {
     const run = await this.owned(this.prisma, user, id);
     if (run.status !== AI_RESEARCH_STATUS.COMPLETED || !run.report) throw new AppException('RES-002', '완료한 조사만 Notion으로 내보낼 수 있어요');
-    if (run.notionPageUrl) throw new AppException('RES-007');
+    const { picked, latest } = await this.pickVersion(id, version);
     await this.notion.assertReady();
 
     const claim: { at: Date | null } = { at: null };
     const takeClaim = async () => {
       const at = new Date();
       const { count } = await this.repository.claimNotionExport(this.prisma, id, user.employeeId, at, new Date(at.getTime() - NOTION_EXPORT_STALE_MS));
-      if (count === 0) {
-        const current = await this.repository.findById(this.prisma, id);
-        if (current?.notionPageUrl) throw new AppException('RES-007');
-        throw new AppException('RES-002', '지금 다른 곳에서 이 조사를 Notion으로 내보내는 중이거나, 직전 내보내기 결과를 확인하지 못했어요. Notion을 확인하고 잠시 뒤 다시 해 주세요');
-      }
+      if (count === 0) throw new AppException('RES-007');
       claim.at = at;
     };
     const view = toRunView(run, [], 0);
+    const exportedVersion = picked?.version ?? latest;
+    const shown = picked ? { ...view, report: picked.report, charts: storedCharts(picked.charts) } : view;
+    const versionLabel = exportedVersion ? `${exportedVersion}판` : null;
     let notionPageUrl: string;
     try {
-      notionPageUrl = await this.notion.createPage({ title: researchNotionTitle(view), content: buildResearchNotionMarkdown(view) }, takeClaim);
+      notionPageUrl = await this.notion.createPage({ title: researchNotionTitle(view, versionLabel), content: buildResearchNotionMarkdown(shown, versionLabel) }, takeClaim);
     } catch (error) {
       const uncertain = error instanceof AppException && error.code === 'INT-009';
       if (claim.at && !uncertain) await this.repository.releaseNotionExport(this.prisma, id, claim.at);
       throw error;
     }
-    const { count } = claim.at ? await this.repository.finishNotionExport(this.prisma, id, claim.at, notionPageUrl, new Date()) : { count: 0 };
+    const { count } = claim.at ? await this.repository.finishNotionExport(this.prisma, id, claim.at, { notionPageUrl, exportedAt: new Date(), version: exportedVersion }) : { count: 0 };
     if (count === 0) {
       this.logger.error(`조사 ${id}: Notion 페이지(${notionPageUrl})를 만들었지만 잡기를 잃어 주소를 저장하지 못했어요`);
       throw new AppException('COM-001', `Notion 페이지(${notionPageUrl})는 만들었지만 조사에 주소를 남기지 못했어요. 새로 불러와 중복 페이지가 없는지 Notion에서 확인해 주세요`);
     }
     return { notionPageUrl, run: await this.get(user, id) };
+  }
+
+  /**
+   * 반복 걸기·바꾸기 (이슈 #521): 완료한 내 조사를 매일 또는 매주 고른 요일의 시각(Asia/Seoul)에 같은 질문·계획으로 다시 조사한다.
+   * 반복이 만든 조사에서 부르면 그 반복(원래 조사의 것)을 바꾼다. 켜진 반복은 사원당 5개까지(RES-009, 사원별 잠금 안에서 센다).
+   * 다음 차례는 지금 뒤 첫 시각이다. 마지막 실행·건너뛴 이유는 그대로 둔다.
+   */
+  async setSchedule(user: AuthUser, id: number, dto: SetAiResearchScheduleDto): Promise<AiResearchScheduleView> {
+    const weekdays = dto.frequency === AI_RESEARCH_SCHEDULE_FREQUENCY.DAILY ? [] : normalizeWeekdays(dto.weekdays ?? []);
+    if (dto.frequency === AI_RESEARCH_SCHEDULE_FREQUENCY.WEEKLY && weekdays.length === 0) throw new AppException('COM-004', '매주 반복은 요일을 하나 이상 골라 주세요');
+    const rule = { frequency: dto.frequency, weekdays, time: dto.time };
+    const nextRunAt = nextAiResearchRunAt(rule, new Date());
+    if (!nextRunAt) throw new AppException('COM-004', '반복 규칙을 읽지 못했어요');
+    const row = await this.prisma.$transaction(async (tx) => {
+      // 반복이 바뀌는 동안 차례가 와도 겹치지 않게 일꾼(반복 차례)과 같은 순서로 사원별 잠금을 먼저 잡는다
+      await this.repository.lockEmployee(tx, user.employeeId);
+      const source = await this.scheduleSource(tx, user, id);
+      if (source.status !== AI_RESEARCH_STATUS.COMPLETED || !storedPlan(source.plan)) throw new AppException('RES-002', '완료한 조사만 반복할 수 있어요');
+      const existing = await this.repository.findScheduleByRunId(tx, source.id);
+      if (!existing?.enabled && (await this.repository.countEnabledSchedules(tx, user.employeeId)) >= AI_RESEARCH_LIMITS.maxSchedulesPerEmployee) throw new AppException('RES-009');
+      return this.repository.upsertSchedule(tx, source.id, { employeeId: user.employeeId, frequency: rule.frequency, weekdays, runTime: rule.time, nextRunAt });
+    });
+    return toScheduleView(row);
+  }
+
+  /** 반복 끄기 (이슈 #521). 지운 것이 아니라 꺼 둔다(다시 켜면 같은 반복). 반복이 없으면 RES-001 */
+  async disableSchedule(user: AuthUser, id: number): Promise<AiResearchScheduleView> {
+    const row = await this.prisma.$transaction(async (tx) => {
+      await this.repository.lockEmployee(tx, user.employeeId);
+      const source = await this.scheduleSource(tx, user, id);
+      const existing = await this.repository.findScheduleByRunId(tx, source.id);
+      if (!existing) throw new AppException('RES-001', '이 조사에는 반복이 없어요');
+      return existing.enabled ? this.repository.updateSchedule(tx, existing.id, { enabled: false, nextRunAt: null }) : existing;
+    });
+    return toScheduleView(row);
+  }
+
+  /** 내 반복 목록 (켜진 것 먼저) */
+  async listSchedules(user: AuthUser): Promise<AiResearchScheduleView[]> {
+    return (await this.repository.listSchedules(this.prisma, user.employeeId)).map(toScheduleView);
+  }
+
+  /** 반복을 걸 조사: 반복이 만든 조사면 그 반복을 건 원래 조사 (내 조사만, 아니면 RES-001) */
+  private async scheduleSource(tx: Tx, user: AuthUser, id: number): Promise<AiResearchRun> {
+    const run = await this.owned(tx, user, id);
+    if (run.scheduleId === null) return run;
+    const schedule = await this.repository.findScheduleById(tx, run.scheduleId);
+    return schedule && schedule.runId !== run.id ? this.owned(tx, user, schedule.runId) : run;
+  }
+
+  /** 내보낼 판: version이 없거나 마지막 판이면 picked = null(지금 보고서). 없는 판은 RES-001. latest는 마지막 판 번호(판이 없으면 null) */
+  private async pickVersion(id: number, version: number | undefined): Promise<{ picked: AiResearchReportVersion | null; latest: number | null }> {
+    const latest = (await this.repository.lastVersion(this.prisma, id)) || null;
+    if (version === undefined || version === latest) return { picked: null, latest };
+    const picked = await this.repository.findVersion(this.prisma, id, version);
+    if (!picked) throw new AppException('RES-001', '보고서 판을 찾을 수 없어요');
+    return { picked, latest };
   }
 
   /** 사원별 잠금 안에서 진행 중 조사 수를 센다. 상한이면 RES-006 (트랜잭션 안에서 부른다) */
@@ -331,7 +426,12 @@ export class AiResearchService {
     const events = await this.repository.eventsAfter(tx, run.id, afterSeq);
     const lastSeq = await this.repository.lastSeq(tx, run.id);
     const versions = await this.repository.listVersions(tx, run.id);
-    return toRunView(run, events, lastSeq, versions);
+    return toRunView(run, events, lastSeq, versions, await this.scheduleOf(tx, run));
+  }
+
+  /** 이 조사의 반복: 반복이 만든 조사면 만든 반복, 아니면 이 조사에 건 반복 */
+  private scheduleOf(tx: Tx, run: AiResearchRun): Promise<ScheduleWithRun | null> {
+    return run.scheduleId !== null ? this.repository.findScheduleById(tx, run.scheduleId) : this.repository.findScheduleByRunId(tx, run.id);
   }
 }
 
@@ -352,10 +452,4 @@ function conflictFor(run: AiResearchRun, revision: number): AppException {
   if (run.status !== AI_RESEARCH_STATUS.AWAITING_APPROVAL) return new AppException('RES-002', '계획 확인 대기 중인 조사만 계획을 고치거나 시작할 수 있어요');
   if (run.planRevision !== revision) return new AppException('RES-003');
   return new AppException('RES-002');
-}
-
-/** seed와 그 출처를 저장할 열로 (없으면 빈 객체: 열 기본값을 쓴다) */
-function seedColumns(seed: AiResearchSeed | null): { seed?: Prisma.InputJsonObject; sources?: Prisma.InputJsonArray } {
-  if (!seed) return {};
-  return { seed: seed as unknown as Prisma.InputJsonObject, sources: seedSources(seed) as unknown as Prisma.InputJsonArray };
 }

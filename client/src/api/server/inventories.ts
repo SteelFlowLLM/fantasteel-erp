@@ -1,15 +1,16 @@
-// 재고 화면 ↔ 서버 API (GET /inventories, GET /lots, GET /lots/:id). 서버 재고 응답은 규격별 합계만 있어서
-// LOT 목록·원료 LOT은 LOT 목록·상세에서, 입고일·입고 번호는 입고 목록, 입고예정은 발주 목록에서 채운다(권한이 없으면 비운다).
+// 재고 화면 ↔ 서버 API (GET /inventories, GET /lots). 서버 재고 응답은 규격별 합계만 있어서
+// LOT 목록·원료 LOT은 LOT 목록(withLinks: 상위 히트·불합격 처리·현재 배정·원료 종류를 줄마다 함께 받는다)에서,
+// 입고일·입고 번호는 입고 목록, 입고예정은 발주 목록에서 채운다(권한이 없으면 비운다). LOT 상세를 줄마다 따로 부르지 않는다(이슈 #498).
 // - 서버 onHandQty는 "합격 재고"(적격·미소진)라 화면의 합격 매수다. 화면의 재고 매수는 재고 상태(AVAILABLE) LOT 수로 센다.
 //   불합격 = 그 가운데 자기 검사 불합격, 판정 대기 = 나머지(상위 히트만 불합격인 LOT도 여기에 든다).
 // - 여재 탭은 서버 재고 응답의 surplus(inventory.md 8-1)를 쓴다. 여재 전환 시각은 ERD에 없어 비우고, LOT 목록의 여재 표시는 끈다.
 // - 생산계획 링크, 공급업체, 기본 야드는 서버 응답에 없어 비운다.
-import type { InventoryOverview, InspectionResult, ItemView, LotDetail, LotSummary, PurchaseOrderView, GoodsReceiptView, ReservationReconciliationView } from '@fantasteel/shared';
+import type { InventoryOverview, InspectionResult, ItemView, LotListItem, LotSummary, PurchaseOrderView, GoodsReceiptView, ReservationReconciliationView } from '@fantasteel/shared';
 import type { LotListFilter, LotListView, ProductInventoryView, RawMaterialInventoryView, SurplusSpecView } from '@/api/inventories';
 import { serverRequest } from '@/api/http';
 import { allPages, orEmpty } from '@/api/server/inspections';
 import { PRODUCT_QTY_UNIT, type ProductItemType } from '@/codes';
-import { currentAllocationOf, heatInspectionResult, productInspectionResult } from '@/features/inventory/lib/inventoryRules';
+import { heatInspectionResult, productInspectionResult } from '@/features/inventory/lib/inventoryRules';
 import { decDiv, decSum } from '@/lib/decimal';
 import { productEligibility } from '@/lib/eligibility';
 import { calcTheoreticalWeightTon, calcWeightTon } from '@/lib/weight';
@@ -81,114 +82,90 @@ async function listProducts(): Promise<ProductInventoryView[]> {
   });
 }
 
-/** 한 번의 조회 안에서 같은 LOT 상세를 두 번 읽지 않는다 */
-function detailReader() {
-  const cache = new Map<number, Promise<LotDetail>>();
-  return (id: number): Promise<LotDetail> => {
-    let found = cache.get(id);
-    if (!found) {
-      found = serverRequest<LotDetail>('GET', `/lots/${id}`);
-      cache.set(id, found);
-    }
-    return found;
-  };
-}
-
 /** 생산완료일(원료는 입고일) 최근 순 → LOT 번호 */
 const byProducedDesc = (a: LotListView, b: LotListView) => b.producedDate.localeCompare(a.producedDate) || a.lotNo.localeCompare(b.lotNo);
 
 async function listLots(filter: LotListFilter = {}): Promise<LotListView[]> {
   const [lots, receipts] = await Promise.all([
-    allPages<LotSummary>('/lots', { lotType: filter.lotType, lotStatus: filter.lotStatus, itemId: filter.itemId }),
+    allPages<LotListItem>('/lots', { lotType: filter.lotType, lotStatus: filter.lotStatus, itemId: filter.itemId, withLinks: 'true' }),
     filter.lotType === undefined || filter.lotType === 'RAW_MATERIAL' ? readReceipts() : Promise.resolve(new Map<number, GoodsReceiptView>()),
   ]);
-  const readDetail = detailReader();
-  // 히트 판정은 목록에 있으면 그대로, 없으면(유형 필터) 히트 상세에서 읽는다
-  const inspectionById = new Map(lots.map((l) => [l.id, l.inspectionResult]));
-  const heatResultOf = async (heatId: number) => (inspectionById.has(heatId) ? (inspectionById.get(heatId) ?? null) : (await readDetail(heatId)).inspectionResult);
-  const rows = await Promise.all(
-    lots.map(async (lot): Promise<LotListView> => {
-      const product = isProduct(lot.lotType);
-      const detail = product || lot.lotType === 'HEAT' ? await readDetail(lot.id) : null;
-      const heat = product && detail?.heat ? { isPassed: passedOf(await heatResultOf(detail.heat.id)) } : null;
-      const isPassed = passedOf(lot.inspectionResult);
-      const allocation = product && detail ? currentAllocationOf(detail.allocations) : null;
-      return {
-        lotId: lot.id,
-        lotNo: lot.lotNo,
-        lotType: lot.lotType,
-        lotStatus: lot.lotStatus,
-        itemId: lot.itemId,
-        itemCode: lot.itemCode,
-        itemName: lot.itemName,
-        steelGradeCode: lot.steelGradeCode,
-        producedDate: lot.producedDate ?? receipts.get(lot.id)?.receivedDate ?? '',
-        quality: product ? productEligibility({ lotStatus: lot.lotStatus, isPassed }, heat) : lot.lotType === 'HEAT' ? (lot.inspectionResult === 'PASS' || lot.inspectionResult === 'FAIL' ? lot.inspectionResult : 'PENDING') : null,
-        yardName: lot.yardName,
-        initialTon: lot.initialTon,
-        remainingTon: lot.remainingTon,
-        heatNo: detail?.heat?.lotNo ?? null,
-        productionPlanNo: null,
-        surplusAt: null,
-        dispositionStatus: detail?.disposition?.dispositionStatus ?? null,
-        productionPlanId: null,
-        inspectionResult: product ? productInspectionResult({ isPassed }, heat) : lot.lotType === 'HEAT' ? heatInspectionResult(isPassed) : null,
-        allocationPurpose: allocation?.allocationPurpose ?? null,
-        allocationStatus: allocation && allocation.allocationStatus !== 'RELEASED' ? allocation.allocationStatus : null,
-        isSurplus: false,
-      };
-    }),
-  );
+  const rows = lots.map((lot): LotListView => {
+    const product = isProduct(lot.lotType);
+    // 상위 히트의 판정은 서버가 히트 LOT이 목록에 없어도(유형 필터) 함께 준다
+    const heat = product && lot.heat ? { isPassed: passedOf(lot.heat.inspectionResult) } : null;
+    const isPassed = passedOf(lot.inspectionResult);
+    return {
+      lotId: lot.id,
+      lotNo: lot.lotNo,
+      lotType: lot.lotType,
+      lotStatus: lot.lotStatus,
+      itemId: lot.itemId,
+      itemCode: lot.itemCode,
+      itemName: lot.itemName,
+      steelGradeCode: lot.steelGradeCode,
+      producedDate: lot.producedDate ?? receipts.get(lot.id)?.receivedDate ?? '',
+      quality: product ? productEligibility({ lotStatus: lot.lotStatus, isPassed }, heat) : lot.lotType === 'HEAT' ? (lot.inspectionResult === 'PASS' || lot.inspectionResult === 'FAIL' ? lot.inspectionResult : 'PENDING') : null,
+      yardName: lot.yardName,
+      initialTon: lot.initialTon,
+      remainingTon: lot.remainingTon,
+      heatNo: lot.heat?.lotNo ?? null,
+      productionPlanNo: null,
+      surplusAt: null,
+      dispositionStatus: lot.disposition?.dispositionStatus ?? null,
+      productionPlanId: null,
+      inspectionResult: product ? productInspectionResult({ isPassed }, heat) : lot.lotType === 'HEAT' ? heatInspectionResult(isPassed) : null,
+      allocationPurpose: lot.allocation?.allocationPurpose ?? null,
+      allocationStatus: lot.allocation && lot.allocation.allocationStatus !== 'RELEASED' ? lot.allocation.allocationStatus : null,
+      isSurplus: false,
+    };
+  });
   return rows.sort(byProducedDesc);
 }
 
-/** 입고예정 = 입고 완료 전 발주의 품목별 미입고량 합계. 권한이 없으면(구매·관리자 외) 0 */
+/** 입고예정 = 입고를 기다리는 발주(발주 확정·부분 입고)의 품목별 미입고량 합계. 권한이 없으면(구매·관리자 외) 0 */
 async function scheduledReceiptTonByItem(): Promise<Map<number, string[]>> {
   const purchaseOrders = await orEmpty(() => allPages<PurchaseOrderView>('/purchase-orders'), []);
   const byItem = new Map<number, string[]>();
   for (const po of purchaseOrders) {
-    if (po.purchaseOrderStatus === 'RECEIVED') continue;
+    // 발주 취소·잔량 마감한 발주는 더 들어올 양이 없다 (대시보드 구매 진행·MRP 입고예정과 같은 기준)
+    if (po.purchaseOrderStatus !== 'CONFIRMED' && po.purchaseOrderStatus !== 'PARTIALLY_RECEIVED') continue;
     for (const line of po.items) byItem.set(line.itemId, [...(byItem.get(line.itemId) ?? []), line.remainingTon]);
   }
   return byItem;
 }
 
 async function listRawMaterials(): Promise<RawMaterialInventoryView[]> {
-  const [overview, lots, receipts, scheduled] = await Promise.all([readOverview(), allPages<LotSummary>('/lots', { lotType: 'RAW_MATERIAL' }), readReceipts(), scheduledReceiptTonByItem()]);
-  const readDetail = detailReader();
-  return Promise.all(
-    overview.rawMaterials.map(async (row): Promise<RawMaterialInventoryView> => {
-      const mine = lots
-        .filter((l) => l.itemId === row.itemId)
-        .map((l) => ({ lot: l, receipt: receipts.get(l.id) }))
-        // FIFO: 입고일 → LOT 번호 (lib/fifo와 같은 순서)
-        .sort((a, b) => (a.receipt?.receivedDate ?? '').localeCompare(b.receipt?.receivedDate ?? '') || a.lot.lotNo.localeCompare(b.lot.lotNo) || a.lot.id - b.lot.id);
-      // 원료 종류(합금철 등)는 LOT 상세에만 있어 이 원료의 LOT 하나에서 읽는다
-      const first = mine[0];
-      const rawMaterialType = first ? (await readDetail(first.lot.id)).rawMaterialType : null;
-      return {
-        itemId: row.itemId,
-        itemCode: row.itemCode,
-        itemName: row.itemName,
-        rawMaterialType,
-        remainingTon: row.remainingTon,
-        scheduledReceiptTon: decSum(scheduled.get(row.itemId) ?? []),
-        lots: mine.map(({ lot, receipt }) => ({
-          lotId: lot.id,
-          lotNo: lot.lotNo,
-          receiptDate: receipt?.receivedDate ?? '',
-          initialTon: lot.initialTon ?? '0.000',
-          remainingTon: lot.remainingTon ?? '0.000',
-          lotStatus: lot.lotStatus,
-          supplierName: null,
-          goodsReceiptNo: receipt?.goodsReceiptNo ?? null,
-          yardName: lot.yardName,
-        })),
-        defaultYardName: null,
-        availableLotCount: row.lotCount,
-      };
-    }),
-  );
+  const [overview, lots, receipts, scheduled] = await Promise.all([readOverview(), allPages<LotListItem>('/lots', { lotType: 'RAW_MATERIAL', withLinks: 'true' }), readReceipts(), scheduledReceiptTonByItem()]);
+  return overview.rawMaterials.map((row): RawMaterialInventoryView => {
+    const mine = lots
+      .filter((l) => l.itemId === row.itemId)
+      .map((l) => ({ lot: l, receipt: receipts.get(l.id) }))
+      // FIFO: 입고일 → LOT 번호 (lib/fifo와 같은 순서)
+      .sort((a, b) => (a.receipt?.receivedDate ?? '').localeCompare(b.receipt?.receivedDate ?? '') || a.lot.lotNo.localeCompare(b.lot.lotNo) || a.lot.id - b.lot.id);
+    return {
+      itemId: row.itemId,
+      itemCode: row.itemCode,
+      itemName: row.itemName,
+      // 원료 종류(합금철 등)는 규격 기준이라 이 원료의 LOT 하나에서 읽는다
+      rawMaterialType: mine[0]?.lot.rawMaterialType ?? null,
+      remainingTon: row.remainingTon,
+      scheduledReceiptTon: decSum(scheduled.get(row.itemId) ?? []),
+      lots: mine.map(({ lot, receipt }) => ({
+        lotId: lot.id,
+        lotNo: lot.lotNo,
+        receiptDate: receipt?.receivedDate ?? '',
+        initialTon: lot.initialTon ?? '0.000',
+        remainingTon: lot.remainingTon ?? '0.000',
+        lotStatus: lot.lotStatus,
+        supplierName: null,
+        goodsReceiptNo: receipt?.goodsReceiptNo ?? null,
+        yardName: lot.yardName,
+      })),
+      defaultYardName: null,
+      availableLotCount: row.lotCount,
+    };
+  });
 }
 
 /** 여재 = 서버 재고 응답의 surplus (inventory.md 8-1). 톤은 매수 × 1매 이론중량으로 계산한다 */

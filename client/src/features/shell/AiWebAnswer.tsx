@@ -6,7 +6,7 @@
 import type { AiWebSource } from '@fantasteel/shared';
 import { useMemo, useState } from 'react';
 import { Icon } from '@/components/Icon';
-import { openableWebSources, tokenizeAnswerLinks, webSourcesHeading } from '@/lib/aiWebLinks';
+import { ANSWER_SOURCE_GROUP_LABEL, answerSourceGroupOf, groupAnswerSources, openableWebSources, tokenizeAnswerLinks, type AnswerSourceGroup } from '@/lib/aiWebLinks';
 
 /** 이 개수를 넘으면 앞의 몇 개만 보이고 나머지는 펼친다 */
 export const WEB_SOURCES_COLLAPSED = 3;
@@ -32,29 +32,36 @@ export function AiAnswerText({ content, webSources, className }: { content: stri
   );
 }
 
-/** 답 아래 출처(웹·Drive·Notion): 제목은 글로, 주소 호스트를 함께 보이고, 새 탭으로 연다 */
+/** 답 아래 출처: 회사 Drive·Notion·웹을 묶음별로 나눠(이슈 #530) 제목은 글로, 주소 호스트를 함께 보이고, 새 탭으로 연다 */
 export function AiWebSources({ sources }: { sources: AiWebSource[] | undefined }) {
   const items = useMemo(() => openableWebSources(sources), [sources]);
   const [expanded, setExpanded] = useState(false);
   if (items.length === 0) return null;
   const shown = expanded ? items : items.slice(0, WEB_SOURCES_COLLAPSED);
   const hidden = items.length - shown.length;
+  const total = (group: AnswerSourceGroup) => items.filter((item) => answerSourceGroupOf(item.href) === group).length;
   return (
     <div className="flex flex-col gap-1 border-t border-line pt-2 text-cap">
-      <span className="font-semibold text-ink-2">{webSourcesHeading(items)} · {items.length}건</span>
-      <ul className="flex flex-col gap-1">
-        {shown.map((item) => (
-          <li key={item.href} className="flex min-w-0 items-start gap-1.5">
-            <Icon name="link" size="sm" className="mt-0.5 flex-none text-ink-3" />
-            <span className="min-w-0 break-words">
-              <a href={item.href} target="_blank" rel="noopener noreferrer" className={LINK}>
-                {item.title}
-              </a>
-              <span className="text-ink-3"> · {item.host}</span>
-            </span>
-          </li>
-        ))}
-      </ul>
+      {groupAnswerSources(shown).map(({ group, items: groupItems }) => (
+        <div key={group} className="flex flex-col gap-1">
+          <span className="font-semibold text-ink-2">
+            {ANSWER_SOURCE_GROUP_LABEL[group]} · {total(group)}건
+          </span>
+          <ul className="flex flex-col gap-1">
+            {groupItems.map((item) => (
+              <li key={item.href} className="flex min-w-0 items-start gap-1.5">
+                <Icon name="link" size="sm" className="mt-0.5 flex-none text-ink-3" />
+                <span className="min-w-0 break-words">
+                  <a href={item.href} target="_blank" rel="noopener noreferrer" className={LINK}>
+                    {item.title}
+                  </a>
+                  <span className="text-ink-3"> · {item.host}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
       {items.length > WEB_SOURCES_COLLAPSED ? (
         <button type="button" aria-expanded={expanded} className="self-start text-cap font-medium text-ink-2 hover:text-ink" onClick={() => setExpanded((value) => !value)}>
           {expanded ? '접기' : `${hidden}건 더 보기`}

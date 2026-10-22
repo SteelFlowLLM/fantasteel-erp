@@ -15,6 +15,7 @@ import { BusinessEventRepository, type BusinessEventRow } from './business-event
 import type { ListBusinessEventsQuery } from './dto/list-business-events.query';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const SEOUL_OFFSET_MS = 9 * 60 * 60 * 1000;
 
 /** 서울 날짜 'YYYY-MM-DD'의 0시. 2월 30일처럼 없는 날짜는 Date가 다음 달로 넘기므로 되돌려 비교해 COM-004로 막는다 */
@@ -64,12 +65,15 @@ export class BusinessEventService {
   private async toViews(rows: BusinessEventRow[]): Promise<BusinessEventView[]> {
     if (rows.length === 0) return [];
     const unique = (values: (number | null)[]) => [...new Set(values.filter((v): v is number => v !== null))];
-    const [employees, salesOrders, messages, eventLots] = await Promise.all([
+    const [employees, salesOrders, messages, eventLots, messagelessDrafts] = await Promise.all([
       this.repository.findEmployees(this.prisma, unique(rows.map((r) => r.actorEmployeeId))),
       this.repository.findSalesOrders(this.prisma, unique(rows.map((r) => r.salesOrderId))),
       this.repository.findMessages(this.prisma, unique(rows.map((r) => r.messageId))),
       this.repository.findEventLots(this.prisma, rows.map((r) => r.id)),
+      this.repository.findMessagelessDrafts(this.prisma, unique(rows.map((r) => r.actionDraftId))),
     ]);
+    // Agent 후보는 payload.agent가 있는 메시지 없는 초안이다 (회의록·철강맨AI 구매요청 초안은 agent 칸이 없다)
+    const agentDraftIds = new Set(messagelessDrafts.filter((d) => isRecord(d.payload) && isRecord(d.payload.agent)).map((d) => d.id));
     const lots = new Map((await this.repository.findLots(this.prisma, unique(eventLots.map((l) => l.lotId)))).map((l) => [l.id, l]));
     const employeeById = new Map(employees.map((e) => [e.id, e]));
     const salesOrderNoById = new Map(salesOrders.map((s) => [s.id, s.salesOrderNo]));
@@ -101,6 +105,7 @@ export class BusinessEventService {
         reason: row.reason,
         isAiAssisted: row.isAiAssisted,
         actionDraftId: row.actionDraftId,
+        isAgentCandidate: row.actionDraftId !== null && agentDraftIds.has(row.actionDraftId),
         messageId: row.messageId,
         chatRoomId: row.messageId === null ? null : (chatRoomIdByMessage.get(row.messageId) ?? null),
         occurredAt: row.createdAt.toISOString(),

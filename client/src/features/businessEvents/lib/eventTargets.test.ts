@@ -35,5 +35,13 @@ describe('작업 로그 대상 링크', () => {
     expect(targetTableLabel('chat_room')).toBe('chat_room');
     expect(isTargetFilterTable('mill_sheet')).toBe(true);
     expect(isTargetFilterTable('item')).toBe(false);
+    // Agent 위험 감지(불합격률 상승)·과거 사례 등록·삭제가 기록되는 테이블 (#509)
+    expect(isTargetFilterTable('steel_grade')).toBe(true);
+    expect(isTargetFilterTable('past_case')).toBe(true);
+  });
+
+  it('초안은 초안 상세로, Agent 대응 후보는 메시지 초안 상세(COM-002)가 아니라 Agent 화면으로 간다 (#509)', () => {
+    expect(targetHref(ref('action_draft'))).toBe('/action-drafts/5');
+    expect(targetHref(ref('action_draft', { isAgentCandidate: true }))).toBe('/agent');
   });
 });

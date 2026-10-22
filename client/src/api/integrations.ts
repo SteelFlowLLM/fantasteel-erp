@@ -10,6 +10,8 @@ import type {
   IntegrationTestResult,
   NotionCalendarOption,
   NotionCalendarSettingsInput,
+  NotionSyncFailureView,
+  NotionSyncRetryResult,
 } from '@fantasteel/shared';
 import { serverDownload, serverRequest, serverUrl } from '@/api/http';
 import { driveContentPath } from '@/lib/driveFiles';
@@ -21,18 +23,24 @@ export type {
   DriveFileView,
   IntegrationConnectResult,
   IntegrationConnectionView,
+  IntegrationFaultView,
+  IntegrationHealthLevel,
+  IntegrationHealthView,
   IntegrationProviderKey,
   IntegrationSettingsInput,
   IntegrationTestResult,
   NotionCalendarOption,
   NotionCalendarSettings,
   NotionCalendarSettingsInput,
+  NotionSyncFailureView,
+  NotionSyncRetryResult,
   NotionWorkspaceView,
 } from '@fantasteel/shared';
 
 export const integrationKeys = {
   all: ['integrations'] as const,
   list: () => ['integrations', 'list'] as const,
+  syncFailures: () => ['integrations', 'sync-failures'] as const,
   driveFiles: (kind: DriveFileListKind) => ['integrations', 'drive-files', kind] as const,
   driveBlob: (fileId: string) => ['integrations', 'drive-blob', fileId] as const,
 };
@@ -51,6 +59,12 @@ export const integrationApi = {
   notionCalendars: (): Promise<NotionCalendarOption[]> => serverRequest('GET', '/integrations/notion/calendars'),
   /** 일정을 함께 만들 캘린더·초대 여부. accountId null이면 캘린더 반영을 끈다 */
   updateNotionCalendar: (input: NotionCalendarSettingsInput): Promise<IntegrationConnectionView> => serverRequest('PUT', '/integrations/notion/calendar', { body: input }),
+  /** 이슈 #518. Notion 반영에 실패해 DB 목록에 남은 일정·회의록·할 일 (ORG_MANAGE 조회 권한) */
+  notionSyncFailures: (): Promise<NotionSyncFailureView[]> => serverRequest('GET', '/integrations/notion/sync-failures'),
+  /** 이슈 #518. 남은 반영 실패를 모두 다시 시도하고 결과를 기다린다 (ORG_MANAGE 사용 권한) */
+  retryNotionSyncFailures: (): Promise<NotionSyncRetryResult> => serverRequest('POST', '/integrations/notion/sync-failures/retry'),
+  /** 이슈 #518. 반영 실패 한 건만 다시 시도한다 */
+  retryNotionSyncFailure: (failureId: number): Promise<NotionSyncRetryResult> => serverRequest('POST', `/integrations/notion/sync-failures/${failureId}/retry`),
   /** 이슈 #361·#392. 설정한 Drive 폴더의 녹음·사진·문서(kind=all은 모두), 최신 수정순 한 쪽(50개). pageToken으로 다음 쪽 */
   driveFiles: ({ kind, pageToken }: { kind: DriveFileListKind; pageToken?: string }): Promise<DriveFilePage> =>
     serverRequest('GET', '/integrations/google-drive/files', { query: { kind, pageToken } }),

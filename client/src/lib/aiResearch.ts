@@ -2,6 +2,14 @@
 // 출처 제목·요약·보고서는 웹에서 온 글이다. 여기서는 글 조각으로만 나누고 HTML로 바꾸지 않는다.
 import {
   AI_RESEARCH_LIMITS,
+  AI_RESEARCH_LLM_RETRY_LABEL,
+  AI_RESEARCH_REPORT_FALLBACK_LABEL,
+  AI_RESEARCH_SCHEDULE_TIME_PATTERN,
+  aiResearchFallbackText,
+  nextAiResearchRunAt,
+  normalizeWeekdays,
+  type AiResearchScheduleRule,
+  type AiResearchScheduleView,
   type AiResearchEventView,
   type AiResearchPlan,
   type AiResearchPlanStep,
@@ -11,6 +19,7 @@ import {
   type AiResearchStatus,
 } from '@fantasteel/shared';
 import { safeWebHref, tokenizeAnswerLinks, webHostOf, webSourceTitle } from '@/lib/aiWebLinks';
+import { fmtHM, fmtMDdow } from '@/lib/format';
 
 // ── 폴링 ──
 
@@ -75,7 +84,13 @@ export function timelineLineOf(event: AiResearchEventView): TimelineLine {
   switch (event.type) {
     case 'plan.ready': {
       const p = event.payload;
-      const title = p.copiedFrom ? `조사 #${p.copiedFrom}의 계획을 가져왔어요 · ${p.stepCount}단계` : p.fallback ? '질문 그대로 한 단계로 계획을 세웠어요' : `계획을 세웠어요 · ${p.stepCount}단계`;
+      const title = p.scheduled && p.copiedFrom
+        ? `반복 차례라 조사 #${p.copiedFrom}의 계획으로 시작했어요 · ${p.stepCount}단계`
+        : p.copiedFrom
+          ? `조사 #${p.copiedFrom}의 계획을 가져왔어요 · ${p.stepCount}단계`
+          : p.fallback
+            ? '질문 그대로 한 단계로 계획을 세웠어요'
+            : `계획을 세웠어요 · ${p.stepCount}단계`;
       return { ...base, tone: 'ai', title, detail: cut(webSourceTitle(p.title, ''), 100) };
     }
     case 'step.started': {
@@ -113,12 +128,17 @@ export function timelineLineOf(event: AiResearchEventView): TimelineLine {
     }
     case 'audit.ready': {
       const p = event.payload;
+      if (!p.ok && p.failure) return { ...base, tone: 'wait', title: `점검 AI가 끝내 답하지 못해 점검 없이 보고서를 써요 · ${AI_RESEARCH_REPORT_FALLBACK_LABEL[p.failure]}` };
       if (!p.ok) return { ...base, tone: 'wait', title: '점검을 읽지 못해 조사 메모로 대신했어요' };
       return { ...base, tone: 'ai', title: '보고서 쓰기 전 점검을 마쳤어요', detail: `뒷받침된 주장 ${p.claimCount}개 · 엇갈리는 내용 ${p.contradictionCount}개 · 빠진 관점 ${p.missingCount}개` };
     }
     case 'report.ready': {
       const p = event.payload;
       return { ...base, tone: 'ok', title: '보고서를 썼어요', detail: `${p.chars.toLocaleString('ko-KR')}자 · 인용한 출처 ${p.citedCount}개${p.truncated ? ' · 길이 한도에 걸려 끝까지 쓰지 못했어요' : ''}` };
+    }
+    case 'report.retry': {
+      const p = event.payload;
+      return { ...base, tone: 'wait', title: `${p.phase === 'audit' ? '근거 점검' : '보고서'} AI가 답하지 못해(${AI_RESEARCH_LLM_RETRY_LABEL[p.reason]}) ${p.waitSeconds}초 뒤 다시 부탁해요 · ${p.attempt}번째` };
     }
     case 'failed':
       return { ...base, tone: 'danger', title: '조사에 실패했어요', detail: cut(event.payload.reason, 300) };
@@ -430,3 +450,40 @@ export function progressText(run: Pick<AiResearchRunView, 'stepsUsed' | 'budget'
   // 우리 ERP에서 조회한 출처·사내 지식은 웹 출처 자리에 세지 않는다
   return `${run.stepsUsed}/${run.budget.maxSteps} 단계 · 출처 ${run.sources.filter((source) => sourceKindOf(source.url) === 'web').length}/${run.budget.maxSources}`;
 }
+
+/** 대체본 표시 (이슈 #521). PDF와 같은 글이 되게 shared의 것을 쓴다 */
+export const reportFallbackLabel = aiResearchFallbackText;
+
+// ── 반복 (이슈 #521) ──
+
+/** 반복 걸기 창의 처음 값: 지금 반복이 있으면 그것, 없으면 평일 아침 9시 */
+export function scheduleDraftOf(schedule: AiResearchScheduleView | null): AiResearchScheduleRule {
+  return schedule ? { frequency: schedule.frequency, weekdays: [...schedule.weekdays], time: schedule.time } : { frequency: 'DAILY', weekdays: [], time: '09:00' };
+}
+
+/** 요일 켜고 끄기 (1=월 … 7=일, 정리해서) */
+export function toggleWeekday(weekdays: readonly number[], weekday: number): number[] {
+  return normalizeWeekdays(weekdays.includes(weekday) ? weekdays.filter((d) => d !== weekday) : [...weekdays, weekday]);
+}
+
+/** 저장할 수 없는 까닭 (없으면 null) */
+export function scheduleDraftProblem(draft: AiResearchScheduleRule): string | null {
+  if (!AI_RESEARCH_SCHEDULE_TIME_PATTERN.test(draft.time)) return '실행 시각을 골라 주세요';
+  if (draft.frequency === 'WEEKLY' && normalizeWeekdays(draft.weekdays).length === 0) return '반복할 요일을 하나 이상 골라 주세요';
+  return null;
+}
+
+/** 서버에 보낼 값: 매일이면 요일을 비운다 */
+export const scheduleInputOf = (draft: AiResearchScheduleRule): AiResearchScheduleRule => ({ frequency: draft.frequency, weekdays: draft.frequency === 'DAILY' ? [] : normalizeWeekdays(draft.weekdays), time: draft.time });
+
+/** '10-23 (금) 09:00' (서울) */
+export const fmtRunAt = (at: Date | string): string => `${fmtMDdow(at)} ${fmtHM(at)}`;
+
+/** 창에서 고른 규칙의 다음 실행 미리 보기 (틀린 규칙이면 null) */
+export function nextRunPreview(draft: AiResearchScheduleRule, now: Date = new Date()): string | null {
+  const next = scheduleDraftProblem(draft) ? null : nextAiResearchRunAt(scheduleInputOf(draft), now);
+  return next ? fmtRunAt(next) : null;
+}
+
+/** 화면이 내려받을 PDF 이름 (서버 이름과 같은 꼴, 제목은 빼고 짧게) */
+export const researchPdfName = (id: number, version: number | null): string => `심층조사-${id}${version ? `-${version}판` : ''}.pdf`;

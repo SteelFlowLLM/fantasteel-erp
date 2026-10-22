@@ -277,6 +277,7 @@ const REQUISITION_COLOR: Record<PurchaseRequisitionStatus, string> = {
   APPROVED: 'bg-run',
   REJECTED: 'bg-danger',
   ORDERED: 'bg-ok',
+  ORDER_CANCELLED: 'bg-line-strong',
 };
 
 function PurchaseProgressBody({ data }: { data: PurchaseProgressData }) {

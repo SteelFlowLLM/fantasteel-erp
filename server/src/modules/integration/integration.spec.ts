@@ -10,10 +10,25 @@ import type { AddressInfo } from 'node:net';
 import { Server as McpServer } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, type Tool } from '@modelcontextprotocol/sdk/types.js';
-import { MEETING_MINUTES_STATUS, TASK_STATUS, type IntegrationConnectResult, type IntegrationConnectionView, type IntegrationTestResult, type MeetingNotionExportResult } from '@fantasteel/shared';
+import {
+  MEETING_MINUTES_STATUS,
+  NOTIFICATION_TYPE,
+  PERMISSION,
+  PERMISSION_LEVEL,
+  TASK_STATUS,
+  type IntegrationConnectResult,
+  type IntegrationConnectionView,
+  type IntegrationTestResult,
+  type MeetingNotionExportResult,
+  type NotionSyncFailureView,
+  type NotionSyncRetryResult,
+} from '@fantasteel/shared';
 import { AppModule } from '../../app.module';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PARENT_PAGE_NOT_FOUND_MESSAGE } from './notion/notion.tools';
+import { IntegrationHealthMonitor } from './integration-health.monitor';
+import { NotionSyncFailureService } from './notion/notion-sync-failure.service';
+import { NotionSyncRepository } from './notion/notion-sync.repository';
 import { NotionWorkspaceService } from './notion/notion-workspace.service';
 
 const PARENT_ID = '1a2b3c4d5e6f47a8b9c0d1e2f3a4b5c6';
@@ -280,6 +295,8 @@ let purchaseCookie: string;
 let purchaseId: number;
 /** 김영업 (영업) — 작성자도 관리자도 아님 */
 let salesCookie: string;
+/** 연동 관리 권한자(ORG_MANAGE 사용)인 재직 사원 id: 장애·복구 알림을 받는다 (이슈 #518) */
+let managerIds: number[];
 
 async function login(employeeNo: string): Promise<string> {
   const res = await fetch(`${baseUrl}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ employeeNo, password: process.env.SEED_PASSWORD ?? 'fantasteel' }) });
@@ -347,13 +364,33 @@ beforeAll(async () => {
   purchaseCookie = await login('2207005');
   salesCookie = await login('2103003');
   adminId = (await prisma.employee.findUniqueOrThrow({ where: { employeeNo: '1503001' } })).id;
+  managerIds = (
+    await prisma.employee.findMany({
+      where: { isActive: true, role: { rolePermissions: { some: { permission: PERMISSION.ORG_MANAGE, permissionLevel: PERMISSION_LEVEL.USE } } } },
+      select: { id: true },
+    })
+  ).map((e) => e.id);
   purchaseId = (await prisma.employee.findUniqueOrThrow({ where: { employeeNo: '2207005' } })).id;
 }, 60_000);
 
 afterAll(async () => {
+  // 같은 묶음 DB를 쓰는 다른 시험이 이 시험의 장애·알림을 보지 않게 치운다
+  await clearFaultState();
+  await prisma?.notionSyncFailure.deleteMany();
   await app?.close();
   await new Promise<void>((resolve) => fakeServer?.close(() => resolve()));
 });
+
+/** 장애 기록과 그 알림을 모두 지운다 (이슈 #518) */
+async function clearFaultState(): Promise<void> {
+  await prisma.integrationFault.deleteMany();
+  await prisma.notification.deleteMany({ where: { notificationType: { in: [NOTIFICATION_TYPE.INTEGRATION_FAULT, NOTIFICATION_TYPE.INTEGRATION_RECOVERED] } } });
+}
+
+/** 장애·복구 알림 (연동 관리 권한자마다 한 행) */
+function alertsOf(type: typeof NOTIFICATION_TYPE.INTEGRATION_FAULT | typeof NOTIFICATION_TYPE.INTEGRATION_RECOVERED) {
+  return prisma.notification.findMany({ where: { notificationType: type }, orderBy: { id: 'asc' } });
+}
 
 describe('연결 전', () => {
   it('목록은 로그인만 보고, 연결하지 않은 상태로 보인다', async () => {
@@ -375,6 +412,7 @@ describe('연결 전', () => {
       serviceAccountEmail: null,
       driveFolderFromEnv: false,
       notionWorkspace: null,
+      health: { level: 'NORMAL', lastErrorAt: null, faults: [] },
     });
   });
 
@@ -496,6 +534,7 @@ describe('OAuth 연결', () => {
   });
 
   it('갱신 요청이 일시적으로 실패하면 토큰을 지우지 않고 INT-004로 알린다', async () => {
+    await clearFaultState();
     fake.accessTokens.clear();
     fake.refreshFails = true;
     const id = await confirmedMeeting(purchaseId);
@@ -507,8 +546,47 @@ describe('OAuth 연결', () => {
     expect(test.body.data).toMatchObject({ ok: false, error: expect.stringContaining('잠시 뒤') });
     expect((await prisma.integrationConnection.findUniqueOrThrow({ where: { providerKey: 'notion' } })).oauthTokens).not.toBeNull();
     expect((await notionView()).status).toBe('CONNECTED');
+    // 두 번 실패한 것은 아직 알릴 만큼이 아니다 (요청 실패는 3번 이어질 때 알린다)
+    expect(await prisma.integrationFault.findMany({ where: { providerKey: 'notion' } })).toMatchObject([{ faultKind: 'REQUEST_FAILED', failureCount: 2, notifiedAt: null }]);
+    expect(await alertsOf(NOTIFICATION_TYPE.INTEGRATION_FAULT)).toHaveLength(0);
     // 장애가 지나면 남겨 둔 리프레시 토큰으로 이어 간다
     expect((await call<IntegrationTestResult>('POST', '/integrations/notion/test', adminCookie)).body.data.ok).toBe(true);
+    // 알리지 않은 장애는 조용히 풀린다: 복구 알림도 없다
+    expect(await prisma.integrationFault.count({ where: { providerKey: 'notion' } })).toBe(0);
+    expect(await alertsOf(NOTIFICATION_TYPE.INTEGRATION_RECOVERED)).toHaveLength(0);
+  });
+
+  it('토큰 갱신이 3번 이어서 실패하면 연동 관리 권한자에게 알림 한 번, 더 실패해도 다시 안 가고, 회복하면 복구 알림 한 번', async () => {
+    await clearFaultState();
+    fake.accessTokens.clear();
+    fake.refreshFails = true;
+    for (let i = 1; i <= 4; i += 1) {
+      const test = await call<IntegrationTestResult>('POST', '/integrations/notion/test', adminCookie);
+      expect(test.body.data.ok).toBe(false);
+      expect(await alertsOf(NOTIFICATION_TYPE.INTEGRATION_FAULT)).toHaveLength(i < 3 ? 0 : managerIds.length);
+    }
+    const alerts = await alertsOf(NOTIFICATION_TYPE.INTEGRATION_FAULT);
+    expect(alerts.map((a) => a.recipientId).sort()).toEqual([...managerIds].sort());
+    expect(alerts[0]).toMatchObject({ linkPath: '/admin/integrations' });
+    expect(alerts[0].notificationContent).toContain('Notion 요청이 3번 이어서 실패했어요');
+    expect(alerts[0].notificationContent).toContain('잠시 뒤');
+    // 관리 화면: 주의, 마지막 오류와 시각, 알린 장애
+    const view = await notionView();
+    expect(view.health.level).toBe('WARNING');
+    expect(view.health.lastErrorAt).not.toBeNull();
+    expect(view.health.faults).toMatchObject([{ faultKind: 'REQUEST_FAILED', failureCount: 4, notifiedAt: expect.any(String) }]);
+
+    fake.refreshFails = false;
+    expect((await call<IntegrationTestResult>('POST', '/integrations/notion/test', adminCookie)).body.data.ok).toBe(true);
+    const recovered = await alertsOf(NOTIFICATION_TYPE.INTEGRATION_RECOVERED);
+    expect(recovered).toHaveLength(managerIds.length);
+    expect(recovered[0].notificationContent).toBe('Notion 요청이 다시 정상이에요');
+    expect(await prisma.integrationFault.count({ where: { providerKey: 'notion' } })).toBe(0);
+    expect((await notionView()).health).toEqual({ level: 'NORMAL', lastErrorAt: null, faults: [] });
+    // 정상인 동안 호출해도 복구 알림이 늘지 않는다
+    expect((await call<IntegrationTestResult>('POST', '/integrations/notion/test', adminCookie)).body.data.ok).toBe(true);
+    expect(await alertsOf(NOTIFICATION_TYPE.INTEGRATION_RECOVERED)).toHaveLength(managerIds.length);
+    await clearFaultState();
   });
 
   it('다시 연결: 허용이 끝날 때까지 옛 토큰을 쓰고, 다른 사원으로 로그인한 콜백은 거절한다', async () => {
@@ -1041,6 +1119,270 @@ describe('Notion 업무 공간 (이슈 #391)', () => {
     expect(row.notionPageId).toMatch(HEX32);
     expect(row.notionSyncedAt?.getTime()).toBeLessThan(row.updatedAt.getTime());
   });
+
+  describe('반영 실패 목록과 다시 시도 (이슈 #518)', () => {
+    const failures = async () => (await call<NotionSyncFailureView[]>('GET', '/integrations/notion/sync-failures', adminCookie)).body.data;
+    const retryAll = () => call<NotionSyncRetryResult>('POST', '/integrations/notion/sync-failures/retry', adminCookie);
+    /** 미룬 시각을 모두 지나게 해서 다음 반영이 바로 다시 해 보게 한다 (기다리지 않고 시간이 흐른 것처럼) */
+    const makeDue = () => prisma.notionSyncFailure.updateMany({ data: { retryAfter: new Date(Date.now() - 1000) } });
+    const failingTask = async (title: string, response: 'error' | 'no-url' = 'error') => {
+      fake.createResponse = response;
+      const id = await createTask(title);
+      await sync();
+      fake.createResponse = 'ok';
+      return id;
+    };
+
+    /** 실패 줄을 비우고 밀린 행을 모두 반영한다: 앞 시험이 실패로 남긴 행이 다음 시험의 반영에서 또 실패하지 않게 */
+    const settle = async () => {
+      fake.createResponse = 'ok';
+      await prisma.notionSyncFailure.deleteMany();
+      await sync();
+    };
+
+    beforeAll(async () => {
+      await settle();
+      await clearFaultState();
+    });
+
+    afterEach(settle);
+
+    it('실패한 행은 DB 목록에 무엇이·몇 번·왜 실패했는지 남고, 같은 행이 또 실패하면 횟수를 올리며 미루는 시간을 두 배로 늘린다', async () => {
+      const id = await failingTask('목록에 남을 실패');
+      const [first] = await failures();
+      expect(first).toMatchObject({ targetType: 'task', targetId: id, title: '목록에 남을 실패', failureCount: 1, isResultUnknown: false });
+      expect(first.lastError).toContain('Could not find parent page');
+      expect(new Date(first.retryAfter).getTime() - new Date(first.lastFailedAt).getTime()).toBe(60_000);
+      expect((await notionView()).notionWorkspace?.failedCount).toBe(1);
+      // 바로 다시 돌아도 미뤄 둔 행이라 Notion을 부르지 않는다
+      fake.calls = [];
+      await sync();
+      expect(fake.calls.filter((c) => c.name === 'notion-create-pages')).toEqual([]);
+
+      await makeDue();
+      fake.createResponse = 'error';
+      await sync();
+      const [second] = await failures();
+      expect(second).toMatchObject({ id: first.id, failureCount: 2 });
+      expect(new Date(second.retryAfter).getTime() - new Date(second.lastFailedAt).getTime()).toBe(120_000);
+      expect(new Date(second.firstFailedAt).getTime()).toBe(new Date(first.firstFailedAt).getTime());
+    });
+
+    it('만들어졌는지 알 수 없는 실패는 표시하고 30분 미룬다', async () => {
+      await failingTask('결과를 모르는 실패', 'no-url');
+      const [row] = await failures();
+      expect(row).toMatchObject({ title: '결과를 모르는 실패', isResultUnknown: true });
+      expect(new Date(row.retryAfter).getTime() - new Date(row.lastFailedAt).getTime()).toBe(30 * 60_000);
+    });
+
+    it('서버를 다시 띄워도(앱을 새로 만들어도) 목록이 남는다', async () => {
+      const id = await failingTask('다시 띄워도 남는 실패');
+      const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+      const restarted = moduleRef.createNestApplication();
+      await restarted.init();
+      try {
+        const list = await restarted.get(NotionSyncFailureService).list();
+        expect(list).toMatchObject([{ targetType: 'task', targetId: id, title: '다시 띄워도 남는 실패', failureCount: 1 }]);
+      } finally {
+        await restarted.close();
+      }
+    });
+
+    it('목록은 연동 관리 권한자만 본다. 지워진 행의 줄은 치운다', async () => {
+      const denied = await call('GET', '/integrations/notion/sync-failures', salesCookie);
+      expect(denied.status).toBe(403);
+      expect(denied.body.error?.code).toBe('COM-002');
+      expect((await call('GET', '/integrations/notion/sync-failures', null)).status).toBe(401);
+
+      await prisma.notionSyncFailure.create({ data: { targetType: 'task', targetId: 987654, lastError: '지워진 업무', retryAfter: new Date(Date.now() + 60_000) } });
+      expect(await failures()).toEqual([]);
+      expect(await prisma.notionSyncFailure.count()).toBe(0);
+    });
+
+    /** 이 시험이 Notion에 만든 페이지의 ERP 번호 (보낸 순서대로, 업무·일정·회의록 합쳐서) */
+    const createdNumbers = () =>
+      fake.calls
+        .filter((c) => c.name === 'notion-create-pages')
+        .flatMap((c) => c.args.pages as { properties: Record<string, unknown> }[])
+        .map((p) => p.properties['번호']);
+
+    it('다시 시도(전체): 미룬 시각을 기다리지 않고 바로 반영해 성공한 행의 줄을 지운다', async () => {
+      const a = await failingTask('다시 시도할 업무 A');
+      const b = await failingTask('다시 시도할 업무 B');
+      expect(await failures()).toHaveLength(2);
+
+      const { status, body } = await retryAll();
+      expect(status).toBe(200);
+      expect(body.data).toMatchObject({ requested: 2, succeeded: 2, failed: 0, skipped: 0, failures: [] });
+      for (const id of [a, b]) expect((await prisma.task.findUniqueOrThrow({ where: { id } })).notionPageId).toMatch(HEX32);
+      expect(await prisma.notionSyncFailure.count()).toBe(0);
+      expect((await notionView()).notionWorkspace?.failedCount).toBe(0);
+    });
+
+    it('다시 시도(전체)는 만들어졌는지 모르는 건을 빼고 건너뛴 수를 알린다 (확인 없이 다시 만들면 Notion 페이지가 중복될 수 있다). 그 건은 한 건씩 다시 시도한다', async () => {
+      const normal = await failingTask('결과를 아는 실패');
+      const unknown = await failingTask('결과 모름 실패', 'no-url');
+      const unknownRow = (await failures()).find((f) => f.targetId === unknown);
+      expect(unknownRow).toMatchObject({ isResultUnknown: true, failureCount: 1 });
+
+      fake.calls = [];
+      const all = await retryAll();
+      expect(all.status).toBe(200);
+      expect(all.body.data).toMatchObject({ requested: 1, succeeded: 1, failed: 0, skipped: 1 });
+      expect(all.body.data.failures).toMatchObject([{ id: unknownRow?.id, targetId: unknown, isResultUnknown: true, failureCount: 1, retryAfter: unknownRow?.retryAfter }]);
+      // 결과 모름 건은 Notion에 만들기를 부르지도 않았다
+      expect(createdNumbers()).toContain(normal);
+      expect(createdNumbers()).not.toContain(unknown);
+      expect((await prisma.task.findUniqueOrThrow({ where: { id: unknown } })).notionPageId).toBeNull();
+
+      // 한 건씩은 사람이 확인하고 하는 것이라 다시 만든다
+      const one = await call<NotionSyncRetryResult>('POST', `/integrations/notion/sync-failures/${unknownRow?.id}/retry`, adminCookie);
+      expect(one.body.data).toMatchObject({ requested: 1, succeeded: 1, failed: 0, skipped: 0, failures: [] });
+      expect((await prisma.task.findUniqueOrThrow({ where: { id: unknown } })).notionPageId).toMatch(HEX32);
+    });
+
+    it('결과 모름 건만 남았으면 전체 다시 시도는 Notion을 부르지 않고 건너뛴 수만 알린다', async () => {
+      const unknown = await failingTask('결과 모름뿐', 'no-url');
+      fake.calls = [];
+      const { body } = await retryAll();
+      expect(body.data).toMatchObject({ requested: 0, succeeded: 0, failed: 0, skipped: 1 });
+      expect(body.data.failures).toMatchObject([{ targetId: unknown, isResultUnknown: true }]);
+      expect(fake.calls.filter((c) => c.name === 'notion-create-pages')).toEqual([]);
+    });
+
+    it('한 번 결과 모름이 된 행은 그 뒤 오류 답으로 또 실패해도 성공할 때까지 결과 모름으로 두고 30분 미룬다', async () => {
+      const id = await failingTask('결과 모름 뒤 오류', 'no-url');
+      await makeDue();
+      fake.createResponse = 'error';
+      await sync();
+      fake.createResponse = 'ok';
+      const [row] = await failures();
+      expect(row).toMatchObject({ targetId: id, failureCount: 2, isResultUnknown: true });
+      expect(row.lastError).toContain('Could not find parent page');
+      expect(new Date(row.retryAfter).getTime() - new Date(row.lastFailedAt).getTime()).toBe(30 * 60_000);
+    });
+
+    it('자동 반영과 다시 시도를 동시에 불러도 Notion 페이지는 한 번만 만든다', async () => {
+      const id = await failingTask('동시에 반영');
+      await makeDue();
+      fake.calls = [];
+      await Promise.all([sync(), retryAll(), sync(), retryAll()]);
+      expect(createdNumbers().filter((number) => number === id)).toHaveLength(1);
+      expect((await prisma.task.findUniqueOrThrow({ where: { id } })).notionPageId).toMatch(HEX32);
+      expect(await prisma.notionSyncFailure.count()).toBe(0);
+    });
+
+    it('다시 시도(한 건): 그 건만 다시 하고 나머지는 그대로 둔다', async () => {
+      const a = await failingTask('한 건만 다시 시도 A');
+      const b = await failingTask('한 건만 다시 시도 B');
+      const [rowA] = (await failures()).filter((f) => f.targetId === a);
+      const { status, body } = await call<NotionSyncRetryResult>('POST', `/integrations/notion/sync-failures/${rowA.id}/retry`, adminCookie);
+      expect(status).toBe(200);
+      expect(body.data).toMatchObject({ requested: 1, succeeded: 1, failed: 0 });
+      expect(body.data.failures.map((f) => f.targetId)).toEqual([b]);
+      expect((await prisma.task.findUniqueOrThrow({ where: { id: a } })).notionPageId).toMatch(HEX32);
+      expect((await prisma.task.findUniqueOrThrow({ where: { id: b } })).notionPageId).toBeNull();
+    });
+
+    it('다시 시도가 또 실패하면 목록에 남고 횟수가 오른다', async () => {
+      const id = await failingTask('계속 실패');
+      fake.createResponse = 'error';
+      const { body } = await retryAll();
+      fake.createResponse = 'ok';
+      expect(body.data).toMatchObject({ requested: 1, succeeded: 0, failed: 1 });
+      expect(body.data.failures).toMatchObject([{ targetId: id, failureCount: 2 }]);
+    });
+
+    it('다시 시도는 연동 관리 권한자만, 없는 건은 COM-003', async () => {
+      const id = await failingTask('권한 확인');
+      const [row] = await failures();
+      for (const path of ['/integrations/notion/sync-failures/retry', `/integrations/notion/sync-failures/${row.id}/retry`]) {
+        const denied = await call('POST', path, salesCookie);
+        expect(denied.status).toBe(403);
+        expect(denied.body.error?.code).toBe('COM-002');
+      }
+      expect((await call('POST', '/integrations/notion/sync-failures/retry', null)).status).toBe(401);
+      // 거절된 시도는 아무것도 바꾸지 않는다
+      expect((await prisma.task.findUniqueOrThrow({ where: { id } })).notionPageId).toBeNull();
+      expect(await failures()).toMatchObject([{ id: row.id, failureCount: 1 }]);
+
+      const missing = await call('POST', '/integrations/notion/sync-failures/99999/retry', adminCookie);
+      expect(missing.status).toBe(404);
+      expect(missing.body.error?.code).toBe('COM-003');
+      expect((await call('POST', '/integrations/notion/sync-failures/abc/retry', adminCookie)).status).toBe(400);
+    });
+
+    it('이미 반영된 행(다른 길로 풀림)의 줄은 다음 반영이 치운다', async () => {
+      const id = await failingTask('다른 길로 풀린 실패');
+      const task = await prisma.task.findUniqueOrThrow({ where: { id } });
+      expect(task.notionSyncedAt).toBeNull();
+      // 다른 길로 Notion 페이지가 생기고 반영한 것으로 적힌 상황 (updated_at은 건드리지 않는 TypedSQL로)
+      await app.get(NotionSyncRepository).markTaskSynced(prisma, id, 'f'.repeat(32), task.updatedAt);
+      await makeDue();
+      await sync();
+      expect(await prisma.notionSyncFailure.count()).toBe(0);
+    });
+
+    it('연결이 없으면 다시 시도는 INT-002', async () => {
+      const stored = await prisma.integrationConnection.findUniqueOrThrow({ where: { providerKey: 'notion' } });
+      await prisma.integrationConnection.update({ where: { providerKey: 'notion' }, data: { oauthTokens: null } });
+      try {
+        const res = await retryAll();
+        expect(res.status).toBe(409);
+        expect(res.body.error?.code).toBe('INT-002');
+      } finally {
+        await prisma.integrationConnection.update({ where: { providerKey: 'notion' }, data: { oauthTokens: stored.oauthTokens } });
+      }
+    });
+
+    it('반영 실패가 3번 이어지면 연동 관리 권한자에게 알림 한 번, 더 실패해도 다시 안 가고, 다시 시도가 성공하면 복구 알림 한 번', async () => {
+      await clearFaultState();
+      const id = await failingTask('연속 실패');
+      for (let sweep = 1; sweep <= 3; sweep += 1) {
+        if (sweep > 1) {
+          await makeDue();
+          fake.createResponse = 'error';
+          await sync();
+          fake.createResponse = 'ok';
+        }
+        expect(await alertsOf(NOTIFICATION_TYPE.INTEGRATION_FAULT)).toHaveLength(sweep < 3 ? 0 : managerIds.length);
+      }
+      const [alert] = await alertsOf(NOTIFICATION_TYPE.INTEGRATION_FAULT);
+      expect(alert.notificationContent).toContain('Notion 업무 공간 반영이 3번 이어서 실패했어요');
+      expect(alert.notificationContent).toContain('Could not find parent page');
+      expect(alert.linkPath).toBe('/admin/integrations');
+      const warned = await notionView();
+      expect(warned.health.level).toBe('WARNING');
+      expect(warned.health.faults).toMatchObject([{ faultKind: 'SYNC_FAILED', failureCount: 3, notifiedAt: expect.any(String) }]);
+
+      // 4번째 실패에는 다시 알리지 않는다
+      await makeDue();
+      fake.createResponse = 'error';
+      await sync();
+      fake.createResponse = 'ok';
+      expect(await alertsOf(NOTIFICATION_TYPE.INTEGRATION_FAULT)).toHaveLength(managerIds.length);
+
+      expect((await retryAll()).body.data).toMatchObject({ requested: 1, succeeded: 1, failed: 0 });
+      expect((await prisma.task.findUniqueOrThrow({ where: { id } })).notionPageId).toMatch(HEX32);
+      const recovered = await alertsOf(NOTIFICATION_TYPE.INTEGRATION_RECOVERED);
+      expect(recovered).toHaveLength(managerIds.length);
+      expect(recovered[0].notificationContent).toBe('Notion 업무 공간 반영이 다시 정상이에요');
+      expect(await prisma.integrationFault.count({ where: { providerKey: 'notion' } })).toBe(0);
+      expect((await notionView()).health.level).toBe('NORMAL');
+      await clearFaultState();
+    });
+
+    it('한두 번 실패했다가 스스로 풀리면 알림도 복구 알림도 없다', async () => {
+      await clearFaultState();
+      await failingTask('잠깐 흔들린 업무');
+      await makeDue();
+      await sync();
+      expect(await prisma.notionSyncFailure.count()).toBe(0);
+      expect(await prisma.integrationFault.count()).toBe(0);
+      expect(await alertsOf(NOTIFICATION_TYPE.INTEGRATION_FAULT)).toHaveLength(0);
+      expect(await alertsOf(NOTIFICATION_TYPE.INTEGRATION_RECOVERED)).toHaveLength(0);
+    });
+  });
 });
 
 describe('Notion 캘린더 (이슈 #391 2단계)', () => {
@@ -1221,6 +1563,8 @@ describe('Notion 캘린더 (이슈 #391 2단계)', () => {
 });
 
 describe('다시 연결이 필요할 때', () => {
+  beforeAll(clearFaultState);
+
   it('토큰이 모두 취소되면 INT-003, 상태는 RECONNECT_REQUIRED', async () => {
     fake.accessTokens.clear();
     fake.refreshTokens.clear();
@@ -1231,16 +1575,58 @@ describe('다시 연결이 필요할 때', () => {
     const view = await notionView();
     expect(view.status).toBe('RECONNECT_REQUIRED');
     expect(view.lastError).toContain('다시 연결');
+    // 관리 화면: 끊김, 마지막 오류 시각, 다시 연결이 필요한 장애
+    expect(view.health.level).toBe('DOWN');
+    expect(view.health.lastErrorAt).not.toBeNull();
+    expect(view.health.faults).toMatchObject([{ faultKind: 'RECONNECT_REQUIRED', failureCount: 1, notifiedAt: expect.any(String) }]);
 
     const test = await call<IntegrationTestResult>('POST', '/integrations/notion/test', adminCookie);
     expect(test.body.data).toMatchObject({ ok: false, error: expect.stringContaining('다시 연결') });
   });
 
-  it('연결 끊기: 비밀값을 지우고 설정은 남긴다', async () => {
+  it('다시 연결이 필요한 장애는 알림이 한 번만 가고, 되풀이돼도 다시 안 간다', async () => {
+    const alerts = await alertsOf(NOTIFICATION_TYPE.INTEGRATION_FAULT);
+    expect(alerts.map((a) => a.recipientId).sort()).toEqual([...managerIds].sort());
+    expect(alerts[0].notificationContent).toContain('Notion 연결이 끊겼어요');
+    // 토큰이 없는 채로 두 번 더 불러도 (내보내기·연결 확인) 같은 장애의 알림은 늘지 않는다
+    const id = await confirmedMeeting(purchaseId);
+    expect((await call('POST', `/meeting-minutes/${id}/notion-export`, purchaseCookie)).body.error?.code).toBe('INT-003');
+    await call('POST', '/integrations/notion/test', adminCookie);
+    expect(await alertsOf(NOTIFICATION_TYPE.INTEGRATION_FAULT)).toHaveLength(managerIds.length);
+    expect((await prisma.integrationFault.findFirstOrThrow({ where: { providerKey: 'notion', faultKind: 'RECONNECT_REQUIRED' } })).failureCount).toBeGreaterThanOrEqual(3);
+  });
+
+  it('주기 확인은 토큰이 끊긴 채 아무도 쓰지 않아도 같은 장애로 센다 (알림은 늘지 않는다)', async () => {
+    const before = (await prisma.integrationFault.findFirstOrThrow({ where: { providerKey: 'notion', faultKind: 'RECONNECT_REQUIRED' } })).failureCount;
+    await app.get(IntegrationHealthMonitor).runNow();
+    expect((await prisma.integrationFault.findFirstOrThrow({ where: { providerKey: 'notion', faultKind: 'RECONNECT_REQUIRED' } })).failureCount).toBe(before + 1);
+    expect(await alertsOf(NOTIFICATION_TYPE.INTEGRATION_FAULT)).toHaveLength(managerIds.length);
+  });
+
+  it('관리자가 다시 연결하면 복구 알림이 한 번 가고 장애는 사라진다', async () => {
+    const { body } = await call<IntegrationConnectResult>('POST', '/integrations/notion/connect', adminCookie);
+    const url = new URL(body.data.authorizationUrl);
+    fake.pendingChallenge = url.searchParams.get('code_challenge');
+    const res = await fetch(`${baseUrl}/integrations/oauth/callback?code=good-code&state=${encodeURIComponent(url.searchParams.get('state') ?? '')}`, { redirect: 'manual', headers: { cookie: adminCookie } });
+    expect(new URL(res.headers.get('location') ?? '').searchParams.get('result')).toBe('connected');
+    const recovered = await alertsOf(NOTIFICATION_TYPE.INTEGRATION_RECOVERED);
+    expect(recovered).toHaveLength(managerIds.length);
+    expect(recovered[0].notificationContent).toBe('Notion 연결이 다시 정상이에요');
+    expect(await prisma.integrationFault.count({ where: { providerKey: 'notion' } })).toBe(0);
+    const view = await notionView();
+    expect(view).toMatchObject({ status: 'CONNECTED', lastError: null });
+    expect(view.health).toEqual({ level: 'NORMAL', lastErrorAt: null, faults: [] });
+  });
+
+  it('연결 끊기: 비밀값을 지우고 설정은 남긴다. 일부러 끊은 것이라 장애는 알림 없이 지운다', async () => {
+    await prisma.integrationFault.create({ data: { providerKey: 'notion', faultKind: 'REQUEST_FAILED', failureCount: 5, lastMessage: '시간 초과', notifiedAt: new Date() } });
+    const recoveredBefore = (await alertsOf(NOTIFICATION_TYPE.INTEGRATION_RECOVERED)).length;
     const { status, body } = await call<IntegrationConnectionView>('POST', '/integrations/notion/disconnect', adminCookie);
     expect(status).toBe(200);
-    expect(body.data).toMatchObject({ status: 'NOT_CONNECTED', connectedAt: null, settings: { parentPageId: PARENT_ID } });
+    expect(body.data).toMatchObject({ status: 'NOT_CONNECTED', connectedAt: null, settings: { parentPageId: PARENT_ID }, health: { level: 'NORMAL', lastErrorAt: null, faults: [] } });
     const row = await prisma.integrationConnection.findUniqueOrThrow({ where: { providerKey: 'notion' } });
     expect([row.oauthClientInformation, row.oauthTokens, row.oauthCodeVerifier]).toEqual([null, null, null]);
+    expect(await prisma.integrationFault.count({ where: { providerKey: 'notion' } })).toBe(0);
+    expect(await alertsOf(NOTIFICATION_TYPE.INTEGRATION_RECOVERED)).toHaveLength(recoveredBefore);
   });
 });

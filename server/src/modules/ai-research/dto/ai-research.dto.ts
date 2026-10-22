@@ -1,6 +1,6 @@
-import { AI_RESEARCH_LIMITS } from '@fantasteel/shared';
+import { AI_RESEARCH_LIMITS, AI_RESEARCH_SCHEDULE_FREQUENCY, AI_RESEARCH_SCHEDULE_TIME_PATTERN, type AiResearchScheduleFrequency } from '@fantasteel/shared';
 import { Transform, Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsInt, IsNotEmpty, IsObject, IsOptional, IsString, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, ArrayUnique, IsArray, IsBoolean, IsIn, IsInt, IsNotEmpty, IsObject, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
 
 /** int4 상한. 넘는 값은 DB 오류(500) 대신 입력 오류로 */
 export const INT4_MAX = 2147483647;
@@ -207,4 +207,42 @@ export class GetAiResearchRunQuery {
   @Min(0)
   @Max(INT4_MAX)
   afterSeq?: number;
+}
+
+/** PUT ai-research/runs/:id/schedule (이슈 #521). 매일이면 요일을 보내지 않거나 빈 배열, 매주면 1(월)~7(일) 중 하나 이상 */
+export class SetAiResearchScheduleDto {
+  @IsIn(Object.values(AI_RESEARCH_SCHEDULE_FREQUENCY), { message: '반복은 매일(DAILY)이나 매주(WEEKLY)로 골라 주세요' })
+  frequency!: AiResearchScheduleFrequency;
+
+  @IsOptional()
+  @IsArray({ message: '요일은 목록으로 보내 주세요' })
+  @ArrayMaxSize(7, { message: '요일은 7개까지예요' })
+  @ArrayUnique({ message: '같은 요일을 두 번 골랐어요' })
+  @IsInt({ each: true, message: '요일은 1(월)~7(일)로 보내 주세요' })
+  @Min(1, { each: true, message: '요일은 1(월)~7(일)로 보내 주세요' })
+  @Max(7, { each: true, message: '요일은 1(월)~7(일)로 보내 주세요' })
+  weekdays?: number[];
+
+  @IsString({ message: '실행 시각을 HH:MM으로 써 주세요' })
+  @Matches(AI_RESEARCH_SCHEDULE_TIME_PATTERN, { message: '실행 시각을 00:00~23:59의 HH:MM으로 써 주세요' })
+  time!: string;
+}
+
+/** GET ai-research/runs/:id/pdf (이슈 #521). version이 없으면 지금 보고서 */
+export class AiResearchPdfQuery {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: '판 번호는 정수로 보내 주세요' })
+  @Min(1)
+  @Max(INT4_MAX)
+  version?: number;
+}
+
+/** POST ai-research/runs/:id/notion-export (이슈 #521). version이 없으면 지금 판 */
+export class ExportAiResearchNotionDto {
+  @IsOptional()
+  @IsInt({ message: '판 번호는 정수로 보내 주세요' })
+  @Min(1)
+  @Max(INT4_MAX)
+  version?: number;
 }

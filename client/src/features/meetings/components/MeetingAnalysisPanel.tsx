@@ -18,6 +18,7 @@ import { MeetingTracePanel } from '@/features/meetings/components/MeetingTracePa
 import { useAction } from '@/hooks/useAction';
 import { useAdminOrgChart } from '@/hooks/useAdminOrganization';
 import { useItemList } from '@/hooks/useLookups';
+import { useScheduleNotionStatus } from '@/hooks/useScheduleEvents';
 import { useMe } from '@/hooks/useMe';
 import { cn } from '@/lib/cn';
 import { fmtDateTime } from '@/lib/format';
@@ -64,6 +65,8 @@ const NO_EXTRA: readonly { employeeId: number; employeeName: string }[] = [];
 export interface Names {
   employee: (id: number) => string;
   item: (id: number) => string | null;
+  /** 일정을 지금 Notion에 넣을 수 있는지 (이슈 #530). 모르면 null(넣기로 한 값만 보인다) */
+  notionReady: boolean | null;
 }
 
 /** 담당자·참석자는 회의 참석자가 아니어도 되므로 조직도의 전체 사원에서, 품목은 원료 목록에서 이름을 찾는다 */
@@ -75,12 +78,14 @@ function useNames(minutes: MeetingMinutesView): Names {
 export function useDirectoryNames(extra: readonly { employeeId: number; employeeName: string }[] = NO_EXTRA): Names {
   const chart = useAdminOrgChart();
   const rawMaterials = useItemList({ itemType: ITEM_TYPE.RAW_MATERIAL });
+  const notion = useScheduleNotionStatus();
+  const notionReady = notion.data?.ready ?? null;
   return useMemo(() => {
     const employees = new Map<number, string>(extra.map((a) => [a.employeeId, a.employeeName]));
     for (const group of groupsOfChart(chart.data ?? [])) for (const member of group.members) employees.set(member.id, member.employeeName);
     const items = new Map((rawMaterials.data ?? []).map((item) => [item.id, item.itemName]));
-    return { employee: (id) => employees.get(id) ?? `사원 ${id}`, item: (id) => items.get(id) ?? null };
-  }, [extra, chart.data, rawMaterials.data]);
+    return { employee: (id) => employees.get(id) ?? `사원 ${id}`, item: (id) => items.get(id) ?? null, notionReady };
+  }, [extra, chart.data, rawMaterials.data, notionReady]);
 }
 
 export function fields(c: CandidateFieldsSource, names: Names): React.ReactNode {
@@ -100,13 +105,14 @@ export function fields(c: CandidateFieldsSource, names: Names): React.ReactNode 
           {c.endAssumed ? <span className="ml-1 text-cap text-ink-3">(끝 시각은 가정)</span> : null}
         </Field>
         <Field label="참석자">{c.attendeeIds.length > 0 ? c.attendeeIds.map(names.employee).join(', ') : <span className="text-ink-3">미정</span>}</Field>
-        <Field label="Notion 캘린더">{notionSyncOf(c) ? '함께 넣음' : <span className="text-ink-3">넣지 않음 (ERP 일정만)</span>}</Field>
+        <Field label="Notion 캘린더">{notionCalendarText(notionSyncOf(c), names.notionReady)}</Field>
       </>
     );
   }
   const itemId = c.purchase?.itemId ?? null;
   return (
     <>
+      {c.purchaseRequesterId != null ? <Field label="요청자">{c.purchaseRequesterName ?? names.employee(c.purchaseRequesterId)} (초안을 확인해 구매요청으로 확정)</Field> : null}
       <Field label="품목">{itemId !== null ? (names.item(itemId) ?? c.itemName ?? `품목 ${itemId}`) : <span className="text-ink-3">미정{c.itemName ? ` (말한 품목: ${c.itemName})` : ''}</span>}</Field>
       <Field label="수량">{c.purchase?.requestedTon ? `${c.purchase.requestedTon} 톤` : <span className="text-ink-3">미정</span>}</Field>
       <Field label="희망 입고일">{c.purchase?.desiredReceiptDate ?? <span className="text-ink-3">미정</span>}</Field>
@@ -115,7 +121,14 @@ export function fields(c: CandidateFieldsSource, names: Names): React.ReactNode 
 }
 
 /** 칸을 글로 보일 때 필요한 후보 값. 회의록 후보와 AI 어시스턴트 실행 카드가 같이 쓴다 */
-export type CandidateFieldsSource = Pick<MeetingCandidate, 'kind' | 'assigneeId' | 'assigneeName' | 'dueDate' | 'startAt' | 'endAt' | 'endAssumed' | 'attendeeIds' | 'notionSync' | 'purchase' | 'itemName'>;
+export type CandidateFieldsSource = Pick<MeetingCandidate, 'kind' | 'assigneeId' | 'assigneeName' | 'dueDate' | 'startAt' | 'endAt' | 'endAssumed' | 'attendeeIds' | 'notionSync' | 'purchase' | 'itemName' | 'purchaseRequesterId' | 'purchaseRequesterName'>;
+
+/** 일정의 Notion 캘린더 칸 글. 넣기로 했어도 지금 Notion이 준비되지 않았으면 ERP에만 들어간다고 보인다 (이슈 #530) */
+export function notionCalendarText(sync: boolean, ready: boolean | null): React.ReactNode {
+  if (!sync) return <span className="text-ink-3">넣지 않음 (ERP 일정만)</span>;
+  if (ready === false) return <span className="text-ink-3">넣기로 함 · 지금은 Notion이 준비되지 않아 ERP에만 들어가요</span>;
+  return '함께 넣음';
+}
 
 /** 서버가 DB에서 읽어 만든 ERP 현황. 눈여겨볼 점(warn)은 경고색으로 */
 function ContextLines({ lines }: { lines: MeetingCandidateContextLine[] }) {
@@ -200,7 +213,7 @@ function CandidateCard({ candidate, minutes, names, editable, editing, pending, 
         </span>
       </div>
       {editing ? (
-        <CandidateEditor candidate={candidate} myId={myId} pending={pending} onCancel={() => onEdit(null)} onSave={(input) => onSave(candidate.key, input)} />
+        <CandidateEditor candidate={candidate} myId={myId} pending={pending} requesterPicker onCancel={() => onEdit(null)} onSave={(input) => onSave(candidate.key, input)} />
       ) : (
         <>
           {candidate.description ? <p className="text-sm text-ink-2">{candidate.description}</p> : null}

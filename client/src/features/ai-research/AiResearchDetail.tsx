@@ -3,11 +3,9 @@
 // 심층 조사 상세: 상태마다 다른 모습 (계획 중 · 계획 확인 · 진행 · 완료 · 실패/취소).
 // 계획을 세운 뒤에는 제목을 언제든 바꾸고, 끝난 조사는 [다시 조사]로 질문·계획을 복사한 새 조사를 만들어 고친 뒤 시작한다.
 // 완료한 보고서는 말로 고쳐 판(1판·2판…)으로 남기고, 판을 골라 앞 판을 다시 본다 (이슈 #418).
-import { AI_RESEARCH_LIMITS, AI_RESEARCH_STATUS_LABEL, type AiResearchRunView, type AiResearchSeed } from '@fantasteel/shared';
+import { AI_RESEARCH_LIMITS, AI_RESEARCH_LLM_RETRY_LABEL, AI_RESEARCH_STATUS_LABEL, type AiResearchRunView, type AiResearchSeed } from '@fantasteel/shared';
 import { useState } from 'react';
 import { useShellStore } from '@/stores/useShellStore';
-import { useIntegrations } from '@/hooks/useIntegrations';
-import { isNotionExportReady, notionConnection, safeExternalUrl } from '@/lib/integrations';
 import { aiResearchApi } from '@/api/aiResearch';
 import { Banner } from '@/components/Banner';
 import { Button } from '@/components/Button';
@@ -25,11 +23,13 @@ import { AiResearchReport } from '@/features/ai-research/AiResearchReport';
 import { AiResearchStatusBadge } from '@/features/ai-research/AiResearchStatusBadge';
 import { AiResearchCharts } from '@/features/ai-research/AiResearchCharts';
 import { AiResearchRevisions, AiResearchVersionPicker } from '@/features/ai-research/AiResearchRevisions';
+import { AiResearchReportExports, ResearchNotionLink } from '@/features/ai-research/AiResearchExport';
+import { AiResearchScheduleBanner, AiResearchScheduleModal } from '@/features/ai-research/AiResearchSchedule';
 import { useUrlParams } from '@/features/purchasing/hooks/useUrlParams';
 import { errorCodeOf } from '@/api/http';
 import { useAction } from '@/hooks/useAction';
 import { useAiResearchRun, useAiResearchVersion } from '@/hooks/useAiResearch';
-import { canCancelRun, canRenameRun, canRerunRun, planTitleProblem, progressText, timelineLines, versionLabel } from '@/lib/aiResearch';
+import { canCancelRun, canRenameRun, canRerunRun, planTitleProblem, progressText, reportFallbackLabel, timelineLines, versionLabel } from '@/lib/aiResearch';
 import { openableWebSources } from '@/lib/aiWebLinks';
 import { AiAnswerText } from '@/features/shell/AiWebAnswer';
 import { toast } from '@/stores/useToastStore';
@@ -76,29 +76,20 @@ function RunTimeline({ run }: { run: AiResearchRunView }) {
   );
 }
 
-/** 완료된 조사의 Notion 내보내기 (회의록과 같이: 연결·상위 페이지가 준비됐을 때만 버튼, 내보냈으면 링크) */
-function ResearchNotionExport({ run }: { run: AiResearchRunView }) {
-  const integrations = useIntegrations();
-  const exportToNotion = useAction(() => aiResearchApi.exportToNotion(run.id), { success: 'Notion으로 내보냈어요' });
-  const link = safeExternalUrl(run.notionPageUrl);
-  if (link) {
-    return (
-      <a
-        href={link}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="inline-flex h-7 items-center gap-1.5 rounded-sm border border-line-strong bg-surface px-2.5 text-xs font-medium text-ink no-underline hover:border-[#a9b3be] hover:bg-surface-2"
-      >
-        <Icon name="share" size="sm" />
-        Notion에서 보기
-      </a>
-    );
-  }
-  if (!isNotionExportReady(notionConnection(integrations.data))) return null;
+/**
+ * 대체본·점검 실패 안내 한 줄 (이슈 #521): 보고서 LLM이 다시 시도해도 쓰지 못해 조사 메모(또는 앞 판)로 남긴 까닭과 시도 횟수, 점검 없이 쓴 보고서인지.
+ * 보고서 본문·완료 표시와 따로 상세 머리 아래에만 둔다
+ */
+function ReportFallbackNote({ run }: { run: AiResearchRunView }) {
+  const fallback = reportFallbackLabel(run.reportFallback);
+  if (!fallback && !run.auditFailure) return null;
   return (
-    <Button size="sm" icon="share" onClick={() => exportToNotion.mutate(undefined)} disabled={exportToNotion.isPending} aria-busy={exportToNotion.isPending}>
-      {exportToNotion.isPending ? 'Notion으로 보내는 중…' : 'Notion으로 내보내기'}
-    </Button>
+    <p role="status" className="flex items-center gap-1.5 text-cap text-wait">
+      <Icon name="alert" size="sm" />
+      {fallback ? `${fallback} — AI가 보고서를 쓰지 못해 대신 정리했어요` : null}
+      {fallback && run.auditFailure ? ' · ' : null}
+      {run.auditFailure ? `근거 점검 없이 쓴 보고서예요(${run.auditFailure === 'TIMEOUT' || run.auditFailure === 'CONNECT' || run.auditFailure === 'NO_MODEL' ? AI_RESEARCH_LLM_RETRY_LABEL[run.auditFailure] : '점검 실패'})` : null}
+    </p>
   );
 }
 
@@ -167,7 +158,7 @@ function ReportWithVersions({ run }: { run: AiResearchRunView }) {
       {older !== null ? (
         version.data ? (
           <>
-            <AiResearchReport run={run} report={version.data.report} title={`보고서 · ${version.data.version}판`} />
+            <AiResearchReport run={run} report={version.data.report} title={`보고서 · ${version.data.version}판`} actions={<AiResearchReportExports run={run} version={older} />} />
             <AiResearchCharts run={run} charts={version.data.charts} />
           </>
         ) : version.isError ? (
@@ -177,7 +168,7 @@ function ReportWithVersions({ run }: { run: AiResearchRunView }) {
         )
       ) : (
         <>
-          <AiResearchReport run={run} title={latest ? `보고서 · ${latest}판` : '보고서'} />
+          <AiResearchReport run={run} title={latest ? `보고서 · ${latest}판` : '보고서'} actions={<AiResearchReportExports run={run} version={null} />} />
           <AiResearchCharts run={run} />
         </>
       )}
@@ -233,6 +224,7 @@ function RenameModal({ run, onClose }: { run: AiResearchRunView; onClose: () => 
 function Body({ run }: { run: AiResearchRunView }) {
   const { set } = useUrlParams();
   const [renaming, setRenaming] = useState(false);
+  const [scheduling, setScheduling] = useState(false);
   const cancel = useAction(() => aiResearchApi.cancel(run.id), { success: '조사를 취소했어요' });
   const rerun = useAction(() => aiResearchApi.rerun(run.id), {
     success: (created) => (created.status === 'PLANNING' ? '같은 질문으로 계획을 다시 세우고 있어요' : '질문·계획을 복사했어요. 고친 뒤 시작해 주세요'),
@@ -262,13 +254,16 @@ function Body({ run }: { run: AiResearchRunView }) {
               </Button>
             ) : null}
             {run.status === 'COMPLETED' && run.report ? (
-              <>
-                <Button size="sm" icon="search" onClick={() => askAboutResearch({ id: run.id, title: run.title ?? run.question })}>
-                  이 보고서로 묻기
-                </Button>
-                <ResearchNotionExport run={run} />
-              </>
+              <Button size="sm" icon="search" onClick={() => askAboutResearch({ id: run.id, title: run.title ?? run.question })}>
+                이 보고서로 묻기
+              </Button>
             ) : null}
+            {run.status === 'COMPLETED' && run.plan && !run.schedule ? (
+              <Button size="sm" icon="refresh" title="정한 시각마다 같은 질문·계획으로 다시 조사해요" onClick={() => setScheduling(true)}>
+                반복 걸기
+              </Button>
+            ) : null}
+            <ResearchNotionLink run={run} />
             {canCancelRun(run.status) ? (
               <Button size="sm" variant="danger-outline" icon="x-circle" disabled={cancel.isPending} onClick={() => cancel.mutate(undefined)}>
                 취소
@@ -277,7 +272,9 @@ function Body({ run }: { run: AiResearchRunView }) {
           </>
         }
       />
+      <ReportFallbackNote run={run} />
       {renaming ? <RenameModal run={run} onClose={() => setRenaming(false)} /> : null}
+      {scheduling ? <AiResearchScheduleModal run={run} onClose={() => setScheduling(false)} /> : null}
       <Card className="flex-none">
         <CardBody>
           <b className="text-cap font-semibold text-ink-2">질문</b>
@@ -285,6 +282,7 @@ function Body({ run }: { run: AiResearchRunView }) {
           {run.seed ? <SeedDetails seed={run.seed} /> : null}
         </CardBody>
       </Card>
+      <AiResearchScheduleBanner run={run} onEdit={() => setScheduling(true)} />
 
       {run.status === 'PLANNING' ? (
         <Banner tone="run" icon="clock">

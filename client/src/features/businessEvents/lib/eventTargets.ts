@@ -29,7 +29,7 @@ export const TARGET_TABLE_LABEL: Partial<Record<string, string>> = {
   department: '부서',
 };
 
-/** 대상 필터에 보이는 테이블: 31개 이벤트가 기록되는 업무 테이블 (REQ-LOG-002) */
+/** 대상 필터에 보이는 테이블: 작업 로그 이벤트가 기록되는 업무 테이블 (REQ-LOG-002). 강종(불합격률 상승 감지)·과거 사례는 #509에서 더했다 */
 export const TARGET_FILTER_TABLES = [
   'sales_order',
   'sales_order_item',
@@ -46,6 +46,8 @@ export const TARGET_FILTER_TABLES = [
   'shipment_request_item',
   'mill_sheet',
   'action_draft',
+  'steel_grade',
+  'past_case',
 ] as const;
 
 export type TargetFilterTable = (typeof TARGET_FILTER_TABLES)[number];
@@ -70,6 +72,8 @@ export interface TargetRef {
   purchaseOrderId?: number | null;
   /** 출하요청 품목 대상(배정 추천)일 때 그 출하요청 id */
   shipmentRequestId?: number | null;
+  /** 초안 대상이 Agent 대응 후보인지 (후보는 메시지 초안 상세가 아니라 Agent 화면에서 본다) */
+  isAgentCandidate?: boolean;
 }
 
 /** 대상 번호를 눌렀을 때 갈 화면 (없으면 null). 화면 주소의 쿼리 이름은 각 화면의 약속을 따른다. */
@@ -104,7 +108,7 @@ export function targetHref(target: TargetRef): string | null {
     case 'mill_sheet':
       return `/mill-sheets?id=${targetId}`;
     case 'action_draft':
-      return `/action-drafts/${targetId}`;
+      return target.isAgentCandidate ? '/agent' : `/action-drafts/${targetId}`;
     default:
       return null;
   }

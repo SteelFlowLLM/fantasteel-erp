@@ -1,4 +1,4 @@
-import { AI_RESEARCH_LIMITS, AI_RESEARCH_STATUS, type AiResearchAudit, type AiResearchBudget, type AiResearchPlan, type AiResearchSeed, type AiResearchState, type AiResearchStatus } from '@fantasteel/shared';
+import { AI_RESEARCH_LIMITS, AI_RESEARCH_STATUS, type AiResearchAudit, type AiResearchBudget, type AiResearchPlan, type AiResearchReportFallback, type AiResearchReportFallbackReason, type AiResearchSeed, type AiResearchState, type AiResearchStatus } from '@fantasteel/shared';
 import { parseJsonContent } from '../llm/llm.client';
 import { cutText, internalReferenceIn, partnerNamesIn, redactQuery, stripInvisible, urlKey } from '../ai-assistant/web/web-text';
 import { RESEARCH_CAPS, researchLimits, type ResearchLimits } from './ai-research.config';
@@ -87,6 +87,21 @@ export interface StoredAudit extends AiResearchAudit {
   reportTruncated: boolean;
   /** 조사를 다 마치지 못하고 모은 것으로 보고서를 쓴 이유 (시간 상한·LLM 실패). 다 마쳤으면 null */
   incompleteReason?: string | null;
+  /** 보고서가 대체본이면 그 까닭·시도 횟수 (이슈 #521). 보고서 LLM이 썼으면 null */
+  reportFallback?: AiResearchReportFallback | null;
+  /** 점검 LLM이 다시 시도해도 실패해 점검 없이 보고서로 넘어간 까닭 (이슈 #521) */
+  auditFailure?: AiResearchReportFallbackReason | null;
+}
+
+const FALLBACK_REASONS: readonly AiResearchReportFallbackReason[] = ['TIMEOUT', 'NO_MODEL', 'CONNECT', 'ERROR', 'EMPTY'];
+
+const fallbackReasonOf = (value: unknown): AiResearchReportFallbackReason | null => (FALLBACK_REASONS.includes(value as AiResearchReportFallbackReason) ? (value as AiResearchReportFallbackReason) : null);
+
+/** 저장된 대체본 표시 (모양이 틀리면 null) */
+export function storedReportFallback(value: unknown): AiResearchReportFallback | null {
+  const reason = isRecord(value) ? fallbackReasonOf(value.reason) : null;
+  if (!isRecord(value) || !reason) return null;
+  return { reason, previous: value.previous === true, attempts: typeof value.attempts === 'number' && Number.isInteger(value.attempts) && value.attempts > 0 ? value.attempts : 1 };
 }
 
 const SUMMARY_MAX = 1500;
@@ -406,6 +421,8 @@ export function storedAudit(value: unknown): StoredAudit | null {
     ok: value.ok !== false,
     reportTruncated: value.reportTruncated === true,
     incompleteReason: typeof value.incompleteReason === 'string' ? value.incompleteReason : null,
+    reportFallback: storedReportFallback(value.reportFallback),
+    auditFailure: fallbackReasonOf(value.auditFailure),
   };
 }
 
@@ -604,3 +621,24 @@ function stringList(value: unknown, max = LIST_MAX): string[] {
 }
 
 const oneLine = (text: string): string => stripInvisible(text).replace(/\s+/g, ' ').trim();
+
+/**
+ * 🟡 검색어에서 관련성을 볼 때 빼는 낱말: 계획이 붙이는 자료 종류·시점 낱말이라 어느 결과에나 있을 수 있다 (이슈 #530)
+ */
+const GENERIC_QUERY_WORDS = new Set(['통계', '공식', '발표', '보고서', '규격', '논문', '최근', '최신', '현황', '전망', '비교', '차이', '자료', '한계', '비판', '반론', '위험', '사례', 'vs', 'and', 'or', 'of', 'the']);
+
+const relevanceText = (text: string) => text.normalize('NFKC').toLowerCase();
+
+/**
+ * 검색 결과가 검색어와 상관있는지: 검색어의 낱말(자료 종류·시점 낱말·한 글자·연도는 빼고) 중 하나라도 제목·요약에 있으면 상관있다.
+ * 볼 낱말이 없으면 판단하지 않고 남긴다. 예: "SS275 SM355A 차이"에 '판타지 토탈 워 SS - 나무위키'는 상관없다 (이슈 #530)
+ */
+export function relevantToQuery(query: string, title: string, snippet: string): boolean {
+  const words = relevanceText(query)
+    .split(/[\s,.;:!?()[\]{}"'·/|~\-]+/)
+    .filter((w) => w.length >= 2 && !GENERIC_QUERY_WORDS.has(w) && !/^(19|20)\d{2}(년)?$/.test(w));
+  if (words.length === 0) return true;
+  const haystack = relevanceText(`${title} ${snippet}`);
+  const squeezed = haystack.replace(/\s+/g, '');
+  return words.some((w) => haystack.includes(w) || squeezed.includes(w));
+}

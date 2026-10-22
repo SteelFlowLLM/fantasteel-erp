@@ -28,14 +28,16 @@ function evidenceLotIdOf(lot: RejectedLot): number | null {
   return lot.qualityInspection?.inspectionResult === INSPECTION_RESULT.FAIL ? lot.id : toInspectedLotSummary(lot).heatLotId;
 }
 
-function toRejectedLotListItem(lot: RejectedLot, evidenceByLotId: ReadonlyMap<number, RejectedLotEvidence>): RejectedLotListItem {
+function toRejectedLotListItem(lot: RejectedLot, evidenceByLotId: ReadonlyMap<number, RejectedLotEvidence>, dispositionTimes: ReadonlyMap<number, Date>): RejectedLotListItem {
   const evidenceLotId = evidenceLotIdOf(lot);
+  const dispositionAt = lot.dispositionStatus === null ? undefined : dispositionTimes.get(lot.id);
   return {
     ...toInspectedLotSummary(lot),
     qualityInspectionId: lot.qualityInspection?.id ?? null,
     inspectionResult: (lot.qualityInspection?.inspectionResult as InspectionResult | undefined) ?? null,
     dispositionStatus: (lot.dispositionStatus as DispositionStatus | null) ?? null,
     dispositionReason: lot.dispositionReason,
+    dispositionAt: dispositionAt?.toISOString() ?? null,
     updatedAt: lot.updatedAt.toISOString(),
     evidence: (evidenceLotId === null ? undefined : evidenceByLotId.get(evidenceLotId)) ?? null,
   };
@@ -66,7 +68,7 @@ export class RejectedLotService {
     return { items: await this.toListItems(this.prisma, lots), page, size, total };
   }
 
-  /** 목록 행 + 근거 검사(불합격 항목·검사 시각). 화면이 LOT마다 검사 상세를 따로 부르지 않게 한 번에 읽는다 */
+  /** 목록 행 + 근거 검사(불합격 항목·검사 시각) + 처리 상태 지정 시각. 화면이 LOT마다 검사 상세·작업 로그를 따로 부르지 않게 한 번에 읽는다 */
   private async toListItems(tx: Tx, lots: RejectedLot[]): Promise<RejectedLotListItem[]> {
     const evidenceLotIds = [...new Set(lots.flatMap((lot) => evidenceLotIdOf(lot) ?? []))];
     const inspections = await this.repository.findInspectionsByLotIds(tx, evidenceLotIds);
@@ -77,7 +79,8 @@ export class RejectedLotService {
         return [detail.lotId, { qualityInspectionId: detail.qualityInspectionId, lotId: detail.lotId, inspectedAt: detail.inspectedAt, failedItems }];
       }),
     );
-    return lots.map((lot) => toRejectedLotListItem(lot, evidenceByLotId));
+    const dispositionTimes = await this.repository.findDispositionTimes(tx, lots.map((lot) => lot.id));
+    return lots.map((lot) => toRejectedLotListItem(lot, evidenceByLotId, dispositionTimes));
   }
 
   /**

@@ -95,3 +95,38 @@ export function scanSummary(view: AgentScanView): string {
   const failed = view.results.filter((r) => r.error !== null).map((r) => RISK_NAME[r.riskType]);
   return [done.join(' · ') || '돌린 규칙이 없어요', failed.length ? `실패: ${failed.join('·')}` : null].filter(Boolean).join(' · ');
 }
+
+/** 알림만 보내는 위험 유형을 화면에 알리는 한 줄 (후보 목록에 없는 이유) */
+export const ALERT_ONLY_NOTE = `${ALERT_RISKS.map((type) => RISK_NAME[type]).join('·')}은 대응 후보 없이 알림만 보내요`;
+
+/**
+ * 지금 감지를 돌린 결과 한 줄(목록 위에 남는다, 이슈 #532): 새로 만든 후보·보낸 알림 수.
+ * 0건이면 이유를 함께 보인다: 같은 대상의 처리 전 후보가 이미 있으면 새로 만들지 않는다.
+ */
+export function scanOutcomeText(view: AgentScanView): string {
+  const ok = view.results.filter((r) => r.error === null);
+  const candidates = ok.filter((r) => !ALERT_RISKS.includes(r.riskType)).reduce((sum, r) => sum + r.created, 0);
+  const alerts = ok.filter((r) => ALERT_RISKS.includes(r.riskType)).reduce((sum, r) => sum + r.created, 0);
+  const failed = view.results.filter((r) => r.error !== null).length;
+  const parts = [`새 후보 ${candidates}건`, `알림 ${alerts}건`];
+  if (failed > 0) parts.push(`실패한 규칙 ${failed}개`);
+  const none = candidates === 0 && alerts === 0 && failed === 0 ? ' · 같은 대상의 처리 전 후보가 이미 있거나 지금은 위험이 없어요' : '';
+  return `${parts.join(' · ')}${none}`;
+}
+
+/** 이 일수 이상 확인하지 않은 후보는 오래됐다고 알린다 (가정값, 이슈 #532) */
+export const STALE_CANDIDATE_DAYS = 3;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** 확정·반려를 기다린 지 며칠째인지 (만든 시각 기준, 내림) */
+export function candidateWaitingDays(createdAt: string, now: Date): number {
+  const created = new Date(createdAt).getTime();
+  return Number.isNaN(created) ? 0 : Math.max(0, Math.floor((now.getTime() - created) / DAY_MS));
+}
+
+/** 오래 확인하지 않은 후보 표시 글. 확정 전이고 STALE_CANDIDATE_DAYS 이상 기다렸을 때만 */
+export function staleCandidateLabel(c: Pick<AgentCandidateView, 'draftStatus' | 'createdAt'>, now: Date): string | null {
+  if (!isConfirmable(c)) return null;
+  const days = candidateWaitingDays(c.createdAt, now);
+  return days >= STALE_CANDIDATE_DAYS ? `${days}일째 확인 대기` : null;
+}
