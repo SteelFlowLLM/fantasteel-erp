@@ -23,23 +23,25 @@ erp.example.com {
 	encode @static zstd gzip
 
 	# 파일을 올리는 경로. 이 경로만 큰 본문을 받는다(서버가 파일마다 상한을 따로 검사한다)
-	#   회의 녹음 500MB, 음성 서버 시험 오디오 100MB, 메신저 첨부 10개 × 10MB
+	#   회의 녹음 500MiB, 음성 서버 시험 오디오 100MiB, 메신저 첨부 10개 × 10MiB
+	# 크기 단위: Caddy는 MB를 10^6바이트, MiB를 2^20바이트로 읽는다. 서버 상한(MEETING_AUDIO_MAX_BYTES 등)과 Next·서버 JSON 상한은 2^20 기준이라 MiB로 적는다
+	#   (500MiB 녹음이 MB 기준 510MB = 486MiB 상한에 걸려 Caddy가 먼저 413으로 끊지 않게)
 	@bigUpload path /api/v1/meeting-minutes/audio /api/v1/stt/transcribe-test /api/v1/chat-rooms/*/attachments
 
-	# ERP 서버 API. 화면 서버(Next)를 거치지 않고 바로 보낸다 (회의 녹음 500MB 올리기·몇 분 걸리는 AI 답)
+	# ERP 서버 API. 화면 서버(Next)를 거치지 않고 바로 보낸다 (회의 녹음 500MiB 올리기·몇 분 걸리는 AI 답)
 	handle /api/v1/* {
-		# 큰 업로드: 가장 큰 녹음 500MB에 멀티파트 머리 여유(10MB)를 더했다
+		# 큰 업로드: 가장 큰 녹음 500MiB에 멀티파트 머리 여유(10MiB)를 더했다
 		handle @bigUpload {
 			request_body {
-				max_size 510MB
+				max_size 510MiB
 			}
 			import api_proxy
 		}
 
-		# 나머지 요청(로그인 등)은 JSON 본문 상한(서버 12MB: 철강맨AI 질문에 실린 사진)에 여유를 더한 크기까지만 받는다
+		# 나머지 요청(로그인 등)은 JSON 본문 상한(서버 12MiB: 철강맨AI 질문에 실린 사진)에 여유를 더한 크기까지만 받는다
 		handle {
 			request_body {
-				max_size 13MB
+				max_size 13MiB
 			}
 			import api_proxy
 		}
@@ -48,7 +50,7 @@ erp.example.com {
 	# 메신저·알림 실시간 연결 (웹소켓). 글 한 건이 작다 (socket.io 기본 상한 1MB)
 	handle /socket.io/* {
 		request_body {
-			max_size 2MB
+			max_size 2MiB
 		}
 		reverse_proxy 127.0.0.1:8787
 	}
@@ -56,7 +58,7 @@ erp.example.com {
 	# 화면 (Next). 파일 올리기는 위의 /api/v1 경로로 가서 여기에는 큰 본문이 오지 않는다
 	handle {
 		request_body {
-			max_size 2MB
+			max_size 2MiB
 		}
 		reverse_proxy 127.0.0.1:5173
 	}
