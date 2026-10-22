@@ -1,5 +1,6 @@
 import { QueryClient } from '@tanstack/react-query';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { AI_DRIVE_KEY } from '@/lib/aiDrive';
 import { watchSessionChange } from '@/lib/sessionReset';
 import { useMessageComposeStore } from '@/stores/useMessageComposeStore';
 import { useOutboxStore } from '@/stores/useOutboxStore';
@@ -33,6 +34,17 @@ afterEach(() => {
 });
 
 describe('로그아웃·다른 사원 로그인 때 화면 데이터 비우기 (이슈 #476)', () => {
+  it('로그아웃하면 철강맨AI 칩 설정(Drive 켬 등)도 지워 다음 사원이 켜진 채 시작하지 않는다 (이슈 #532)', () => {
+    const data = new Map<string, string>([[AI_DRIVE_KEY, 'true'], ['fantasteel.font-size', 'large']]);
+    vi.stubGlobal('window', { localStorage: { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => void data.set(k, v), removeItem: (k: string) => void data.delete(k) } });
+    try {
+      useSessionStore.getState().signOut();
+      expect([...data.keys()]).toEqual(['fantasteel.font-size']);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('로그아웃하면 조회 캐시와 보내기 실패 메시지, 고른 메시지를 모두 비운다', () => {
     seedPreviousUserData();
     useSessionStore.getState().signOut();
