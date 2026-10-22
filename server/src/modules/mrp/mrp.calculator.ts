@@ -5,7 +5,8 @@ import { Prisma } from '../../generated/prisma/client';
 //   철광석·석탄·석회석(t) = 필요 용선 × 용선 1t당 원단위(t/t)
 //   합금철(t) = 히트 톤 × 강종별 원단위(kg/t) ÷ 1,000
 //   순소요(t) = max(0, 소요량 − 원료 LOT 잔량 − 입고예정)
-// 중간값은 반올림하지 않고 소요량에서 한 번만 소수 3자리로 반올림한다(mrp.md 4장 권장).
+// 실적(제선·제강)과 같은 순서로 반올림한다(#531): 히트 1개 몫 용선을 소수 3자리로 반올림하고, 원료별 히트 1개 몫을 3자리로 반올림한 뒤
+// 히트 수만큼 곱한다. 반올림하지 않고 한 번에 곱하면 MRP 순소요가 실제 투입보다 0.001t 적어 그대로 사면 실적이 막힌다.
 
 type DecimalLike = Prisma.Decimal | string;
 
@@ -21,14 +22,24 @@ export interface MaterialRate {
   consumptionRate: DecimalLike;
 }
 
-/** 계획 1건의 필요 용선과 원료별 소요량. 원단위가 없는 원료는 소요 0 */
-export function planRequirements(heatTon: DecimalLike, steelmakingYieldRate: DecimalLike, rates: readonly MaterialRate[]): { requiredHotMetalTon: Prisma.Decimal; materials: { itemId: number; requiredTon: Prisma.Decimal }[] } {
-  const hotMetal = D(heatTon).div(D(steelmakingYieldRate));
+/**
+ * 계획 1건(남은 히트 heatCount개)의 필요 용선과 원료별 소요량. 원단위가 없는 원료는 소요 0.
+ * 제선·제강 실적과 같은 값: 히트 1개 용선 = round3(히트 용량 ÷ 제강 수율), 히트 1개 용강 = round3(용선 × 제강 수율),
+ * 원료 = round3(용선 × 원단위), 합금철 = round3(용강 × 원단위 ÷ 1,000), 그리고 × 히트 수
+ */
+export function planRequirements(
+  heatCapacityTon: DecimalLike,
+  heatCount: number,
+  steelmakingYieldRate: DecimalLike,
+  rates: readonly MaterialRate[],
+): { requiredHotMetalTon: Prisma.Decimal; materials: { itemId: number; requiredTon: Prisma.Decimal }[] } {
+  const hotMetalPerHeat = round3(D(heatCapacityTon).div(D(steelmakingYieldRate)));
+  const heatTonPerHeat = round3(hotMetalPerHeat.mul(D(steelmakingYieldRate)));
   return {
-    requiredHotMetalTon: round3(hotMetal),
+    requiredHotMetalTon: hotMetalPerHeat.mul(heatCount),
     materials: rates.map((r) => ({
       itemId: r.itemId,
-      requiredTon: round3(r.isFerroalloy ? D(heatTon).mul(D(r.consumptionRate)).div(1000) : hotMetal.mul(D(r.consumptionRate))),
+      requiredTon: round3(r.isFerroalloy ? heatTonPerHeat.mul(D(r.consumptionRate)).div(1000) : hotMetalPerHeat.mul(D(r.consumptionRate))).mul(heatCount),
     })),
   };
 }

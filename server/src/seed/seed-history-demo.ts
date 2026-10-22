@@ -434,6 +434,23 @@ async function runTimeline(c: Ctx) {
   at('2026-10-20 18:00');
   await h.simulate('prodHead', so8.planId, 20261020, 'SO-8 슬래브 2히트');
 
+  // 시연용 원료 재고 (#531, 가정값): 시드가 3주 동안 원료를 거의 다 써서, 시연에서 새 수주의 실적 시뮬레이션이 원료 부족(INV-001)으로
+  // 막히지 않게 히트 약 6개분(철광석 3,000t·석탄 1,200t·석회석 300t·합금철 30t)을 정기 입고로 넣어 둔다
+  at('2026-10-21 07:40');
+  const stockPRs = await h.requisitions(
+    'purchase',
+    [
+      { code: 'ORE01', ton: '3000.000', desired: '2026-10-21' },
+      { code: 'COL01', ton: '1200.000', desired: '2026-10-21' },
+      { code: 'LIM01', ton: '300.000', desired: '2026-10-21' },
+      { code: 'SMN01', ton: '30.000', desired: '2026-10-21' },
+    ],
+    '11월 생산분 원료 정기 입고',
+  );
+  for (const pr of stockPRs) await c.purchasing.approve(c.user('purchaseHead'), pr.id);
+  const stockPOs = await h.orderEach('purchase', stockPRs, '2026-10-21');
+  for (const pr of stockPRs) await h.receive('purchase', stockPOs[pr.code], pr.requestedTon, '2026-10-21');
+
   at('2026-10-21 08:30');
   await h.receive('purchase', smnPO.SMN01, '6.000', '2026-10-21');
   at('2026-10-21 08:50');

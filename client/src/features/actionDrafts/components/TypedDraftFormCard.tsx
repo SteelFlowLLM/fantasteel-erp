@@ -42,6 +42,7 @@ import { useCanUse } from '@/hooks/usePermission';
 import { useSalesOrderDetail, useSalesOrderList } from '@/hooks/useSalesOrders';
 import { useShipmentRequestDetail, useShipmentRequestList, useShippableItems } from '@/hooks/useShipmentRequests';
 import { cn } from '@/lib/cn';
+import { createSubmitLock } from '@/lib/submitLock';
 import { fmtMDHM } from '@/lib/format';
 import { withEulReul } from '@/lib/josa';
 import { toast } from '@/stores/useToastStore';
@@ -115,9 +116,19 @@ export function TypedDraftFormCard({ draft, actionType, failure, onConfirmFailur
     },
   });
   const pending = update.isPending || confirm.isPending || execute.isPending || reject.isPending;
+  // 확정·다시 실행·반려를 렌더를 기다리지 않고 잠근다: 더블클릭한 두 번째 요청을 보내지 않는다 (#531)
+  const [lock] = useState(createSubmitLock);
+  const once = (run: () => Promise<unknown>) => () => {
+    if (!lock.tryEnter()) return;
+    void run()
+      .catch(() => {
+        // 안내는 useAction(토스트)과 onError가 한다
+      })
+      .finally(() => lock.release());
+  };
 
   const save = () => update.mutate({ actionDraftId: draft.id, fields: buildTypedPatch(form), expectedUpdatedAt: draft.updatedAt });
-  const doConfirm = async () => {
+  const doConfirm = once(async () => {
     onConfirmFailure(null);
     try {
       let expectedUpdatedAt = draft.updatedAt;
@@ -126,7 +137,7 @@ export function TypedDraftFormCard({ draft, actionType, failure, onConfirmFailur
     } catch {
       // 안내는 useAction(토스트)과 onError(위 배너)가 한다
     }
-  };
+  });
 
   const ctx: FieldContext = {
     draft,
@@ -172,7 +183,7 @@ export function TypedDraftFormCard({ draft, actionType, failure, onConfirmFailur
             <Button
               variant="danger-outline"
               disabled={rejectReason.trim() === '' || pending}
-              onClick={() => reject.mutate({ actionDraftId: draft.id, rejectReason: rejectReason.trim(), expectedUpdatedAt: draft.updatedAt })}
+              onClick={once(() => reject.mutateAsync({ actionDraftId: draft.id, rejectReason: rejectReason.trim(), expectedUpdatedAt: draft.updatedAt }))}
             >
               반려 확정
             </Button>
@@ -186,7 +197,7 @@ export function TypedDraftFormCard({ draft, actionType, failure, onConfirmFailur
             <Button icon="check" className="ml-auto" disabled={!dirty || pending} onClick={save}>
               저장
             </Button>
-            <Button variant="primary" icon="send" disabled={pending} onClick={() => void doConfirm()}>
+            <Button variant="primary" icon="send" disabled={pending} onClick={doConfirm}>
               {guide?.confirmLabel ?? '확정'}
             </Button>
           </>
@@ -197,7 +208,7 @@ export function TypedDraftFormCard({ draft, actionType, failure, onConfirmFailur
               반려
             </Button>
             <span className="text-cap text-ink-3">확정된 값은 바꿀 수 없어요</span>
-            <Button variant="primary" icon="refresh" className="ml-auto" disabled={pending} onClick={() => execute.mutate({ actionDraftId: draft.id })}>
+            <Button variant="primary" icon="refresh" className="ml-auto" disabled={pending} onClick={once(() => execute.mutateAsync({ actionDraftId: draft.id }))}>
               {typeLabel} 다시 실행
             </Button>
           </>

@@ -175,6 +175,19 @@ describe('수주 등록 초안 (SALES_ORDER_CREATE)', () => {
     expect(planEvents.every((e) => e.isAiAssisted)).toBe(true);
   });
 
+  it('확정을 동시에 두 번 보내도(더블클릭) 확정 작업 로그와 수주는 한 건씩이다 (#531)', async () => {
+    useLlm({ customerName: '나래조선', items: [{ itemCode: SLAB_SS275, orderedQty: 3, dueDate: '2026-11-20' }] });
+    const { id } = await createDraft(sales, '나래조선 SS275 슬래브 3매 11월 20일 납기', 'SALES_ORDER_CREATE');
+    const { updatedAt } = await service.get(sales, id);
+    const settled = await Promise.allSettled([service.confirm(sales, id, { expectedUpdatedAt: updatedAt }), service.confirm(sales, id, { expectedUpdatedAt: updatedAt })]);
+    expect(settled.filter((s) => s.status === 'fulfilled')).toHaveLength(1);
+    const rejected = settled.find((s) => s.status === 'rejected');
+    expect(rejected?.status === 'rejected' && rejected.reason).toBeInstanceOf(AppException);
+    const events = await eventsOf(id);
+    expect(events.filter((e) => e.businessEventType === BUSINESS_EVENT_TYPE.DRAFT_CONFIRMED)).toHaveLength(1);
+    expect(events.filter((e) => e.businessEventType === BUSINESS_EVENT_TYPE.SALES_ORDER_CREATED)).toHaveLength(1);
+  });
+
   it('권한이 없으면 만들 수 없고, 다른 사원이 만든 미처리 초안이 있으면 그 초안과 만든 사람을 돌려준다. 고치고 확정하는 것은 만든 사원만', async () => {
     expect(await codeOf(createDraft(purchaser, '나래조선 수주 넣어줘', 'SALES_ORDER_CREATE'))).toBe('COM-002');
     const message = await send(purchaser, '나래조선 SM355A 슬래브 수주');
