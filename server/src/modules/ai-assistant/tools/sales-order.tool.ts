@@ -17,7 +17,7 @@ export function salesOrderTool(salesOrders: SalesOrderService, today: () => stri
     definition: {
       name: 'get_sales_orders',
       description:
-        '수주 목록과 진행 상황(수주 충족 현황)을 조회한다. 수주번호나 수주 id를 주면 그 수주의 품목별 출하·예약·생산중·미확보 매수를 준다. 납기 위험 수주를 물으면 dueRiskOnly=true.',
+        '수주 목록과 진행 상황(수주 충족 현황)을 조회한다. 수주번호나 수주 id를 주면 그 수주의 품목별 출하·예약·생산중·미확보 매수를 준다. 미확보 = 미출하 − 예약(재고로 아직 확보하지 못한 매수)이고, 생산중·시작 전 계획 매수가 그 미확보를 채우는 중일 수 있다. 계획을 더 세워야 하는 매수는 "추가 계획 필요 매수"다. 납기 위험 수주를 물으면 dueRiskOnly=true.',
       parameters: {
         type: 'object',
         properties: {
@@ -112,6 +112,7 @@ function detailOutput(f: SalesOrderFulfillment, s: Pick<SalesOrderSummary, 'cust
         '생산중 매수': i.inProductionQty,
         '시작 전 계획 매수': i.plannedQty,
         '미확보 매수': i.unsecuredQty,
+        '추가 계획 필요 매수': i.additionalPlanQty,
         '재생산 필요 매수': i.reproductionNeedQty,
         진행률: percentText(i.progress.ratio),
       })),

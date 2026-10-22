@@ -24,6 +24,7 @@ import {
   type TranscriptSegment,
 } from '@fantasteel/shared';
 import { hasPermission } from '../../common/auth/auth.guard';
+import { AuthUserService } from '../../common/auth/auth-user.service';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { AppException } from '../../common/errors/app.exception';
 import { NOTION_EXPORT_STALE_MS } from '../integration/mcp/mcp.client';
@@ -177,6 +178,7 @@ export class MeetingMinutesService {
     private readonly drive: GoogleDriveService,
     private readonly notionWorkspace: NotionWorkspaceService,
     private readonly speakerSuggester: MeetingSpeakerSuggester,
+    private readonly authUsers: AuthUserService,
   ) {}
 
   /** API-258. 텍스트 입력은 STT를 건너뛰므로 TRANSCRIBED로 시작한다 */
@@ -406,17 +408,55 @@ export class MeetingMinutesService {
 
     // 담당자·날짜·품목을 고치면 ERP 현황과 그에 따른 경고도 달라지므로 고칠 때마다 다시 계산한다
     const edited = await this.contexts.apply(this.prisma, applyCandidateEdit(analysis.candidates[index], dto, dateOnly(row.meetingDate)));
+    if (dto.purchaseRequesterId !== undefined) {
+      if (edited.kind !== 'PURCHASE') throw new AppException('COM-004', '요청자는 구매요청 후보에만 정할 수 있어요');
+      if (dto.purchaseRequesterId === null) {
+        edited.purchaseRequesterId = null;
+        edited.purchaseRequesterName = null;
+      } else {
+        const requester = await this.purchaseRequester(dto.purchaseRequesterId);
+        edited.purchaseRequesterId = requester.employeeId;
+        edited.purchaseRequesterName = requester.employeeName;
+      }
+    }
     if (dto.decision !== undefined) {
       if (dto.decision === 'APPROVED') {
         const missing = missingFieldsOf(edited);
         if (missing.length > 0) throw new AppException('VOC-006', `${missing.join(', ')}을(를) 채워야 허가할 수 있어요`);
-        if (edited.kind === 'PURCHASE') await this.messageActions.assertCanRequestFromMeeting(this.prisma, user);
+        if (edited.kind === 'PURCHASE') await this.assertPurchaseRequester(user, edited);
       }
       edited.decision = dto.decision;
     }
     const candidates = analysis.candidates.map((c, i) => (i === index ? edited : c));
     await this.saveReviewEdit(id, row.updatedAt, { ...analysis, candidates });
     return this.get(id);
+  }
+
+  /**
+   * 구매요청 후보의 요청자 (이슈 #530). 확정 주체가 요청자라(Message → ERP 초안 규칙) 구매요청 등록 권한이 있어야 하고 승인권자(부서장)가 있어야 한다.
+   * 사용 중인 사원이 아니면 VOC-002, 권한·부서장 문제는 그 오류 그대로
+   */
+  private async purchaseRequester(employeeId: number): Promise<AuthUser> {
+    const requester = await this.authUsers.load(employeeId);
+    if (!requester) throw new AppException('VOC-002', '요청자로 고른 사원을 찾을 수 없거나 퇴사했어요');
+    await this.messageActions.assertCanRequestFromMeeting(this.prisma, requester);
+    return requester;
+  }
+
+  /** 구매요청 후보를 허가할 수 있는지: 정한 요청자, 없으면 작성자가 구매요청 초안의 요청자가 될 수 있어야 한다 */
+  private async assertPurchaseRequester(user: AuthUser, candidate: MeetingCandidate): Promise<void> {
+    if (candidate.purchaseRequesterId != null) {
+      await this.purchaseRequester(candidate.purchaseRequesterId);
+      return;
+    }
+    try {
+      await this.messageActions.assertCanRequestFromMeeting(this.prisma, user);
+    } catch (error) {
+      if (error instanceof AppException && error.code === 'COM-002') {
+        throw new AppException('COM-002', '작성자에게 구매요청 등록 권한이 없어요. 요청자를 구매요청 권한이 있는 사원(예: 구매 담당 참석자)으로 고른 뒤 허가해 주세요. 그 사원이 초안을 확인해 구매요청으로 확정해요');
+      }
+      throw error;
+    }
   }
 
   /** 검토 중에 AI 요약을 작성자가 고친다. 요약 칸과 분석 결과 안의 요약을 같이 바꾼다 */
@@ -442,6 +482,11 @@ export class MeetingMinutesService {
     }
     const segments = readSegments(row.transcriptSegments);
     const attendeeIds = row.attendees.map((a) => a.employeeId);
+    // 구매요청 초안의 요청자(확정 주체): 허가한 뒤 퇴사·권한이 바뀌었을 수 있어 확정할 때 다시 본다 (이슈 #530)
+    const requesters = new Map<string, AuthUser>();
+    for (const c of approved.filter((a) => a.kind === 'PURCHASE')) {
+      if (c.purchaseRequesterId != null) requesters.set(c.key, await this.purchaseRequester(c.purchaseRequesterId));
+    }
 
     const created = await this.prisma.$transaction(async (tx) => {
       const { count } = await this.repository.confirm(tx, id, new Date());
@@ -502,18 +547,28 @@ export class MeetingMinutesService {
             },
           );
         } else if (c.kind === 'PURCHASE' && c.purchase !== null) {
+          const requester = requesters.get(c.key) ?? user;
           const draftId = await this.messageActions.createFromMeeting(
             tx,
-            user,
+            requester,
             id,
             {
               ...c.purchase,
               requestReason: c.purchase.requestReason ?? c.title,
             },
             c.salesOrderId,
+            user,
           );
           actionDraftIds.push(draftId);
           registered.set(c.key, { type: 'action_draft', id: draftId });
+          // 작성자가 넘긴 요청자에게 확인할 초안이 생겼다고 알린다 (작성자 본인이면 보내지 않는다)
+          if (requester.employeeId !== user.employeeId) {
+            await this.notifications.notifyEmployees(tx, [requester.employeeId], {
+              notificationType: NOTIFICATION_TYPE.TASK_ASSIGNED,
+              notificationContent: `구매요청 초안 확인 · ${c.title}`,
+              linkPath: '/action-drafts',
+            });
+          }
         }
       }
 

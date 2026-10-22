@@ -6,7 +6,13 @@ import { dropReasonOf, isObject, LIST_MAX, silentChangesOf, squash, text, titleO
 export const REVIEW_ISSUE = {
   found: 'AI 2차 검토에서 찾은 후보예요',
   concernPrefix: '2차 검토: ',
+  excluded: '2차 검토가 빼자고 해 기본으로 제외해 뒀어요. 필요하면 되살려 주세요',
 } as const;
+
+/**
+ * 모델이 exclude를 빠뜨렸을 때 이유 글로 '빼야 한다'는 지적을 알아본다 (이슈 #530). 담당자·날짜가 틀렸다는 지적은 고치면 되므로 걸리지 않게 좁게 둔다
+ */
+const EXCLUDE_REASON = /(빼야|제외해야|제외하는 ?게|후보가 아니|할 일이 아니|업무가 아니|사적|개인적인 ?약속|잡담|중복)/;
 
 const CONCERN_MAX = 120;
 // 작은 모델이 "(오류 아님)"이라고 적은 채 지적 칸에 넣는 경우가 있어, 스스로 문제가 아니라고 한 지적은 버린다
@@ -59,6 +65,7 @@ export function mergeReview(first: MeetingCandidate[], raw: unknown, ctx: Analys
 
   const changes: MeetingTraceChange[] = [];
   const concerns = new Map<string, string[]>();
+  const excludes = new Set<string>();
   let concernCount = 0;
   for (const c of (Array.isArray(raw.concerns) ? raw.concerns : []).slice(0, LIST_MAX)) {
     if (!isObject(c)) continue;
@@ -75,10 +82,16 @@ export function mergeReview(first: MeetingCandidate[], raw: unknown, ctx: Analys
       continue;
     }
     concerns.set(key, [...(concerns.get(key) ?? []), `${REVIEW_ISSUE.concernPrefix}${reason}`]);
+    if (c.exclude === true || (c.exclude === undefined && EXCLUDE_REASON.test(reason))) excludes.add(key);
     concernCount += 1;
   }
 
-  const merged = first.map((c) => ({ ...c, issues: [...c.issues, ...(concerns.get(c.key) ?? [])] }));
+  // 빼자는 지적은 기본 제외로 둔다(이슈 #530). 사람이 이미 정한 후보(허가·제외)는 건드리지 않고, 작성자가 언제든 되살릴 수 있다
+  const merged = first.map((c) => {
+    const issues = [...c.issues, ...(concerns.get(c.key) ?? [])];
+    if (!excludes.has(c.key) || c.decision !== 'PENDING') return { ...c, issues };
+    return { ...c, decision: 'EXCLUDED' as const, issues: [...issues, REVIEW_ISSUE.excluded] };
+  });
   const room = Math.max(0, limit - merged.length);
   let missedCount = 0;
   for (const item of (Array.isArray(raw.missed) ? raw.missed : []).slice(0, LIST_MAX)) {

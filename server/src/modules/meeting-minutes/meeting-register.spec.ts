@@ -374,6 +374,34 @@ describe('확정하고 등록 (POST register, API-261)', () => {
     expect((await service.get(id)).analysisResult?.candidates[0].decision).toBe('PENDING');
   });
 
+  it('구매요청 권한이 없는 작성자는 요청자를 구매 담당 사원으로 넘겨 허가하고, 확정하면 그 사원이 요청자인 초안이 생긴다 (이슈 #530)', async () => {
+    const purchase = { itemId: oreId, requestedTon: '7.000', desiredReceiptDate: '2026-10-31', requestReason: '철광석 추가 구매', sourceText: null };
+    const id = await reviewMinutes([purchaseCandidate('c1', { purchase })], sales);
+    // 요청자 없이 허가하면 요청자를 고르라고 알린다
+    await expect(service.updateCandidate(sales, id, 'c1', { decision: 'APPROVED' })).rejects.toMatchObject({ code: 'COM-002', message: expect.stringContaining('요청자를') });
+    // 구매요청 권한이 없는 사원은 요청자가 될 수 없다
+    expect(await codeOf(service.updateCandidate(sales, id, 'c1', { purchaseRequesterId: sales.employeeId }))).toBe('COM-002');
+    expect(await codeOf(service.updateCandidate(sales, id, 'c1', { purchaseRequesterId: 2147483000 }))).toBe('VOC-002');
+    // 다른 종류 후보에는 요청자를 정할 수 없다
+    const other = await reviewMinutes([taskCandidate('c1')], sales);
+    expect(await codeOf(service.updateCandidate(sales, other, 'c1', { purchaseRequesterId: author.employeeId }))).toBe('COM-004');
+
+    const handed = await service.updateCandidate(sales, id, 'c1', { purchaseRequesterId: author.employeeId, decision: 'APPROVED' });
+    expect(handed.analysisResult?.candidates[0]).toMatchObject({ decision: 'APPROVED', purchaseRequesterId: author.employeeId, purchaseRequesterName: author.employeeName });
+    const { actionDraftIds } = await service.register(sales, id);
+    const draft = await prisma.actionDraft.findUniqueOrThrow({ where: { id: actionDraftIds[0] } });
+    expect(draft).toMatchObject({ requesterId: author.employeeId, meetingMinutesId: id, draftStatus: DRAFT_STATUS.WAITING_APPROVAL });
+    // 작업 로그의 행위자는 초안을 만든 작성자, 요청자는 after에 남는다
+    const event = await prisma.businessEvent.findFirstOrThrow({ where: { businessEventType: BUSINESS_EVENT_TYPE.DRAFT_CREATED, actionDraftId: draft.id } });
+    expect(event).toMatchObject({ actorEmployeeId: sales.employeeId });
+    expect(event.afterData).toMatchObject({ requesterId: author.employeeId });
+    // 요청자에게 확인할 초안이 생겼다고 알린다
+    expect(await prisma.notification.count({ where: { id: { gt: startNotificationId }, recipientId: author.employeeId, notificationContent: '구매요청 초안 확인 · c1 후보' } })).toBe(1);
+    // 요청자가 기존 초안 흐름으로 구매요청까지 확정한다
+    const confirmed = await messageActions.confirm(author, draft.id, {});
+    expect(confirmed).toMatchObject({ executed: true, draft: { result: { table: 'purchase_requisition' } } });
+  });
+
   it('허가 뒤 권한이 바뀌어 초안을 못 만들면 전부 취소되고 REVIEW로 남는다', async () => {
     const id = await reviewMinutes(
       [

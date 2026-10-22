@@ -1,6 +1,6 @@
 // 웹 검색 답의 링크: 이번 질문의 웹 출처에 있는 주소만 링크가 되고, 나머지는 전부 글이다.
 import { describe, expect, it } from 'vitest';
-import { MAX_WEB_URL_LENGTH, normalizeWebUrl, openableWebSources, safeWebHref, tokenizeAnswerLinks, webHostOf, webSourceTitle } from '@/lib/aiWebLinks';
+import { answerSourceGroupOf, groupAnswerSources, MAX_WEB_URL_LENGTH, normalizeWebUrl, openableWebSources, safeWebHref, tokenizeAnswerLinks, webHostOf, webSourceTitle } from '@/lib/aiWebLinks';
 
 const SOURCES = [
   { title: '철강 시황', url: 'https://example.com/steel/' },
@@ -130,5 +130,20 @@ describe('웹 출처 목록', () => {
     expect(webSourceTitle('가'.repeat(500), 'https://a.com')).toHaveLength(121);
     expect(webSourceTitle('  ', 'https://www.a.com/x')).toBe('a.com');
     expect(webSourceTitle('<script>alert(1)</script>', 'https://a.com')).toBe('<script>alert(1)</script>');
+  });
+});
+
+describe('답 아래 출처 묶음 (이슈 #530)', () => {
+  it('회사 Drive·Notion에서 읽은 것은 웹 출처와 따로 묶는다', () => {
+    expect(answerSourceGroupOf('https://drive.google.com/file/d/x/view')).toBe('drive');
+    expect(answerSourceGroupOf('https://docs.google.com/document/d/x')).toBe('drive');
+    expect(answerSourceGroupOf('https://www.notion.so/page-1')).toBe('notion');
+    expect(answerSourceGroupOf('https://ko.wikipedia.org/wiki/x')).toBe('web');
+    const items = [{ href: 'https://ko.wikipedia.org/a' }, { href: 'https://drive.google.com/file/d/x/view' }, { href: 'https://www.notion.so/p' }];
+    expect(groupAnswerSources(items).map((g) => [g.group, g.items.length])).toEqual([
+      ['drive', 1],
+      ['notion', 1],
+      ['web', 1],
+    ]);
   });
 });

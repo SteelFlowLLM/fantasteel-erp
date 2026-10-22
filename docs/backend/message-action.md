@@ -176,7 +176,7 @@ confirm(draftId, actor):
 | 같은 메시지·유형 | 미처리 초안은 메시지·유형마다 1건이다(ERD 부분 unique, 9장 중복 생성 응답). 다른 사원이 만든 미처리 초안이 있으면 새로 만들지 않고 그 초안을 돌려준다(`created: false`). 화면은 "○○님이 만든 초안이 이미 있어요"를 보여 준다. 방 멤버라 상세는 볼 수 있지만 고치고 확정·반려하는 것은 만든 사원만 한다. 그 초안이 반려되면 다시 만들 수 있다. **실행된(EXECUTED) 초안이 있으면 새로 만들지 않는다**(2026-10-22, 이슈 #496): 다시 만들면 같은 수주·구매요청이 두 번 등록되므로 COM-004("이 메시지로 만든 ○○ 초안(#id)은 이미 ERP에 반영했어요 (결과 번호). 같은 업무가 두 번 등록되지 않게 새 초안은 만들 수 없어요")로 막는다. LLM을 부르기 전과 저장 트랜잭션 안에서 같은 확인을 한다. DB 부분 unique는 그대로 두고 서비스에서 막는다(기존 데이터에 같은 메시지·유형의 실행 초안이 둘 이상 있을 수 있어 인덱스를 바꾸지 않았다) |
 | 결과 연결 | 구매요청은 `purchase_requisition.action_draft_id`. 나머지는 핸들러가 남기는 업무 작업 로그(SALES_ORDER_CREATED 등)의 `action_draft_id`와 DRAFT_EXECUTED `after`(결과 테이블·id·번호). ERD는 바꾸지 않는다(ERD `action_draft` Note의 "생성된 업무 테이블의 action_draft_id로 연결"은 구매요청에만 해당한다) |
 | 중복 실행 | 지금처럼 상태 확인 + `updatedAt` 조건부 갱신. 실행 트랜잭션 안에서 초안을 EXECUTED로 바꾸므로 동시에 두 번 실행하면 한쪽이 COM-001로 롤백된다 |
-| AI 경유 | 생성 때 AI가 채운 칸이 있던 초안을 확정·실행하면 DRAFT_CONFIRMED·DRAFT_EXECUTED와 핸들러 작업 로그에 `is_ai_assisted = true`(REQ-AST-010) |
+| AI 경유 | 생성 때 AI가 채운 칸이 있던 초안은 DRAFT_CREATED, 확정·실행 때의 DRAFT_CONFIRMED·DRAFT_EXECUTED와 핸들러 작업 로그에 `is_ai_assisted = true`(REQ-AST-010) |
 | 다른 모듈 | 핸들러는 각 모듈 service의 트랜잭션을 받는 함수를 부른다. sales-order는 tx를 받는 `createInTx`가 있지만 `private`이라 공개로 바꾸고, shipment·inventory·production은 tx를 받는 함수로 나눈다(동작은 그대로) |
 | 같이 쓰는 곳 | AI 어시스턴트 실행 카드(AST-005, ai-assistant.md 단계 ③)와 회의록 업무 등록(VOC-004)도 이 등록부의 핸들러를 쓴다 |
 
@@ -186,7 +186,7 @@ confirm(draftId, actor):
   - 유형 정의 `fromExtraction`이 값을 다시 확인해 맞는 칸만 채운다. 구매요청은 원료(코드나 이름이 정확히 1건), 톤(0 초과, 소수 3자리까지), 희망 입고일(실제 있는 YYYY-MM-DD)을 본다.
   - 채운 칸 이름은 payload `aiFilledFields`에 남긴다. 수정 요청으로 바꿀 수 없고, 사람이 값을 고쳐도 지우지 않는다(AI 경유 근거).
   - LLM을 부르기 전에 방 멤버·확정 주체·미처리 초안을 확인한다(미처리 초안이 있으면 부르지 않는다). 저장 트랜잭션에서 같은 확인을 다시 한다.
-  - 메시지 초안의 DRAFT_CREATED는 AI 경유로 남기지 않는다(위 표의 AI 경유는 확정·핸들러·실행 로그).
+  - 메시지 초안의 DRAFT_CREATED도 AI가 채운 칸이 있으면 AI 경유로 남긴다(2026-10-22, 이슈 #530: 회의록·철강맨AI 초안과 기준을 맞춤). AI가 아무 칸도 채우지 못한 초안(빈 초안)은 AI 경유가 아니다.
   - 회의록(VOC-004)에서 만든 구매요청 초안은 AI가 회의에서 뽑은 값이라 채워진 칸을 `aiFilledFields`로 남긴다. 생성부터 확정·실행까지 모두 AI 경유다.
 - 응답의 실행 결과는 `result { table, id, no, status }`다(구매요청 전용 `purchaseRequisition` 칸을 바꿈).
 - `GET action-drafts`(내 초안)는 메시지·회의록(VOC-004)에서 만든 초안만 준다. 확정한 Agent 대응 후보는 `?source=agent`(factory-agent)에서 본다.
