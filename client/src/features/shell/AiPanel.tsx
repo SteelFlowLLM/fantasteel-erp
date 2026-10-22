@@ -22,6 +22,8 @@ import { AiChatThreadList } from '@/features/shell/AiChatThreadList';
 import { AiFailureNotice } from '@/features/shell/AiFailureNotice';
 import { QUESTION_CHIP, SOURCE_ICON, sourceText } from '@/features/shell/aiSourceDisplay';
 import { SteelmanAiStatus } from '@/features/shell/SteelmanAiStatus';
+import { AiSpeakButton } from '@/features/shell/AiSpeakButton';
+import { SteelmanSpeakMenu } from '@/features/shell/SteelmanSpeakMenu';
 import { SteelmanWakeToggle, useWakeBarLine } from '@/features/shell/SteelmanWake';
 import { AFTER_ANSWER_MS, finishedSteelmanStatus, liveSteelmanStatus, type SteelmanStatus, type ToolTimes } from '@/lib/steelmanStatus';
 import { useAction } from '@/hooks/useAction';
@@ -548,6 +550,7 @@ export function AiPanel() {
         </div>
         <span className="ml-auto" />
         <SteelmanWakeToggle />
+        <SteelmanSpeakMenu appearance="icon" />
         <IconButton
           icon="history"
           label={showThreads ? '대화로 돌아가기' : '대화 목록'}
@@ -1107,6 +1110,7 @@ function ChatEntry({
           <p className="text-cap text-ink-3">이 모델은 생각 정도를 바꿀 수 없어 기본값으로 답했어요</p>
         ) : null}
         {entry.unsaved ? <p className="text-cap text-ink-3">이 질문과 답은 대화 목록에 저장하지 못했어요</p> : null}
+        <AiSpeakButton entryId={entry.id} content={entry.content} />
       </div>
     </div>
   );

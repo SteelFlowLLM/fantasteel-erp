@@ -3,7 +3,8 @@
 import { create } from 'zustand';
 import type { VoiceApprovalPending } from '@/lib/steelmanWake';
 import { WAKE_ACTIVITY_MS, type WakeActivity, type WakeSensitivity } from '@/lib/steelmanWakeDisplay';
-import { readSteelmanWakePreference, writeSteelmanWakePreference } from '@/lib/steelmanWakePreference';
+import { clampSpeechRate } from '@/lib/steelmanSpeech';
+import { readSteelmanWakePreference, writeSteelmanWakePreference, type SteelmanWakePreference } from '@/lib/steelmanWakePreference';
 
 /** off: 꺼짐, starting: 마이크 여는 중, listening: 듣는 중, paused: 탭이 숨겨져 쉼, error: 마이크를 못 엶 */
 export type SteelmanWakeStatus = 'off' | 'starting' | 'listening' | 'paused' | 'error';
@@ -29,6 +30,12 @@ interface SteelmanWakeState {
   activity: (WakeActivity & { id: number; until: number }) | null;
   /** 말 시작 민감도 (사원별 저장) */
   sensitivity: WakeSensitivity;
+  /** 말로 물은 답을 소리 내 읽어 준다 (사원별 저장, 이슈 #507) */
+  speak: boolean;
+  /** 읽어 줄 목소리 voiceURI. null이면 브라우저 기본 한국어 목소리 (사원별 저장) */
+  voiceUri: string | null;
+  /** 읽는 빠르기 (사원별 저장) */
+  speechRate: number;
   /** 마이크·음성 서버 문제. 스위치 옆에 보인다 */
   problem: string | null;
   /** "철강맨"만 불러(또는 말로 물은 답이 끝나 이어 말하기로) 다음 말을 기다리는 중: 대답과 마감. 기다리는 동안 명령 덩어리로 듣는다 */
@@ -56,6 +63,9 @@ interface SteelmanWakeState {
   showActivity: (activity: WakeActivity, ms?: number) => void;
   clearActivity: (id: number) => void;
   setSensitivity: (sensitivity: WakeSensitivity) => void;
+  setSpeak: (on: boolean) => void;
+  setSpeechVoice: (voiceUri: string | null) => void;
+  setSpeechRate: (rate: number) => void;
   setProblem: (problem: string | null) => void;
   setCalled: (called: SteelmanWakeState['called']) => void;
   setCommandPrefix: (prefix: SteelmanWakeState['commandPrefix']) => void;
@@ -71,6 +81,15 @@ interface SteelmanWakeState {
 
 let nextId = 1;
 
+const preferenceOf = (state: Pick<SteelmanWakeState, 'enabled' | 'voiceApproval' | 'sensitivity' | 'speak' | 'voiceUri' | 'speechRate'>): SteelmanWakePreference => ({
+  wake: state.enabled,
+  voiceApproval: state.voiceApproval,
+  sensitivity: state.sensitivity,
+  speak: state.speak,
+  voiceUri: state.voiceUri,
+  speechRate: state.speechRate,
+});
+
 /** 끄거나 다른 사원으로 바뀌면 지우는 듣기 상태 (소리 크기는 스토어가 아니라 lib/wakeOrb.ts의 wakeLiveLevel) */
 const IDLE = { hearing: false, audioBlocked: false, transcribing: false, activity: null, commandPrefix: null, partialText: null } as const;
 
@@ -85,6 +104,9 @@ export const useSteelmanWakeStore = create<SteelmanWakeState>((set, get) => ({
   transcribing: false,
   activity: null,
   sensitivity: 'normal',
+  speak: true,
+  voiceUri: null,
+  speechRate: 1,
   problem: null,
   called: null,
   commandPrefix: null,
@@ -96,16 +118,16 @@ export const useSteelmanWakeStore = create<SteelmanWakeState>((set, get) => ({
   voiceQuestionId: null,
   load: (employeeId) => {
     const saved = readSteelmanWakePreference(employeeId);
-    set({ employeeId, enabled: saved.wake, voiceApproval: saved.voiceApproval, sensitivity: saved.sensitivity, status: 'off', ...IDLE, problem: null, called: null, notice: null, approval: null, screenConfirm: null, panelRequest: null, voiceQuestionId: null });
+    set({ employeeId, enabled: saved.wake, voiceApproval: saved.voiceApproval, sensitivity: saved.sensitivity, speak: saved.speak, voiceUri: saved.voiceUri, speechRate: saved.speechRate, status: 'off', ...IDLE, problem: null, called: null, notice: null, approval: null, screenConfirm: null, panelRequest: null, voiceQuestionId: null });
   },
   setEnabled: (on) => {
-    const { employeeId, voiceApproval, sensitivity } = get();
-    if (employeeId !== null) writeSteelmanWakePreference(employeeId, { wake: on, voiceApproval, sensitivity });
+    const { employeeId } = get();
+    if (employeeId !== null) writeSteelmanWakePreference(employeeId, { ...preferenceOf(get()), wake: on });
     set(on ? { enabled: true, problem: null } : { enabled: false, status: 'off', ...IDLE, problem: null, called: null, approval: null, screenConfirm: null });
   },
   setVoiceApproval: (on) => {
-    const { employeeId, enabled, sensitivity } = get();
-    if (employeeId !== null) writeSteelmanWakePreference(employeeId, { wake: enabled, voiceApproval: on, sensitivity });
+    const { employeeId } = get();
+    if (employeeId !== null) writeSteelmanWakePreference(employeeId, { ...preferenceOf(get()), voiceApproval: on });
     set(on ? { voiceApproval: true } : { voiceApproval: false, approval: null });
   },
   setCompany: (company) =>
@@ -121,9 +143,25 @@ export const useSteelmanWakeStore = create<SteelmanWakeState>((set, get) => ({
   showActivity: (activity, ms = WAKE_ACTIVITY_MS) => set({ activity: { ...activity, id: nextId++, until: Date.now() + ms } }),
   clearActivity: (id) => set((state) => (state.activity?.id === id ? { activity: null } : {})),
   setSensitivity: (sensitivity) => {
-    const { employeeId, enabled, voiceApproval } = get();
-    if (employeeId !== null) writeSteelmanWakePreference(employeeId, { wake: enabled, voiceApproval, sensitivity });
+    const { employeeId } = get();
+    if (employeeId !== null) writeSteelmanWakePreference(employeeId, { ...preferenceOf(get()), sensitivity });
     set({ sensitivity });
+  },
+  setSpeak: (speak) => {
+    const { employeeId } = get();
+    if (employeeId !== null) writeSteelmanWakePreference(employeeId, { ...preferenceOf(get()), speak });
+    set({ speak });
+  },
+  setSpeechVoice: (voiceUri) => {
+    const { employeeId } = get();
+    if (employeeId !== null) writeSteelmanWakePreference(employeeId, { ...preferenceOf(get()), voiceUri });
+    set({ voiceUri });
+  },
+  setSpeechRate: (rate) => {
+    const speechRate = clampSpeechRate(rate);
+    const { employeeId } = get();
+    if (employeeId !== null) writeSteelmanWakePreference(employeeId, { ...preferenceOf(get()), speechRate });
+    set({ speechRate });
   },
   setProblem: (problem) => set({ problem }),
   setCalled: (called) => set({ called }),
