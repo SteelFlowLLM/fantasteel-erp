@@ -2,6 +2,7 @@
 import type { AuthUser } from '@fantasteel/shared';
 import { IS_PUBLIC, REQUIRED_PERMISSION } from '../../common/auth/auth.decorators';
 import { AppException } from '../../common/errors/app.exception';
+import { netFetch } from '../../common/net/guarded-agent';
 import { SttClient, SttRequestError, quickModelOf, silentWav } from './stt.client';
 import { SttController } from './stt.controller';
 import { SttService, type UploadedAudio } from './stt.service';
@@ -67,7 +68,8 @@ describe('SttService.transcribeWakeClip', () => {
 
   it('음성 서버가 바쁘면(503·시간 초과) 꺼짐이 아니다: 명령 덩어리는 VOC-009(잠시 뒤 다시), 부르는 말 조각은 빈 글로 넘긴다 (#519)', async () => {
     // 바쁨은 SttClient가 만드는 오류 문구로 가리므로, 실제 SttClient가 만든 오류로 확인한다
-    const fetchMock = jest.spyOn(globalThis, 'fetch');
+    // SttClient는 전역 fetch가 아니라 netFetch.run(undici)으로 부른다
+    const fetchMock = jest.spyOn(netFetch, 'run');
     const errorOf = async (): Promise<unknown> =>
       new SttClient().transcribe(stored, { audio: clip.buffer, fileName: 'wake.wav', mimeType: 'audio/wav', model: 'whisper' }, 20_000).then(
         () => null,
