@@ -1,6 +1,6 @@
 'use client';
 
-// 완료된 보고서: 마크다운을 제목·문단·목록 글로만 그리고, [n] 인용을 아래 출처 목록으로 잇는다.
+// 완료된 보고서: 마크다운을 제목·문단·인용·목록 글로만 그리고, [n] 인용을 아래 출처 목록으로 잇는다.
 // 보고서·출처 제목은 웹에서 온 글이다. HTML로 넣지 않고(React 글), 눌러 열리는 링크는 모은 출처의 http·https 주소만 새 탭으로 연다.
 import type { AiResearchRunView } from '@fantasteel/shared';
 import { Fragment, useMemo, type ReactNode } from 'react';
@@ -69,6 +69,13 @@ export function AiResearchReport({ run, report = run.report, title = '보고서'
                     </li>
                   ))}
                 </ul>
+              );
+            }
+            if (block.kind === 'quote') {
+              return (
+                <blockquote key={index} className="rounded-xs border-l-2 border-line-strong bg-wait-bg px-3 py-1.5 whitespace-pre-line text-ink-2">
+                  <Inline parts={block.inline} />
+                </blockquote>
               );
             }
             return (

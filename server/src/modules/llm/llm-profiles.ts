@@ -43,8 +43,8 @@ export const LLM_PROFILE = {
   MEETING_SPEAKER: { sampling: EXTRACTION, reasoning: 'low' },
   /** Message → ERP 초안 칸 채우기 (JSON): 사용자가 초안을 기다리므로 생각하지 않는다 */
   MESSAGE_EXTRACT: { sampling: EXTRACTION, reasoning: 'off' },
-  /** 과거 사례 초안 (JSON) */
-  PAST_CASE_DRAFT: { sampling: EXTRACTION, reasoning: 'low' },
+  /** 과거 사례 초안 (JSON): 칸이 정해진 초안이라 생각하지 않는다. 생각을 켜면 60초 제한을 자주 넘겨 검사 결과 초안으로 끝났다 (#519) */
+  PAST_CASE_DRAFT: { sampling: EXTRACTION, reasoning: 'off' },
   /** 심층 조사 계획·다음 행동·점검 (JSON, 이슈 #378): 단계가 많아 생각을 짧게 */
   RESEARCH_JSON: { sampling: EXTRACTION, reasoning: 'low' },
   /** 심층 조사 보고서 (마크다운, 이슈 #378): 근거는 점검 단계에서 정리했으므로 생각하지 않고 쓴다 */

@@ -58,11 +58,12 @@ function limitText(item: FailedItemFact): string {
 
 /**
  * "망가니즈(MN) 1.68 % (기준 1.60 이하)", "항복강도 300 N/mm² (기준 355 이상)".
- * 원소 기호(MN·SI처럼 세 글자 이하)만 괄호로 붙인다: YIELD_STRENGTH 같은 영문 코드는 화면 글에 쓰지 않는다
+ * 원소 기호(MN·SI처럼 세 글자 이하)만 괄호로 붙인다: YIELD_STRENGTH 같은 영문 코드는 화면 글에 쓰지 않는다.
+ * 검사 기준의 항목 이름은 이미 "인(P)"·"망간(Mn)"처럼 기호를 달고 있어 그때는 붙이지 않는다 ("인(P)(P)", #519)
  */
 export function failedItemText(item: FailedItemFact): string {
   const unit = item.unit ? ` ${item.unit}` : '';
-  const symbol = /^[A-Z]{1,3}$/.test(item.code) ? `(${item.code})` : '';
+  const symbol = /^[A-Z]{1,3}$/.test(item.code) && !item.name.toUpperCase().includes(`(${item.code})`) ? `(${item.code})` : '';
   return `${item.name}${symbol} ${item.value}${unit} (기준 ${limitText(item)})`;
 }
 

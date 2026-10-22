@@ -224,6 +224,8 @@ const AI_SOURCE_KIND_LABEL: Record<AiAssistantSourceKind, string> = { GLOSSARY: 
 const AI_HISTORY_MESSAGES = 50;
 /** AI 어시스턴트 질문 최대 길이 (API-262 규칙) */
 const AI_QUESTION_MAX = 1000;
+/** AI 답을 오래 기다리는 사이 놀던 DB 연결이 닫혀, 다시 여는 데 기본 maxWait(2초)를 넘기면 만든 답을 버린다(#519) */
+const AFTER_AI_TX = { maxWait: 10_000 };
 
 /** AI 답 본문: 누구 질문인지, 답, 출처 */
 function aiReplyContentOf(askerName: string, reply: AiAssistantReplyView): string {
@@ -967,7 +969,7 @@ export class MessengerService implements OnModuleInit, OnModuleDestroy {
         stopTyping();
       }
     }
-    const saved = await this.prisma.$transaction((tx) => this.repository.createSystemMessage(tx, chatRoomId, text));
+    const saved = await this.prisma.$transaction((tx) => this.repository.createSystemMessage(tx, chatRoomId, text), AFTER_AI_TX);
     await this.emitNewMessage(saved);
   }
 

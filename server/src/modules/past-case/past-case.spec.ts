@@ -51,13 +51,20 @@ const heatIds: number[] = [];
 const createdCaseIds: number[] = [];
 let model: string | null;
 let llmReply: () => Promise<unknown>;
+/** 마지막 AI 초안 요청의 설정 (제한 시간·생각 정도) */
+let llmOptions: { timeoutMs?: number; profile?: { reasoning: string | null } } | undefined;
 const service = () =>
   new PastCaseService(
     prisma,
     repository,
     recorder,
     { read: async () => ({ baseUrl: 'http://127.0.0.1:1234/v1', model, apiKey: null }) } as unknown as LlmSettingsStore,
-    { chatJson: () => llmReply() } as unknown as LlmClient,
+    {
+      chatJson: (_endpoint: unknown, _model: unknown, _messages: unknown, _schema: unknown, options: typeof llmOptions) => {
+        llmOptions = options;
+        return llmReply();
+      },
+    } as unknown as LlmClient,
   );
 const register = async (input: Parameters<PastCaseService['create']>[1]) => {
   const created = await service().create(user, input);
@@ -101,6 +108,8 @@ describe('사례 초안 (API-269)', () => {
     const draft = await service().createDraft(101);
     expect(draft).toMatchObject({ aiWritten: true, aiNotice: null, title: 'SM355A 히트 망가니즈 초과', occurredDate: '2026-10-14', lot: { lotId: 101, steelGradeCode: 'SM355A' } });
     expect(draft.referenceCaseNos[0]).toBe('CASE-0005');
+    // 칸이 정해진 JSON 초안이라 생각을 끄고 60초 안에 받는다 (#519)
+    expect(llmOptions).toMatchObject({ timeoutMs: 60_000, profile: { reasoning: 'off' } });
   });
 
   it('AI가 실패해도 오류 없이 검사 결과 초안과 이유를 준다 (모델 미설정·연결 실패·이상한 답)', async () => {

@@ -441,6 +441,17 @@ describe('회의 질문 저장 (2026-10-21)', () => {
     expect((await call<AiChatThreadView | null>('GET', `/ai-assistant/meeting-threads/${meetingId}`)).body.data).toBeNull();
   });
 
+  it('답이 끝내 비면 실패(error 이벤트, AST-005)로 끝나고 대화에 저장하지 않는다 (#519)', async () => {
+    const meetingId = await newMeeting();
+    llmClient.streamWithTools.mockResolvedValue({ content: '', toolCalls: [], reasoningApplied: true });
+    const { events } = await stream({ question: '누가 견적서를 보내?', meetingMinutesId: meetingId, saveThread: true });
+    expect(events.at(-1)).toMatchObject({ type: 'error', code: 'AST-005' });
+    expect(events.some((e) => e.type === 'done')).toBe(false);
+    // 한 번 다시 시킨 뒤 실패로 돌린다
+    expect(llmClient.streamWithTools).toHaveBeenCalledTimes(2);
+    expect((await call<AiChatThreadView | null>('GET', `/ai-assistant/meeting-threads/${meetingId}`)).body.data).toBeNull();
+  });
+
   it('saveThread 없이 물으면 저장하지 않고, 다른 대화 id를 함께 보내면 AST-001', async () => {
     const meetingId = await newMeeting();
     llmClient.streamWithTools.mockResolvedValue({ content: '네', toolCalls: [], reasoningApplied: true });

@@ -524,6 +524,32 @@ describe('LlmClient Unsloth Studio', () => {
     await expect(client.chat(unslothEndpoint, 'a/think', [], LLM_PROFILE.CONNECTION_TEST)).resolves.toBe('안녕하세요');
   });
 
+  it('바쁜 서버가 모델 목록을 시간 안에 못 주면 \'불러온 모델 없음\'으로 막지 않고 보내며, 그 정보는 곧 다시 묻는다 (#519)', async () => {
+    unsloth({ loaded: ['a/think'] });
+    fetchMock.mockImplementation(async (url) => (url.endsWith('/v1/models') ? Promise.reject(Object.assign(new Error('timed out'), { name: 'TimeoutError' })) : reply('안녕하세요')));
+    const now = jest.spyOn(Date, 'now');
+    try {
+      now.mockReturnValue(1_000_000);
+      const client = new LlmClient();
+      await expect(client.chat(unslothEndpoint, 'a/think', [], LLM_PROFILE.CONNECTION_TEST)).resolves.toBe('안녕하세요');
+      expect(chatBodies()).toHaveLength(1);
+      const modelAsks = () => fetchMock.mock.calls.filter(([url]) => url.endsWith('/v1/models')).length;
+      const asked = modelAsks();
+      // 모르는 정보는 5초만 기억한다
+      now.mockReturnValue(1_004_000);
+      await client.chat(unslothEndpoint, 'a/think', [], LLM_PROFILE.CONNECTION_TEST);
+      expect(modelAsks()).toBe(asked);
+      now.mockReturnValue(1_006_000);
+      await client.chat(unslothEndpoint, 'a/think', [], LLM_PROFILE.CONNECTION_TEST);
+      expect(modelAsks()).toBeGreaterThan(asked);
+    } finally {
+      now.mockRestore();
+    }
+    // 목록을 읽었는데 비었으면 그대로 막는다
+    unsloth({ loaded: [] });
+    await expect(new LlmClient().chat(unslothEndpoint, 'a/think', [], LLM_PROFILE.CONNECTION_TEST)).rejects.toBeInstanceOf(LlmModelNotLoadedError);
+  });
+
   it('서버가 No model loaded(400)를 주면 같은 안내로 바꾸고, JSON 형식 없이 다시 부르지 않는다', async () => {
     const noModel = () =>
       Response.json(

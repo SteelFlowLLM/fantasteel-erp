@@ -149,6 +149,11 @@ describe('지난 대화 찾기 도구 (HistorySearchSession)', () => {
     expect(ROOM_MESSAGE_SEARCH_TOOL).toBe('search_room_messages');
   });
 
+  it('"아까 물어본 …"이면 업무 데이터 질문이어도 조회 도구보다 먼저 쓰라고 설명한다 (#519)', () => {
+    for (const kind of ['chat', 'room'] as const) expect(new HistorySearchSession(sourceOf(kind).source).definition.description).toContain('업무 데이터 질문이어도 다른 도구보다 먼저 쓴다');
+    expect(new HistorySearchSession(sourceOf('chat').source).definition.description).toContain('아까 물어본');
+  });
+
   it('has()는 자기 도구 이름에만 true', () => {
     const chat = new HistorySearchSession(sourceOf('chat').source);
     expect(chat.has('search_chat_history')).toBe(true);

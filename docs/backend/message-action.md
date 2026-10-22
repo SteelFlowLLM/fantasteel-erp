@@ -270,7 +270,7 @@ confirm(draftId, actor):
 **조정**
 - 생각을 끄는 전송은 PR #468(이슈 #465, Unsloth Studio 지원)이 맡는다. Unsloth `/v1/status`로 생각 지원을 알아내고, 끔이면 `reasoning_effort: "none"`과 `enable_thinking: false`를 보낸다. 같은 `llm.client.ts`를 고치므로 이 이슈에서는 고치지 않는다. 프로필은 이미 '끔'이라 바꾸지 않는다. #468이 머지되기 전에는 위 '지금' 시간이 그대로다.
 - 제한 시간: 기본 90초 🟡(가정값). 생각이 켜진 지금 측정값(9~38초)을 덮고, 끈 뒤(1~4초)에는 넉넉하다. env `MESSAGE_EXTRACT_TIMEOUT_SECONDS`(1~600초, 그 밖이면 기본값)로 바꾼다.
-- 빈 초안이 된 까닭을 payload `aiExtraction`에 남긴다: `FILLED` 칸을 채움, `NOTHING_FOUND` 답은 왔지만 맞는 값이 없음, `NO_MODEL` 모델 미설정, `TIMEOUT` 시간 초과, `NOT_JSON` JSON이 아님, `FAILED` 연결·서버 오류. 글이 없는 메시지와 이 이슈 전 초안은 없다(null). 스키마는 바꾸지 않는다(payload jsonb).
+- 빈 초안이 된 까닭을 payload `aiExtraction`에 남긴다: `FILLED` 칸을 채움, `NOTHING_FOUND` 답은 왔지만 맞는 값이 없음, `NO_MODEL` 모델 미설정·AI 서버(Unsloth Studio 등)에 모델이 불러와 있지 않음(#519), `TIMEOUT` 시간 초과, `NOT_JSON` JSON이 아님, `FAILED` 연결·서버 오류. 글이 없는 메시지와 이 이슈 전 초안은 없다(null). 스키마는 바꾸지 않는다(payload jsonb).
 - 화면: 메시지 메뉴에서 만드는 동안 'AI가 메시지를 읽는 중…'을 보이고, 시작할 때 안내를 띄운다(메뉴를 닫아도 다 만들면 초안을 연다). 초안 카드 머리에 빈 초안이 된 까닭('AI 추출 안 됨' + 이유)을 보인다.
 
 ### 11.7 #471 리뷰 반영 (2026-10-21, 이슈 #472와 같은 PR)

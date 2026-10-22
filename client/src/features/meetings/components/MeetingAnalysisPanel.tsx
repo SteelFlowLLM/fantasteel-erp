@@ -23,7 +23,7 @@ import { useMe } from '@/hooks/useMe';
 import { cn } from '@/lib/cn';
 import { fmtDateTime } from '@/lib/format';
 import { toast } from '@/stores/useToastStore';
-import { analysisProgressText, analyzeAvailability, approvalBlocker, contextLinesOf, decisionCounts, evidenceLabel, formatSchedule, groupCandidates, registerPreview, reviewSummaryText } from '@/lib/meetingAnalysis';
+import { analysisProgressText, analyzeAvailability, approvalBlocker, contextLinesOf, decisionCounts, evidenceLabel, formatSchedule, groupCandidates, purchaseApprovalBlocker, registerPreview, reviewSummaryText } from '@/lib/meetingAnalysis';
 
 function AiLabel() {
   return (
@@ -123,10 +123,10 @@ export function fields(c: CandidateFieldsSource, names: Names): React.ReactNode 
 /** 칸을 글로 보일 때 필요한 후보 값. 회의록 후보와 AI 어시스턴트 실행 카드가 같이 쓴다 */
 export type CandidateFieldsSource = Pick<MeetingCandidate, 'kind' | 'assigneeId' | 'assigneeName' | 'dueDate' | 'startAt' | 'endAt' | 'endAssumed' | 'attendeeIds' | 'notionSync' | 'purchase' | 'itemName' | 'purchaseRequesterId' | 'purchaseRequesterName'>;
 
-/** 일정의 Notion 캘린더 칸 글. 넣기로 했어도 지금 Notion이 준비되지 않았으면 ERP에만 들어간다고 보인다 (이슈 #530) */
+/** 일정의 Notion 캘린더 칸 글. 넣기로 했어도 지금 Notion이 준비되지 않았으면 아직 ERP에만 있고, 켜 둔 일정은 준비된 뒤 다음 반영 때 올라간다 (이슈 #530, #519) */
 export function notionCalendarText(sync: boolean, ready: boolean | null): React.ReactNode {
   if (!sync) return <span className="text-ink-3">넣지 않음 (ERP 일정만)</span>;
-  if (ready === false) return <span className="text-ink-3">넣기로 함 · 지금은 Notion이 준비되지 않아 ERP에만 들어가요</span>;
+  if (ready === false) return <span className="text-ink-3">넣기로 함 · Notion 준비 전이라 지금은 ERP에만 있고 준비되면 올라가요</span>;
   return '함께 넣음';
 }
 
@@ -149,16 +149,25 @@ function ContextLines({ lines }: { lines: MeetingCandidateContextLine[] }) {
 }
 
 /** 확정 때 만들어진 결과로 가는 링크. 일정은 아직 화면이 없어 시각을 글로 보인다 */
-function RegisteredNote({ candidate }: { candidate: MeetingCandidate }) {
+function RegisteredNote({ candidate, myId, creatorId, names }: { candidate: MeetingCandidate; myId: number; creatorId: number; names: Names }) {
   const registered = candidate.registered;
   if (!registered) return null;
   const link = 'font-medium text-brand hover:underline';
+  // 업무 화면은 처음에 '내 업무'(내가 담당)만 보여서, 남이 담당인 업무는 링크만으로는 찾을 수 없다 (#519)
+  const mine = candidate.assigneeId === myId;
+  const assignee = candidate.assigneeId !== null ? `담당 ${names.employee(candidate.assigneeId)}님` : null;
   return (
-    <div className="flex items-center gap-1 rounded-xs bg-ok-bg px-2 py-1.5 text-xs text-ok-strong">
+    <div className="flex flex-wrap items-center gap-1 rounded-xs bg-ok-bg px-2 py-1.5 text-xs text-ok-strong">
       <Icon name="check" size="sm" />
       {registered.type === 'task' ? (
         <>
-          업무로 등록됐어요 <Link href="/tasks" className={link}>업무 보기</Link>
+          업무로 등록됐어요
+          {mine || myId === creatorId ? (
+            <Link href={`/tasks?task=${registered.id}`} className={link}>
+              업무 보기
+            </Link>
+          ) : null}
+          {!mine && assignee ? <span className="text-ink-2">· {myId === creatorId ? `${assignee} 업무라 업무 화면의 '내가 만든 업무'에서 보여요` : assignee}</span> : null}
         </>
       ) : registered.type === 'action_draft' ? (
         <>
@@ -196,7 +205,11 @@ interface CardProps {
 function CandidateCard({ candidate, minutes, names, editable, editing, pending, myId, onJump, onEdit, onDecide, onSave }: CardProps) {
   const confirmed = minutes.meetingMinutesStatus === MEETING_MINUTES_STATUS.CONFIRMED;
   const excluded = candidate.decision === 'EXCLUDED';
-  const blocker = approvalBlocker(candidate);
+  const me = useMe();
+  // 권한·부서장이라 못 하는 것은 칸을 채워도 풀리지 않아 먼저 보인다
+  const roleBlocker = purchaseApprovalBlocker(candidate, me);
+  const fieldBlocker = approvalBlocker(candidate);
+  const blocker = roleBlocker ?? fieldBlocker;
   return (
     <li className={cn('flex flex-col gap-2 rounded-sm border bg-surface-2 p-3', candidate.decision === 'APPROVED' ? 'border-ok' : 'border-line', excluded && 'opacity-60')}>
       <div className="flex flex-wrap items-center gap-1.5">
@@ -249,7 +262,7 @@ function CandidateCard({ candidate, minutes, names, editable, editing, pending, 
           </div>
         ))}
       </div>
-      {confirmed ? <RegisteredNote candidate={candidate} /> : null}
+      {confirmed ? <RegisteredNote candidate={candidate} myId={myId} creatorId={minutes.creator.id} names={names} /> : null}
       {editable && !editing ? (
         <div className="flex flex-wrap justify-end gap-1.5">
           {excluded ? (
@@ -277,7 +290,7 @@ function CandidateCard({ candidate, minutes, names, editable, editing, pending, 
           )}
         </div>
       ) : null}
-      {editable && !editing && !excluded && candidate.decision !== 'APPROVED' && blocker ? <p className="text-right text-cap text-ink-3">{blocker}. 수정에서 채워 주세요</p> : null}
+      {editable && !editing && !excluded && candidate.decision !== 'APPROVED' && blocker ? <p className="text-right text-cap text-ink-3">{roleBlocker ?? `${fieldBlocker}. 수정에서 채워 주세요`}</p> : null}
     </li>
   );
 }

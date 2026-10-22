@@ -15,6 +15,23 @@ const WAKE_SERVER_DOWN = STT_CONNECT_PUBLIC_MESSAGE;
 /** 부르는 말 조각은 몇 초라 이보다 오래 걸리면 음성 서버가 바쁘거나 막힌 것이다 */
 const WAKE_CLIP_TIMEOUT_MS = 20_000;
 
+/** 음성 서버가 다른 받아쓰기로 바쁠 때(사이드카 503·시간 초과). 꺼진 것이 아니라 잠시 뒤 다시 부르면 된다 (#519) */
+const WAKE_SERVER_BUSY = '음성 서버가 바빠 이번 말은 받아쓰지 못했어요(다른 녹음을 받아쓰는 중일 수 있어요). 잠시 뒤 다시 불러 주세요';
+/**
+ * SttClient가 상태 코드를 따로 주지 않아 그 오류 문구로 가린다 (stt-wake.spec이 실제 SttClient 오류로 확인한다).
+ * 429는 넣지 않는다: OpenAI 같은 외부 음성 서버의 할당량 소진일 수 있어, 바쁨이 아니라 관리자가 볼 이유다
+ */
+const BUSY_FAILURE = /\(HTTP 503\)|초 안에 응답이 없어요/;
+const BUSY_REPLY = /\(HTTP 503\)/;
+/**
+ * 명령 덩어리는 놓치면 말한 명령이 사라진다. 사이드카는 받아쓰기를 하나씩만 받아, 같은 사람의 중간 글이 끝나기 전에 온
+ * 짧은 명령("첫 번째 카드 실행")이 늘 503으로 거절됐다 (#519). 바쁘다고 답하면 짧게 몇 번(합계 4초 안) 다시 보낸다.
+ * 부르는 말 조각·중간 글은 다시 보내지 않고 조용히 넘긴다: 긴 회의 전사 중에는 주변 말마다 조각이 와서 안내가 되풀이되고 조각 줄이 밀렸다
+ */
+const COMMAND_BUSY_RETRY_DELAYS_MS = [400, 600, 800, 800, 800];
+/** 같은 사원의 중간 글이 받아쓰는 중이면 명령 덩어리는 그것이 끝날 때까지(이만큼까지) 기다렸다 보낸다 */
+const PARTIAL_WAIT_MAX_MS = 4_000;
+
 /** multer가 넘기는 업로드 파일 중 쓰는 값 */
 export interface UploadedAudio {
   originalname: string;
@@ -27,6 +44,8 @@ export class SttService {
   private readonly logger = new Logger(SttService.name);
   /** 중간 글(partial) 횟수. 명령 덩어리·부르는 말 조각과 따로 센다 (이슈 #494) */
   private readonly partialLimiter = Object.assign(new SttWakeLimiter(), { perMinute: STT_WAKE_CLIP_LIMITS.partialPerMinute });
+  /** 사원별로 받아쓰는 중인 중간 글 (서버는 한 프로세스라 메모리로 충분하다, SERVER-GUIDE 9장) */
+  private readonly partialsInFlight = new Map<number, Promise<unknown>>();
 
   constructor(
     private readonly store: SttSettingsStore,
@@ -96,6 +115,8 @@ export class SttService {
    * 철강맨 부르기 (이슈 #457): 말소리 조각(PCM WAV, 8초까지) 하나를 글로 바꿔 돌려준다. 소리도 글도 저장·로그하지 않는다
    * (부르는 말이 없는 글은 화면이 바로 버린다). 음성 서버에 닿지 않으면 오류가 아니라 이유를 돌려줘 화면이 스위치에 알린다.
    * 자세한 이유(주소 등)는 설정 권한(ORG_MANAGE USE)이 있는 사원에게만, 나머지는 서버 기록으로 남긴다.
+   * 음성 서버가 바쁘면(503·시간 초과) 꺼짐으로 남기지 않는다 (#519). 명령 덩어리는 같은 사원의 중간 글이 끝난 뒤 보내고, 그래도 503이면
+   * 짧게 몇 번 다시 보낸 뒤 VOC-009(잠시 뒤 다시, 화면은 띠에 문제로 두지 않고 잠깐 안내)로 알린다. 부르는 말 조각·중간 글은 빈 글로 넘긴다
    */
   /**
    * mode(이슈 #494): wake는 부르는 말을 찾는 8초 조각, command는 "철강맨" 뒤 명령 한 덩어리(30초), partial은 명령을 말하는 동안 보이기만 할 중간 글.
@@ -112,18 +133,47 @@ export class SttService {
     const problem = wakeClipProblem(file.buffer, limit.maxSeconds);
     if (problem) throw new AppException('COM-004', problem);
     const settings = await this.store.read();
-    try {
-      const result = await this.client.transcribe(
-        settings,
-        { audio: file.buffer, fileName: 'wake.wav', mimeType: 'audio/wav', model: quickModelOf(settings.model) },
-        WAKE_CLIP_TIMEOUT_MS,
-      );
-      return { text: result.text, error: null };
-    } catch (error) {
-      const detail = messageOf(error);
-      this.logger.warn(`철강맨 부르기 받아쓰기 실패 (사원 ${user.employeeId}): ${detail}`);
-      return { text: null, error: hasPermission(user, { permission: PERMISSION.ORG_MANAGE, level: 'USE' }) ? detail : WAKE_SERVER_DOWN };
+    const input = { audio: file.buffer, fileName: 'wake.wav', mimeType: 'audio/wav', model: quickModelOf(settings.model) };
+    const command = mode === 'command';
+    const retryDelays = command ? COMMAND_BUSY_RETRY_DELAYS_MS : [];
+    if (command) await this.partialDone(user.employeeId);
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        const pending = this.client.transcribe(settings, input, WAKE_CLIP_TIMEOUT_MS);
+        if (mode === 'partial') this.trackPartial(user.employeeId, pending);
+        const result = await pending;
+        return { text: result.text, error: null };
+      } catch (error) {
+        const detail = messageOf(error);
+        const retryDelay = BUSY_REPLY.test(detail) ? retryDelays[attempt] : undefined;
+        if (retryDelay !== undefined) {
+          await new Promise((resolve) => setTimeout(resolve, retryDelay));
+          continue;
+        }
+        const busy = BUSY_FAILURE.test(detail);
+        if (busy && !command) return { text: null, error: null };
+        this.logger.warn(`철강맨 부르기 받아쓰기 실패 (사원 ${user.employeeId}): ${detail}`);
+        if (busy) throw new AppException('VOC-009', WAKE_SERVER_BUSY);
+        return { text: null, error: hasPermission(user, { permission: PERMISSION.ORG_MANAGE, level: 'USE' }) ? detail : WAKE_SERVER_DOWN };
+      }
     }
+  }
+
+  private trackPartial(employeeId: number, pending: Promise<unknown>): void {
+    this.partialsInFlight.set(employeeId, pending);
+    const forget = () => {
+      if (this.partialsInFlight.get(employeeId) === pending) this.partialsInFlight.delete(employeeId);
+    };
+    pending.then(forget, forget);
+  }
+
+  /** 같은 사원의 중간 글 받아쓰기가 끝나길 기다린다 (실패해도, 너무 오래면 그냥 보낸다) */
+  private async partialDone(employeeId: number): Promise<void> {
+    const pending = this.partialsInFlight.get(employeeId);
+    if (!pending) return;
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([pending.then(() => undefined, () => undefined), new Promise<void>((resolve) => (timer = setTimeout(resolve, PARTIAL_WAIT_MAX_MS)))]);
+    clearTimeout(timer);
   }
 }
 
