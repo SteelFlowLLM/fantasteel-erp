@@ -150,3 +150,6 @@ export function seoulDateTimeText(iso: string): string {
 export function daysUntil(date: string, today: string): number {
   return Math.round((Date.parse(`${date.slice(0, 10)}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000);
 }
+
+/** 결과의 '매수'를 말할 때 쓰는 단위: 코일은 '개', 슬래브는 '매' (용어 사전·업무 매뉴얼, 이슈 #530) */
+export const qtyUnitOf = (itemType: string): '개' | '매' => (itemType === 'COIL' ? '개' : '매');
