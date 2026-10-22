@@ -2,7 +2,9 @@
 // 업무·일정·구매요청 카드의 필수 칸 규칙은 회의록 후보와 같은 shared의 missingFieldsOf를 쓰고, 값의 뜻은 서버가 실행할 때 다시 검증한다.
 import {
   AI_RESEARCH_LIMITS,
+  isOrderableQty,
   missingFieldsOf,
+  orderedQtyIssueOf,
   notionSyncOf,
   type AiActionCard,
   type AiActionCardExecuteInput,
@@ -65,7 +67,8 @@ function missingOfSalesOrder(card: AiSalesOrderCard): string[] {
   if (card.lines.length === 0) missing.push('품목');
   card.lines.forEach((line, index) => {
     if (line.itemId === null) missing.push(`${index + 1}번째 줄 규격`);
-    if (line.orderedQty === null) missing.push(`${index + 1}번째 줄 매수`);
+    // 수주 등록 상한(9,999매)을 넘은 매수도 실행하지 않는다: 서버가 SO-002로 막는다 (#509)
+    if (!isOrderableQty(line.orderedQty)) missing.push(`${index + 1}번째 줄 매수`);
     if (line.dueDate === null) missing.push(`${index + 1}번째 줄 납기`);
   });
   return missing;
@@ -265,7 +268,7 @@ export function salesOrderIssues(card: AiSalesOrderCard): string[] {
   if (card.lines.length === 0) issues.push('품목 줄을 하나 이상 넣어 주세요');
   card.lines.forEach((line, index) => {
     if (line.itemId === null) issues.push(`${index + 1}번째 줄의 규격을 정해 주세요`);
-    if (line.orderedQty === null) issues.push(`${index + 1}번째 줄의 매수는 1 이상의 정수여야 해요`);
+    if (!isOrderableQty(line.orderedQty)) issues.push(orderedQtyIssueOf(index + 1));
     if (line.dueDate === null) issues.push(`${index + 1}번째 줄의 납기를 확인해 주세요`);
   });
   return issues;

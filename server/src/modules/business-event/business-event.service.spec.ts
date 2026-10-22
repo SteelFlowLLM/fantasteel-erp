@@ -147,6 +147,24 @@ describe('BusinessEventService 작업 로그 조회 (API-238, REQ-LOG-003)', () 
     expect((await list({ salesOrderId })).items.map((e) => e.chatRoomId)).toEqual([null, null, null]);
   });
 
+  it('초안이 Agent 대응 후보(메시지 없음 + payload.agent)인지 알려 준다 (작업 로그 → Agent 화면, #509)', async () => {
+    const candidate = await prisma.actionDraft.create({ data: { actionType: 'PURCHASE_REQUISITION_CREATE', draftStatus: 'REJECTED', payload: { agent: { riskType: 'RAW_SHORTAGE', targetKey: `${P}agent`, summary: '시험' } } } });
+    const meetingDraft = await prisma.actionDraft.create({ data: { actionType: 'PURCHASE_REQUISITION_CREATE', draftStatus: 'REJECTED', payload: { itemId: 1 } } });
+    const at = '2020-03-11T00:00:00.000Z';
+    for (const [draftId, type] of [[candidate.id, BUSINESS_EVENT_TYPE.AGENT_RISK_DETECTED], [meetingDraft.id, BUSINESS_EVENT_TYPE.DRAFT_CREATED]] as const) {
+      seq += 1;
+      await prisma.businessEvent.create({
+        data: { businessEventNo: `${P}EV-${seq}`, businessEventType: type, actorType: ACTOR_TYPE.SYSTEM, targetType: 'action_draft', targetId: draftId, actionDraftId: draftId, createdAt: new Date(at) },
+      });
+    }
+    const items = (await list({ from: '2020-03-11', to: '2020-03-11' })).items;
+    expect(items.map((e) => [e.actionDraftId, e.isAgentCandidate])).toEqual([
+      [candidate.id, true],
+      [meetingDraft.id, false],
+    ]);
+    expect((await list({ salesOrderId })).items.every((e) => e.isAgentCandidate === false)).toBe(true);
+  });
+
   it('기간은 서울 날짜로 시작·끝을 포함한다', async () => {
     const all = await list({});
     expect(all.items.map((e) => e.id)).toEqual([ev.earlier, ev.created, ev.reserved, ev.inspected, ev.lastMinute]);
