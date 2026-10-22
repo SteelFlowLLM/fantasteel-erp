@@ -7,9 +7,9 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| REQ | REQ-VOC-002 (회의록 저장·목록·상세). REQ-VOC-003 AI 분석(이번 단계). REQ-VOC-004 업무 등록은 다음 단계 |
+| REQ | REQ-VOC-002 (회의록 저장·목록·상세). REQ-VOC-003 AI 분석. REQ-VOC-004 허가한 후보의 확정·등록(`POST :id/register`, 8장) |
 | BP | BP-VOC-01 ([04]). 원본 전사와 AI 요약을 따로 둔다 |
-| 이번 단계 | 글·음성 전사(Voice2ERP 2~3단계) + **AI 분석(4단계)**: 전사 → 요약·결정사항·**등록 후보**. 후보는 아직 아무것도 등록하지 않는다(승인·등록은 5단계) |
+| 단계 | 글·음성 전사(Voice2ERP 2~3단계) + **AI 분석(4단계)**: 전사 → 요약·결정사항·**등록 후보**. AI는 후보만 만들고 스스로 등록하지 않는다. 작성자가 후보를 허가하면 **확정하고 등록(5단계)**이 업무·일정·구매요청 초안을 만든다 |
 
 ## 2. 테이블
 
@@ -174,6 +174,9 @@
 - `GET ai-assistant/meeting-threads/:meetingMinutesId` → 내 대화(`AiChatThreadView`, 메시지 포함) 또는 아직 묻지 않았으면 `null`. 본인 대화만 보인다(다른 사원의 대화는 없다). 지우기는 패널과 같은 `DELETE ai-assistant/threads/:id`(메시지까지 완전히 지움). 회의 질문 대화는 철강맨AI 패널의 대화 목록에 나오지 않지만, 지난 대화 찾기(`search_chat_history`)에는 내 대화로 함께 잡힌다.
 - 회의록을 지우면(`DELETE meeting-minutes/:id`) 모든 사원이 그 회의에 물은 대화도 같은 트랜잭션에서 지운다. 확정한 회의록은 지울 수 없으므로 대화가 남는다.
 - 화면: 전사가 있고 `TRANSCRIBING`이 아닐 때만 카드를 보인다. 열 때 저장한 대화를 불러와 이어 보이고, "대화 지우기"(확인 창)로 내 대화를 지운다. 불러오기에 실패하면 이유와 "다시 불러오기"를 보이고, 다시 불러올 때까지 질문을 막는다(서버는 새 질문을 지난 대화에 이어 쌓으므로 빈 화면에서 묻지 않게). 답의 `#n`은 원본 전사 n번 발언으로 이동하는 칩이 된다(AI 분석의 근거 칩과 같은 `jumpToSegment`).
+
+### 철강맨AI 지난 회의 검색 (이슈 #506, 문서에 없는 기능)
+- 철강맨AI 도구 `search_meeting_minutes`가 `MeetingMinutesService.searchDigests({ meetingMinutesStatus?, from?, to?, page, size })`를 부른다. 목록(API-259)과 같은 범위(회의록은 전 역할이 열람)에 **요약**(`summary`, 없으면 AI 요약)과 **AI가 정리한 결정사항**(`analysis_result.decisions[].text`)을 더해 돌려준다. 전사 글(`transcript`·`transcript_segments`)은 읽지 않는다. 상태·회의일(양 끝 포함)은 DB에서 좁히고, 낱말로 거르기(제목·요약·결정사항, 공백으로 나눈 낱말이 모두 있어야 함)는 부르는 도구가 100건씩 쪽을 넘기며 한다(최대 1,000건, 다 못 읽으면 알림). API는 늘지 않았다.
 
 ### Notion으로 내보내기 (이슈 #358, 문서에 없는 기능)
 - `POST meeting-minutes/:id/notion-export` → `MeetingNotionExportResult { notionPageUrl, notionExportedAt, meetingMinutes }`. 회사 Notion 계정(관리자가 연결, [integration.md](integration.md))으로 관리자가 고른 **상위 페이지 아래** 새 페이지를 만든다.

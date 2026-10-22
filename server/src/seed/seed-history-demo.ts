@@ -77,6 +77,7 @@ type Ctx = {
   production: ProductionService;
   simulation: ProductionSimulationService;
   quality: QualityService;
+  agent: FactoryAgentService;
   rejected: RejectedLotService;
   purchasing: PurchasingService;
   shipment: ShipmentService;
@@ -121,6 +122,7 @@ async function main() {
       production: app.get(ProductionService),
       simulation: app.get(ProductionSimulationService),
       quality: app.get(QualityService),
+      agent: app.get(FactoryAgentService),
       rejected: app.get(RejectedLotService),
       purchasing: app.get(PurchasingService),
       shipment: app.get(ShipmentService),
@@ -522,6 +524,8 @@ function helpers(c: Ctx) {
       for (const [index, lot] of lots.entries()) {
         const override = overrides[index] ?? {};
         const saved = await c.quality.registerQualityInspection({ lotId: lot.id, values: await passingValues(c.prisma, lot.id, override) }, c.user(who));
+        // 검사 등록은 Agent 감지를 기다리지 않는다(#496). 후보 시각이 이 검사 시각이 되도록 가상 시계를 움직이기 전에 감지를 끝낸다
+        await c.agent.idle();
         if (saved.inspectionResult === 'PASS') pass++;
         else fail++;
         if (Object.keys(override).length > 0) logger.log(`  검사 ${lot.lotNo}: ${saved.inspectionResult} (${Object.entries(override).map(([k, v]) => `${k} ${v}`).join(', ')})`);

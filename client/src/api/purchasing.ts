@@ -147,6 +147,8 @@ export interface PurchaseOrderView {
   purchaseOrderStatus: PurchaseOrderStatus;
   /** 발주한 사원 (ERD에 칸이 없어 작업 로그 PURCHASE_ORDER_CREATED로 본다) */
   orderedEmployeeName: string | null;
+  /** 발주 취소·잔량 마감한 사유·사원·시각 (그 상태일 때만, 작업 로그) */
+  statusChange: { reason: string | null; employeeName: string | null; at: string } | null;
   createdAt: string;
   items: {
     id: number;
@@ -159,10 +161,19 @@ export interface PurchaseOrderView {
     expectedReceiptDate: string | null;
     /** 입고 누계 (입고 기록 합계) */
     receivedTon: string;
-    /** 미입고량(입고예정) = 발주량 − 입고 누계 */
+    /** 미입고량(입고예정) = 발주량 − 입고 누계. 발주 취소·잔량 마감한 발주는 0 */
     remainingTon: string;
-    goodsReceipts: { id: number; goodsReceiptNo: string; receivedTon: string; receivedDate: string; lotNo: string | null }[];
+    /** 발주 취소·잔량 마감으로 닫은 양 */
+    closedTon: string;
+    /** 입고 취소 행(음수, reversedGoodsReceiptNo = 취소한 입고)도 들어 있다 */
+    goodsReceipts: { id: number; goodsReceiptNo: string; receivedTon: string; receivedDate: string; lotNo: string | null; reversedGoodsReceiptNo: string | null; reversalGoodsReceiptNo: string | null }[];
   }[];
+}
+
+/** 발주 취소·잔량 마감 (사유 필수, 500자) */
+export interface PurchaseOrderReasonInput {
+  purchaseOrderId: number;
+  reason: string;
 }
 
 export interface PurchaseOrderCreateInput {
@@ -185,4 +196,10 @@ export const purchaseOrderApi = {
 
   /** 발주 확정: 공급업체마다 발주 1건 (승인 전이면 PUR-002). 서버는 공급업체마다 차례로 만든다 */
   create: (orders: readonly PurchaseOrderCreateInput[]): Promise<PurchaseOrderView[]> => serverPurchaseOrderApi.create(orders),
+
+  /** 발주 취소: 입고가 없는 발주만 (있으면 PUR-004). 연결 구매요청은 발주 취소가 된다 */
+  cancel: (input: PurchaseOrderReasonInput): Promise<PurchaseOrderView> => serverPurchaseOrderApi.cancel(input),
+
+  /** 잔량 마감: 일부만 입고된 발주만 (아니면 PUR-005). 남은 양은 입고예정에서 빠진다 */
+  close: (input: PurchaseOrderReasonInput): Promise<PurchaseOrderView> => serverPurchaseOrderApi.close(input),
 };

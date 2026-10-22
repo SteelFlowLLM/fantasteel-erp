@@ -1,4 +1,5 @@
-// 철강맨 부르기 (이슈 #457)에서 받아쓴 글로 하는 일: 부르는 말 처리, 명령, 말로 승인 실행, 화면 조작 켜기 확인.
+// 철강맨 부르기 (이슈 #457)에서 받아쓴 글로 하는 일: 부르는 말 처리, 명령, 말로 승인 실행, 화면 조작 켜기 확인,
+// 말로 물은 답을 읽어 주기와 읽는 동안 듣기 쉬기(이슈 #507).
 // 마이크·화면은 features/shell/SteelmanWake.tsx가 맡고, 여기는 저장소와 API만 써서 시험에서 바로 부를 수 있다.
 import { aiAssistantApi } from '@/api/aiAssistant';
 import { errorCodeOf } from '@/api/http';
@@ -7,6 +8,8 @@ import { controlAiAgent, sendAiAgentNote, stopAiAssistant } from '@/hooks/useAiA
 import { CARD_RESULT, executeInputOf } from '@/lib/aiActionCard';
 import {
   COMMAND_CONTINUE_MS,
+  CONVERSATION_FOLLOW_UP_MS,
+  FOLLOW_UP_REPLY,
   compactSpeech,
   isConversationEnd,
   isLikelyHallucination,
@@ -20,9 +23,12 @@ import {
   WAKE_REPLIES,
   type VoiceCommand,
 } from '@/lib/steelmanWake';
-import type { VoiceSegmentMode } from '@/lib/voiceClip';
-import { playWakeChime, WAKE_CHIME_MS } from '@/lib/steelmanVoice';
-import { useAiChatStore } from '@/stores/useAiChatStore';
+import { setWakeLiveLevel } from '@/lib/wakeOrb';
+import type { VoiceSegmenter, VoiceSegmentMode } from '@/lib/voiceClip';
+import { playWakeChime, speakSteelmanReply, WAKE_CHIME_MS, type SteelmanSpeakRequest } from '@/lib/steelmanVoice';
+import { speak, speechMuted, speechSupport, SPEECH_SAMPLE_KEY, stopSpeaking, useSteelmanSpeechStore } from '@/lib/steelmanSpeech';
+import { speechTextOf } from '@/lib/steelmanSpeechText';
+import { useAiChatStore, type AiChatEntry } from '@/stores/useAiChatStore';
 import { useShellStore } from '@/stores/useShellStore';
 import { useSteelmanWakeStore, voiceApprovalAllowed } from '@/stores/useSteelmanWakeStore';
 import { errorMessageOf, toast } from '@/stores/useToastStore';
@@ -47,7 +53,20 @@ export function setWakeAudioContext(context: AudioContext | null): void {
   audioContext = context;
 }
 
-export const wakeMuted = (now = Date.now()): boolean => now < muteUntil;
+/** 띠링을 울린 직후이거나, 철강맨이 답을 읽는 중(막 끝나 울림이 남은 때 포함)이면 마이크가 소리를 말로 잡지 않는다 (이슈 #507) */
+export const wakeMuted = (now = Date.now()): boolean => now < muteUntil || speechMuted(now);
+
+/**
+ * 마이크 소리 묶음 하나를 받기 전에 부른다. 쉬는 중(띠링·읽는 중)이면 true: 하던 말과 미리 담아 둔 소리(preRoll)를 버리고
+ * 말소리 잡는 표시·소리 크기를 끈다. 그래서 쉬는 동안 조각이 나오지 않고, 풀린 뒤에는 쉬기 전의 소리가 앞에 붙지 않는다 (이슈 #507)
+ */
+export function restMicIfMuted(segmenter: VoiceSegmenter, now = Date.now()): boolean {
+  if (!wakeMuted(now)) return false;
+  segmenter.reset();
+  if (store().hearing) store().setHearing(false);
+  setWakeLiveLevel(0, segmenter.startThreshold);
+  return true;
+}
 
 function chime(): void {
   muteUntil = Date.now() + WAKE_CHIME_MS + 150;
@@ -146,7 +165,9 @@ function runCommand(command: Exclude<VoiceCommand, { kind: 'empty' }>, screenCon
       ask(command.question);
       return;
     case 'stop':
-      if (!chat.pendingId) store().notify('멈출 답이 없어요');
+      // 읽는 중이면 읽기를 멈춘다. 읽는 동안 마이크는 쉬므로 이 말이 오는 것은 읽기 직전에 한 말이 읽기 시작 뒤에 받아써져 도착한 때뿐이다
+      if (stopSpeaking('stopped')) store().notify('읽기를 멈췄어요');
+      else if (!chat.pendingId) store().notify('멈출 답이 없어요');
       else {
         stopAiAssistant();
         store().notify('답을 멈췄어요');
@@ -310,4 +331,98 @@ export async function transcribePartial(wav: Blob, stopped: () => boolean): Prom
   } finally {
     partialInFlight = false;
   }
+}
+
+let speechUnavailableNoticed = false;
+
+/** 시험에서 '한 번만 알림'을 되돌린다 */
+export function resetSpeechNoticeForTest(): void {
+  speechUnavailableNoticed = false;
+}
+
+/** 읽어 주기가 켜져 있는데 이 브라우저가 읽지 못할 때 이유를 한 번만 띠에 보인다 (설정에도 같은 안내가 있다) */
+function noticeSpeechUnavailable(): void {
+  const support = speechSupport();
+  if (support === 'ready' || speechUnavailableNoticed) return;
+  speechUnavailableNoticed = true;
+  store().notify(support === 'unsupported' ? '이 브라우저는 소리 내 읽기를 지원하지 않아 글로만 답해요' : '이 브라우저에 한국어 목소리가 없어 글로만 답해요. 읽어 주기 설정을 봐 주세요');
+}
+
+/** 철강맨 부르기로 물은 답을 브라우저 음성으로 읽는다 (setSteelmanSpeaker에 꽂는 1단계 목소리). 읽기 시작하면 true */
+export function speakVoiceReply(request: SteelmanSpeakRequest): boolean {
+  const { voiceUri, speechRate } = store();
+  return speak({ key: request.key, text: speechTextOf(request.text).text, source: 'voice', voiceUri, rate: speechRate, onDone: request.onDone });
+}
+
+/**
+ * 말로 물은 질문의 답이 끝났을 때 한다: 띠에 '답했어요', 읽어 주기가 켜져 있으면 읽고(그동안 듣기는 쉰다),
+ * 이어 말하기(부르는 말 없이 다음 질문 받기)는 다 읽은 뒤부터 센다. 읽지 않으면 바로 센다.
+ * 읽는 중 새 질문이나 부르기 끄기가 가로채면(interrupted) 이어 말하기를 열지 않는다
+ */
+export function afterVoiceAnswer(last: AiChatEntry | undefined): void {
+  store().showActivity({ kind: 'answered' });
+  const followUp = (): void => {
+    if (!store().enabled || !store().company.wake) return;
+    store().setCalled({ reply: FOLLOW_UP_REPLY, until: Date.now() + CONVERSATION_FOLLOW_UP_MS, followUp: true });
+  };
+  if (last?.role !== 'assistant' || !last.content.trim() || !store().speak) {
+    followUp();
+    return;
+  }
+  const started = speakSteelmanReply({
+    key: last.id,
+    text: last.content,
+    onDone: (outcome) => {
+      if (outcome === 'failed') store().notify('브라우저가 소리를 막았어요. 화면을 한 번 누른 뒤 다시 해 주세요');
+      if (outcome !== 'interrupted') followUp();
+    },
+  });
+  if (started) return;
+  noticeSpeechUnavailable();
+  followUp();
+}
+
+/** 답의 읽기·멈춤 단추: 이 답을 읽는 중이면 멈추고, 아니면 읽는다. 읽어 주기 설정이 꺼져 있어도 누르면 읽는다. 읽을 수 없으면 'unavailable' */
+export function toggleReadAloud(key: string, content: string): 'started' | 'stopped' | 'unavailable' {
+  if (useSteelmanSpeechStore.getState().speaking?.key === key) {
+    stopSpeaking('stopped');
+    return 'stopped';
+  }
+  const { voiceUri, speechRate } = store();
+  return speak({ key, text: speechTextOf(content).text, source: 'button', voiceUri, rate: speechRate }) ? 'started' : 'unavailable';
+}
+
+const SPEECH_SAMPLE = '안녕하세요, 철강맨이에요. 이 목소리로 답을 읽어 드려요.';
+
+/** 설정의 [들어 보기]: 고른 목소리·빠르기로 짧은 글을 읽는다. 읽는 중에 다시 누르면 멈춘다 */
+export function toggleSpeechSample(): 'started' | 'stopped' | 'unavailable' {
+  if (useSteelmanSpeechStore.getState().speaking?.key === SPEECH_SAMPLE_KEY) {
+    stopSpeaking('stopped');
+    return 'stopped';
+  }
+  const { voiceUri, speechRate } = store();
+  return speak({ key: SPEECH_SAMPLE_KEY, text: SPEECH_SAMPLE, source: 'button', voiceUri, rate: speechRate }) ? 'started' : 'unavailable';
+}
+
+/**
+ * 읽는 도중 읽기를 끊어야 하는 일을 지켜본다: 새 질문이 시작됨(손으로 쓰든 말로 하든), 읽던 답이 사라짐(새 대화·다른 대화·다른 사원),
+ * 부르기 끄기(부르기로 읽던 것만). 끊으면 interrupted라 이어 말하기를 열지 않는다. 돌려주는 함수는 지켜보기를 그만두고 읽던 것을 끊는다
+ */
+export function watchSteelmanSpeech(): () => void {
+  const offChat = useAiChatStore.subscribe((state, previous) => {
+    const speaking = useSteelmanSpeechStore.getState().speaking;
+    if (!speaking) return;
+    const newQuestion = state.pendingId !== null && previous.pendingId === null;
+    const answerGone = speaking.key !== SPEECH_SAMPLE_KEY && !state.entries.some((entry) => entry.id === speaking.key);
+    if (newQuestion || answerGone) stopSpeaking('interrupted');
+  });
+  const offWake = useSteelmanWakeStore.subscribe((state, previous) => {
+    if (useSteelmanSpeechStore.getState().speaking?.source !== 'voice') return;
+    if (previous.enabled && previous.company.wake && !(state.enabled && state.company.wake)) stopSpeaking('interrupted');
+  });
+  return () => {
+    offChat();
+    offWake();
+    stopSpeaking('interrupted');
+  };
 }

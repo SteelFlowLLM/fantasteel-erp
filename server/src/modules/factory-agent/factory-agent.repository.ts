@@ -79,9 +79,17 @@ export class FactoryAgentRepository {
     return tx.actionDraft.findUnique({ where: { id }, select: draftSelect });
   }
 
-  /** Agent가 만든 초안은 메시지가 없다 (메시지 초안과 구분). 최근 것 먼저 */
-  findAgentDrafts(tx: Tx) {
-    return tx.actionDraft.findMany({ where: { messageId: null }, orderBy: { id: 'desc' }, select: draftSelect });
+  /**
+   * Agent가 만든 초안은 메시지가 없다 (메시지 초안과 구분). 최근 것 먼저.
+   * openOnly면 아직 처리하지 않은 후보(확정 대기·확정 전·확정했지만 실행 전)만, 회의록 초안은 빼고 읽는다:
+   * 철강맨AI 브리핑·Agent 조회(이슈 #506)가 끝나서 계속 쌓이는 후보까지 읽지 않게
+   */
+  findAgentDrafts(tx: Tx, options: { openOnly?: boolean } = {}) {
+    return tx.actionDraft.findMany({
+      where: { messageId: null, ...(options.openOnly ? { meetingMinutesId: null, draftStatus: { in: OPEN_DRAFT_STATUSES } } : {}) },
+      orderBy: { id: 'desc' },
+      select: draftSelect,
+    });
   }
 
   update(tx: Tx, id: number, data: Prisma.ActionDraftUpdateInput) {

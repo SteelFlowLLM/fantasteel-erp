@@ -72,6 +72,17 @@ describe('통합 검색 서버 모드 (api/server/search.ts)', () => {
     expect(calls.map((c) => c.path).sort()).toEqual(['/auth/me', '/lots']);
   });
 
+  it('LOT 번호 조건(60자)보다 긴 글은 서버를 묻지 않고 빈 결과다 (서버 400이 결과를 통째로 지우지 않게, 이슈 #498)', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.sales, (c: ServerCall) => {
+      if (c.path === '/auth/me') return ok(me({ SALES_ORDER_CREATE: 'USE', SHIPMENT_REQUEST_MANAGE: 'USE' }));
+      if (c.path === '/lots') return c.query.lotNo && c.query.lotNo.length > 60 ? fail(400, 'COM-004', 'lotNo는 60자까지') : ok(lots);
+      return undefined;
+    });
+    expect(await searchApi.search('X'.repeat(60))).toHaveLength(1);
+    expect(await searchApi.search('X'.repeat(61))).toEqual([]);
+    expect(calls.filter((c) => c.path === '/lots').map((c) => c.query.lotNo?.length)).toEqual([60]);
+  });
+
   it('출하요청 목록은 보이지만(출고 확정 권한) 출하요청 화면을 열 권한이 없으면 LOT 추적으로 연결한다', async () => {
     useFakeServer(SEED_EMPLOYEE_NO.logistics, (c: ServerCall) => {
       if (c.path === '/auth/me') return ok(me({ GOODS_ISSUE_CONFIRM: 'USE' }));

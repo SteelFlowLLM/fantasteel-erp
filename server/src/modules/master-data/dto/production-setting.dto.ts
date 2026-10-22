@@ -1,4 +1,4 @@
-import { IsInt, IsOptional, Matches, Min } from 'class-validator';
+import { IsDateString, IsInt, IsOptional, Matches, Min } from 'class-validator';
 
 /** API-188. 보내지 않은 값은 그대로 둔다 (REQ-MST-009) */
 export class UpdateProductionSettingDto {
@@ -11,4 +11,9 @@ export class UpdateProductionSettingDto {
   @IsInt({ message: '납기 위험 기준일은 0 이상의 정수예요' })
   @Min(0, { message: '납기 위험 기준일은 0 이상의 정수예요' })
   deliveryRiskDays?: number;
+
+  /** 불러온 시각. 그 사이 다른 사람이 고쳤으면 COM-001 (이슈 #498). 보내지 않으면 비교하지 않는다 */
+  @IsOptional()
+  @IsDateString({ strict: true }, { message: 'expectedUpdatedAt은 시각(ISO 8601)으로 보내 주세요' })
+  expectedUpdatedAt?: string | null;
 }

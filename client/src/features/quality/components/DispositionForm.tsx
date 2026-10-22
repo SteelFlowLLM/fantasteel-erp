@@ -25,17 +25,8 @@ const HELP: Record<DispositionStatus, string> = {
 /** lot.disposition_reason 길이 (ERD varchar(500)) */
 const MAX_REASON = 500;
 
-export function DispositionForm({
-  row,
-  canEdit,
-  dispositionAt,
-}: {
-  row: RejectedLotListRow;
-  canEdit: boolean;
-  /** 지정 시각. 서버 응답에 없으면 화면이 작업 로그(불합격 상태 지정)에서 찾아 넘긴다 */
-  dispositionAt?: string | null;
-}) {
-  const setAt = dispositionAt ?? row.dispositionAt;
+export function DispositionForm({ row, canEdit }: { row: RejectedLotListRow; canEdit: boolean }) {
+  const setAt = row.dispositionAt;
   const [choice, setChoice] = useState<DispositionStatus | null>(row.dispositionStatus);
   const [reason, setReason] = useState('');
   const save = useSetDisposition(() => setReason(''));

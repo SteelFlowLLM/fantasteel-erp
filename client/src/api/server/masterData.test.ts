@@ -20,6 +20,7 @@ const item = (id: number, itemCode: string, extra: Partial<ItemView>): ItemView 
   theoreticalWeightTon: '23.550',
   defaultYardId: 22,
   defaultSupplierId: null,
+  updatedAt: '2026-10-21T00:00:00.000Z',
   ...extra,
 });
 const raw = (id: number, itemCode: string, defaultSupplierId: number | null): ItemView =>
@@ -30,11 +31,11 @@ const coil = item(102, 'CL-SS275-2.5x1200x980000', { itemType: 'COIL', thickness
 const unmappedSlab = item(103, 'SL-SS275-220x1400x9500', { thicknessMm: '220.00', widthMm: '1400.00', lengthMm: '9500.00', theoreticalWeightTon: '22.966' });
 const items: ItemView[] = [raw(1, 'ORE01', 31), raw(2, 'COL01', null), coil, slab, unmappedSlab];
 const yards: YardView[] = [
-  { id: 21, yardCode: 'YD-RM-01', yardName: '원료 1야드', yardType: 'RAW_MATERIAL' },
-  { id: 22, yardCode: 'YD-SL-01', yardName: '슬래브 1야드', yardType: 'SLAB' },
-  { id: 23, yardCode: 'YD-CL-01', yardName: '코일 1야드', yardType: 'COIL' },
+  { id: 21, yardCode: 'YD-RM-01', yardName: '원료 1야드', yardType: 'RAW_MATERIAL', updatedAt: '2026-10-21T01:00:00.000Z' },
+  { id: 22, yardCode: 'YD-SL-01', yardName: '슬래브 1야드', yardType: 'SLAB', updatedAt: '2026-10-21T02:00:00.000Z' },
+  { id: 23, yardCode: 'YD-CL-01', yardName: '코일 1야드', yardType: 'COIL', updatedAt: '2026-10-21T03:00:00.000Z' },
 ];
-const suppliers: SupplierView[] = [{ id: 31, supplierCode: 'SUP-01', supplierName: '가온광업' }];
+const suppliers: SupplierView[] = [{ id: 31, supplierCode: 'SUP-01', supplierName: '가온광업', updatedAt: '2026-10-21T04:00:00.000Z' }];
 const brief = (i: ItemView) => ({ id: i.id, itemCode: i.itemCode, thicknessMm: i.thicknessMm ?? '', widthMm: i.widthMm ?? '', lengthMm: i.lengthMm ?? '', theoreticalWeightTon: i.theoreticalWeightTon ?? '' });
 const mappings: SpecMappingView[] = [{ id: 51, steelGradeId: 11, steelGradeCode: 'SS275', slabItem: brief(slab), coilItem: brief(coil), hotRollingYieldRate: '0.9800', updatedAt: '2026-10-21T00:00:00.000Z' }];
 const grades: SteelGradeView[] = [
@@ -87,13 +88,18 @@ describe('기준정보 서버 어댑터 조회 (api/server/masterData.ts)', () =
 
   it('라우팅: 슬래브·코일로 묶고 공정 순서대로 둔다', async () => {
     const routings: RoutingView[] = [
-      { id: 3, itemType: 'COIL', processType: 'STEELMAKING', sequenceNo: 2, plannedYieldRate: '0.9000' },
-      { id: 2, itemType: 'COIL', processType: 'IRONMAKING', sequenceNo: 1, plannedYieldRate: null },
-      { id: 1, itemType: 'SLAB', processType: 'IRONMAKING', sequenceNo: 1, plannedYieldRate: null },
+      { id: 3, itemType: 'COIL', processType: 'STEELMAKING', sequenceNo: 2, plannedYieldRate: '0.9000', updatedAt: '2026-10-21T05:00:00.000Z' },
+      { id: 2, itemType: 'COIL', processType: 'IRONMAKING', sequenceNo: 1, plannedYieldRate: null, updatedAt: '2026-10-21T03:00:00.000Z' },
+      { id: 1, itemType: 'SLAB', processType: 'IRONMAKING', sequenceNo: 1, plannedYieldRate: null, updatedAt: '2026-10-21T02:00:00.000Z' },
     ];
     useFakeServer(SEED_EMPLOYEE_NO.admin, (c) => (c.path === '/routings' ? ok(routings) : undefined));
     const result = await masterDataApi.listRoutings();
 
+    // 폼이 저장 때 돌려보내는 시각 = 그 품목 유형 공정 중 가장 늦은 저장 시각 (저장하면 바뀌어 폼이 다시 그려진다, 이슈 #498)
+    expect(result.map((r) => [r.itemType, r.updatedAt])).toEqual([
+      ['SLAB', '2026-10-21T02:00:00.000Z'],
+      ['COIL', '2026-10-21T05:00:00.000Z'],
+    ]);
     expect(result.map((r) => [r.itemType, r.steps.map((s) => [s.processType, s.processSeq, s.plannedYieldRate])])).toEqual([
       ['SLAB', [['IRONMAKING', 1, null]]],
       [
@@ -119,15 +125,17 @@ describe('기준정보 서버 어댑터 조회 (api/server/masterData.ts)', () =
       ['COL01', '원료 1야드', null],
       ['ORE01', '원료 1야드', '가온광업'],
     ]);
+    expect(materials.map((m) => m.updatedAt)).toEqual(['2026-10-21T00:00:00.000Z', '2026-10-21T00:00:00.000Z']);
   });
 
   it('생산 설정값·고객사는 서버 값을 그대로 쓰고 참조 문구는 비운다', async () => {
     useFakeServer(SEED_EMPLOYEE_NO.admin, (c) => {
-      if (c.path === '/production-settings') return ok({ id: 1, heatCapacityTon: '250.000', deliveryRiskDays: 3 });
-      if (c.path === '/customers') return ok([{ id: 41, customerCode: 'CUS-01', customerName: '한빛조선' }]);
+      if (c.path === '/production-settings') return ok({ id: 1, heatCapacityTon: '250.000', deliveryRiskDays: 3, updatedAt: '2026-10-21T06:00:00.000Z' });
+      if (c.path === '/customers') return ok([{ id: 41, customerCode: 'CUS-01', customerName: '한빛조선', updatedAt: '2026-10-21T07:00:00.000Z' }]);
       return undefined;
     });
-    expect(await masterDataApi.getProductionSetting()).toMatchObject({ heatCapacityTon: '250.000', deliveryRiskDays: 3 });
-    expect(await masterDataApi.listCustomers()).toEqual([{ id: 41, customerCode: 'CUS-01', customerName: '한빛조선', referenceText: null, updatedAt: '' }]);
+    // 서버가 준 수정 시각을 그대로 쓴다: 빈 글자면 저장 뒤 폼이 다시 그려지지 않고 동시 수정도 막지 못했다 (이슈 #498)
+    expect(await masterDataApi.getProductionSetting()).toMatchObject({ heatCapacityTon: '250.000', deliveryRiskDays: 3, updatedAt: '2026-10-21T06:00:00.000Z' });
+    expect(await masterDataApi.listCustomers()).toEqual([{ id: 41, customerCode: 'CUS-01', customerName: '한빛조선', referenceText: null, updatedAt: '2026-10-21T07:00:00.000Z' }]);
   });
 });

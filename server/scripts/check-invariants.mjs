@@ -58,12 +58,13 @@ const checks = [
           ORDER BY i.item_code`,
   },
   {
-    name: '④ 원료·용선 잔량은 0 ~ 초기량, 잔량 0이면 소진·남으면 재고 상태',
-    basis: 'BP-PRD-02 예외(음수 잔량)',
+    name: '④ 원료·용선 잔량은 0 ~ 초기량, 잔량 0이면 소진(원료는 입고 취소도)·남으면 재고 상태',
+    basis: 'BP-PRD-02 예외(음수 잔량), BP-PUR-02 반대 거래',
     sql: `SELECT l.lot_no, l.lot_status, l.initial_ton, l.remaining_ton FROM lot l
           WHERE l.lot_type IN ('RAW_MATERIAL', 'HOT_METAL')
             AND (l.remaining_ton IS NULL OR l.remaining_ton < 0 OR l.remaining_ton > l.initial_ton
-                 OR (l.remaining_ton = 0 AND l.lot_status <> 'CONSUMED') OR (l.remaining_ton > 0 AND l.lot_status <> 'AVAILABLE'))
+                 OR (l.remaining_ton = 0 AND l.lot_status NOT IN ('CONSUMED', 'RECEIPT_CANCELLED'))
+                 OR (l.remaining_ton > 0 AND l.lot_status <> 'AVAILABLE'))
           ORDER BY l.lot_no`,
   },
   {
@@ -150,6 +151,30 @@ const checks = [
           HAVING coalesce(sum(r.reserved_qty) FILTER (WHERE r.reservation_status IN ('ACTIVE', 'CONVERTED')), 0) > soi.ordered_qty
               OR (soi.sales_order_item_status = 'CANCELLED' AND coalesce(sum(r.reserved_qty) FILTER (WHERE r.reservation_status = 'ACTIVE'), 0) > 0)
           ORDER BY so.sales_order_no, i.item_code`,
+  },
+  {
+    name: '⑫ 입고 취소 LOT은 잔량 0인 원료 LOT이고 그 입고에 취소 행이 있다 (취소된 입고의 LOT은 입고 취소 상태)',
+    basis: 'BP-PUR-02 반대 거래 (이슈 #500)',
+    sql: `SELECT l.lot_no, l.lot_type, l.lot_status, l.remaining_ton, g.goods_receipt_no, rv.goods_receipt_no AS reversal_no
+          FROM lot l
+          LEFT JOIN goods_receipt g ON g.id = l.goods_receipt_id
+          LEFT JOIN goods_receipt rv ON rv.reversed_goods_receipt_id = g.id
+          WHERE (l.lot_status = 'RECEIPT_CANCELLED' AND (l.lot_type <> 'RAW_MATERIAL' OR l.remaining_ton IS DISTINCT FROM 0 OR rv.id IS NULL))
+             OR (l.lot_status <> 'RECEIPT_CANCELLED' AND rv.id IS NOT NULL)
+          ORDER BY l.lot_no`,
+  },
+  {
+    name: '⑬ 입고 취소 행은 원래 입고와 같은 발주 품목·같은 톤(부호 반대), 발주 품목 입고 누계는 0 ~ 발주량',
+    basis: 'BP-PUR-02, ERD goods_receipt Note',
+    sql: `SELECT rv.goods_receipt_no AS reversal_no, g.goods_receipt_no, rv.received_ton AS reversal_ton, g.received_ton, NULL::numeric AS received_sum, NULL::numeric AS ordered_ton
+          FROM goods_receipt rv JOIN goods_receipt g ON g.id = rv.reversed_goods_receipt_id
+          WHERE rv.purchase_order_item_id <> g.purchase_order_item_id OR rv.received_ton <> -g.received_ton
+          UNION ALL
+          SELECT NULL, poi.id::text, NULL, NULL, sum(gr.received_ton), poi.ordered_ton
+          FROM purchase_order_item poi JOIN goods_receipt gr ON gr.purchase_order_item_id = poi.id
+          GROUP BY poi.id, poi.ordered_ton
+          HAVING sum(gr.received_ton) < 0 OR sum(gr.received_ton) > poi.ordered_ton
+          ORDER BY 1, 2`,
   },
 ];
 

@@ -596,7 +596,7 @@ export class AiAssistantService {
             reply = await call(round < maxRounds ? tools : []);
           }
 
-          const parsed = parseAssistantAnswer(reply.content, [...references, ...readKnowledge.terms], [...processSteps, ...readKnowledge.steps], [...manualGuides, ...readKnowledge.guides]);
+          const parsed = parseAssistantAnswer(reply.content, [...references, ...readKnowledge.terms], [...processSteps, ...readKnowledge.steps], [...manualGuides, ...readKnowledge.guides], readKnowledge.sections);
           // 카드가 없는데 만들었다고 말하면 사용자가 없는 카드를 기다리므로, 만들지 못했다고 바로잡는다.
           // 지난 대화를 찾아 읽은 답은 "그때 카드를 만들었어요"처럼 지난 일을 옮기는 것이라 바로잡지 않는다 (이슈 #412)
           const recalled = toolCalls.some((call) => historySearch?.has(call.name) === true);

@@ -35,7 +35,7 @@ LOT을 **만드는** 일은 production(용선·히트·슬래브·코일)과 pur
 
 | Method | Path | 이름 | 권한 | 비고 ([CSV]) |
 | --- | --- | --- | --- | --- |
-| GET | `lots` | LOT 목록 | 로그인만(LOT 추적은 전 역할) | |
+| GET | `lots` | LOT 목록 | 로그인만(LOT 추적은 전 역할) | `lotNo` 최대 60자(`LOT_NO_FILTER_MAX`, 넘으면 COM-004). `withLinks=true`(이슈 #498)면 줄마다 상위 히트·불합격 처리·현재 배정·원료 종류를 함께 준다: 화면이 줄마다 LOT 상세를 따로 부르던 N+1을 없앤다 |
 | GET | `lots/:id` | LOT 상세 | 로그인만 | |
 | GET | `lots/:id/trace` | LOT 정·역추적 | 로그인만 | 12.2 명시 `?direction=`. `lot_relation` 내부 id로 조회, 번호 파싱 금지 |
 
@@ -59,6 +59,7 @@ LOT을 **만드는** 일은 production(용선·히트·슬래브·코일)과 pur
 **구현 메모** (API-235~237, 응답 타입은 shared `lot.ts`)
 
 - 목록 `GET lots`: `lotType`·`lotStatus`·`itemId`·`lotNo`(앞부분, 대소문자 무관)·`page`·`size`. 생산완료일 최근 순 → LOT 번호 순. 한 줄에 규격·강종·야드·잔량·자기 검사 판정을 담는다.
+  - `withLinks=true`(이슈 #498): 줄마다 `heat`(슬래브·코일의 가장 가까운 상위 히트와 그 히트의 검사 판정), `disposition`(불합격 처리 상태·사유), `allocation`(해제되지 않은 마지막 배정, 슬래브·코일만), `rawMaterialType`(규격 기준)을 더한다. 값은 상세와 같은 규칙이다. 상위 히트는 `findNearestHeatsOfLots.sql`(`WITH RECURSIVE`, 여러 LOT을 한 번에, 거리가 같으면 id가 작은 히트)로 구하고, 배정은 한 번에 읽어 id가 가장 큰 것을 고른다.
 - 상세 `GET lots/:id`: 위 값 + 검사 값·기준 버전 + 적격 여부(슬래브·코일만, 아니면 null) + 상위 히트 + 불합격 처리 상태·사유 + 해제되지 않은 배정 + 바로 위(부모)·아래(자식) LOT과 연결 근거 + 출하(출하요청·수주·밀시트).
 - 추적 `GET lots/:id/trace?direction=backward|forward`: `traceLotBackward.sql`·`traceLotForward.sql`(`WITH RECURSIVE`)로 시작 LOT과 조상·자손의 id와 최소 거리만 구하고, 노드·연결·출하는 Prisma로 따로 읽는다. 경로 배열로 순환을 막고 같은 LOT은 한 번만 나온다(연결은 N:M 그대로 모두 남는다).
 - `direction`을 생략하면 코일·슬래브는 `backward`, 원료·용선·히트는 `forward`다. 역추적은 출하·영향 범위를 채우지 않는다. 정추적은 `shipments`(출하요청 × 수주 단위, 묶음의 LOT이 모두 출고돼야 CONSUMED)와 `impact`(슬래브·코일 수, 출고·미출고·소진 수, 연결된 수주)를 더한다.

@@ -124,6 +124,15 @@ describe('수주 등록 카드', () => {
     expect(salesOrderIssues(salesOrder())).toEqual([]);
     expect(salesOrderIssues(salesOrder({ customerId: null }))).toEqual(['고객사를 정해 주세요']);
   });
+
+  it('매수가 수주 등록 상한(9,999매)을 넘으면 서버와 같은 사유를 붙이고 실행하지 않는다 (#509)', () => {
+    const over = salesOrder({ lines: [{ itemId: 9, itemLabel: null, orderedQty: 10_000, dueDate: '2026-11-10' }] });
+    expect(salesOrderIssues(over)).toEqual(['1번째 줄의 매수는 1 이상 9,999 이하의 정수여야 해요']);
+    expect(missingOfCard(over)).toEqual(['1번째 줄 매수']);
+    const max = salesOrder({ lines: [{ itemId: 9, itemLabel: null, orderedQty: 9_999, dueDate: '2026-11-10' }] });
+    expect(salesOrderIssues(max)).toEqual([]);
+    expect(missingOfCard(max)).toEqual([]);
+  });
 });
 
 describe('열연 배정·히트 편성·사례 카드', () => {

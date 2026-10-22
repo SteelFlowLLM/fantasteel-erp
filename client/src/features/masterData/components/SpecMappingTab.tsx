@@ -112,7 +112,7 @@ function SpecMappingModal({ onClose, editing }: { onClose: () => void; editing?:
   const [slabId, setSlabId] = useState(editing ? String(editing.slab.id) : '');
   const [coilId, setCoilId] = useState(editing ? String(editing.coil.id) : '');
   const create = useAction(masterDataApi.createSpecMapping, { success: '규격을 매핑했어요', onSuccess: onClose, onError: fieldErrors.takeFrom });
-  const update = useAction(masterDataApi.updateSpecMapping, { success: '규격 매핑을 고쳤어요', onSuccess: onClose, onError: fieldErrors.takeFrom });
+  const update = useAction(masterDataApi.updateSpecMapping, { success: '규격 매핑을 고쳤어요', onSuccess: onClose, onError: fieldErrors.takeFrom, refreshOnStale: true, onStale: onClose });
   const free = (s: MasterProductSpecView) => s.mappingId === null || s.mappingId === editing?.id;
 
   const all = specs.data ?? [];

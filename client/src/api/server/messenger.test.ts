@@ -226,6 +226,16 @@ describe('메신저 서버 어댑터 (api/server/messenger.ts)', () => {
     expect(await files[0].text()).toBe('hello');
   });
 
+  it('메시지 검색어는 서버 상한(100자)까지만 보낸다 (넘으면 서버가 400, 이슈 #498)', async () => {
+    const calls = useFakeServer(SEED_EMPLOYEE_NO.sales, (c) => {
+      if (c.path === '/chat-rooms/7') return ok(detail());
+      if (c.path === '/chat-rooms/7/messages/search') return ok({ items: [], hasMore: false });
+      return undefined;
+    });
+    await messengerApi.searchMessages({ chatRoomId: 7, keyword: '가'.repeat(150) });
+    expect(calls.find((c) => c.path.endsWith('/messages/search'))?.query.q).toBe('가'.repeat(100));
+  });
+
   it('파일 모아보기는 GET …/attachments, 검색은 GET …/messages/search?q=, 안 읽은 멤버 수는 그대로 쓴다', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.sales, (c) => {
       if (c.path === '/chat-rooms/7') return ok(detail());

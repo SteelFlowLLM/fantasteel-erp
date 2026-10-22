@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Matches, ValidateIf } from 'class-validator';
+import { IsDateString, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Matches, ValidateIf } from 'class-validator';
 import { ITEM_TYPE, RAW_MATERIAL_TYPE, type ItemType, type RawMaterialType } from '@fantasteel/shared';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
@@ -92,4 +92,9 @@ export class UpdateItemDto {
   @IsOptional()
   @IsInt({ message: '기본 공급업체를 골라 주세요' })
   defaultSupplierId?: number | null;
+
+  /** 불러온 시각. 그 사이 다른 사람이 고쳤으면 COM-001 (이슈 #498). 보내지 않으면 비교하지 않는다 */
+  @IsOptional()
+  @IsDateString({ strict: true }, { message: 'expectedUpdatedAt은 시각(ISO 8601)으로 보내 주세요' })
+  expectedUpdatedAt?: string | null;
 }

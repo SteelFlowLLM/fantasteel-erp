@@ -192,8 +192,9 @@ describe('수주 등록 초안 (SALES_ORDER_CREATE)', () => {
     expect((await service.get(sales, id)).unresolvedFields).toEqual(['고객사', '품목']);
     const itemId = await itemIdOf(SLAB_SS275);
     expect(await codeOf(service.update(sales, id, { payload: { items: [{ itemId, orderedQty: 10.5, dueDate: '2026-11-30' }] } }))).toBe('COM-004');
-    // 수주 등록과 같은 한 줄 상한 (#496)
-    expect(await codeOf(service.update(sales, id, { payload: { items: [{ itemId, orderedQty: 10_000, dueDate: '2026-11-30' }] } }))).toBe('COM-004');
+    // 수주 등록과 같은 한 줄 상한·같은 코드·같은 문구 (#496, #509)
+    const over = await service.update(sales, id, { payload: { items: [{ itemId, orderedQty: 10_000, dueDate: '2026-11-30' }] } }).then(() => null, (e: unknown) => e);
+    expect(over).toMatchObject({ code: 'SO-002', message: '수량은 품목 한 줄에 9,999까지 입력할 수 있어요' });
     expect(await codeOf(service.update(sales, id, { payload: { items: [{ itemId: await itemIdOf('ORE01'), orderedQty: 1, dueDate: '2026-11-30' }] } }))).toBe('SO-001');
     expect(await codeOf(service.update(sales, id, { payload: { itemId } }))).toBe('COM-004');
     const edited = await service.update(sales, id, { payload: { items: [{ itemId, orderedQty: 3, dueDate: null }] } });

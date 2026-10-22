@@ -219,6 +219,18 @@ export class SalesOrderService {
     };
   }
 
+  /**
+   * 진행 중 수주 중 납기 위험인 수주를 납기 빠른 순으로 (철강맨AI 아침 브리핑, 이슈 #506). 대시보드 공정 흐름 현황의 납기 위험 수주와 같은 기준이다.
+   * 목록(최신순 1,000건)을 읽어 거르면 오래된 위험 수주가 빠질 수 있어, 진행 중 수주만 읽는 대시보드와 같은 조회를 쓴다
+   */
+  async listDueRisk(): Promise<SalesOrderSummary[]> {
+    const open = await this.openSalesOrderFulfillments(this.prisma);
+    return open.salesOrders
+      .filter((so) => so.isDueRisk)
+      .map(({ fulfillments: _fulfillments, ...summary }) => summary)
+      .sort((a, b) => (a.earliestDueDate ?? '9999-12-31').localeCompare(b.earliestDueDate ?? '9999-12-31') || a.id - b.id);
+  }
+
   // ── 등록 (BP-SO-01, 13.1·13.2) ─────────────────────────
 
   /**

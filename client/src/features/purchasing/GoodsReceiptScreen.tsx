@@ -3,12 +3,15 @@
 // 입고 (REQ-PUR-004, REQ-LOT-003·004, BP-PUR-02): 발주 품목 줄을 골라 입고 톤·입고일을 넣으면 등록이 곧 확정이다(상태값·수정 없음).
 // 미입고량을 넘으면 PUR-003, 입고일은 오늘까지. 야드는 원료의 기본 야드로 자동 지정한다(야드 선택·비고 없음, PLAN 7장).
 // 입고 1건마다 원료 LOT(RM-원료코드-YYMMDD-NNN, 잔량 = 입고량)이 생기고 발주 입고 누계·입고예정·상태가 바뀐다.
+// 입고 취소(BP-PUR-02 반대 거래): 원료 LOT을 쓰기 전에만, 사유와 함께. 원래 입고는 남고 음수 입고 줄이 더해진다(LOT은 입고 취소·잔량 0).
+// 발주 취소·잔량 마감한 발주는 더 입고하지 않는다.
 // 주소: ?item= 발주 품목 줄, ?po= 그 발주의 첫 미입고 줄.
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { PERMISSION } from '@/codes';
 import { ApiError, InputError } from '@/api/errors';
 import type { GoodsReceiptResult, GoodsReceiptView, ReceiptLine } from '@/api/goodsReceipts';
+import { Badge } from '@/components/Badge';
 import { Banner } from '@/components/Banner';
 import { Button, ButtonLink } from '@/components/Button';
 import { Card, CardBody, CardFoot, CardHead } from '@/components/Card';
@@ -27,11 +30,13 @@ import { EmptyNote, StateView } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
 import { Segmented } from '@/components/Tabs';
 import { MasterGroupTitle, MasterItem, MasterNote, PurchaseOrderStatusBadge } from '@/features/purchasing/components/PurchasingParts';
+import { ReasonDialog } from '@/features/purchasing/components/ReasonDialog';
 import { useUrlParams } from '@/features/purchasing/hooks/useUrlParams';
 import { isOverdue, ratioPercent, rawMaterialLotNoPattern, receiptRowLabel, trimTonText } from '@/features/purchasing/lib/purchasingView';
-import { useGoodsReceiptList, useReceiptLines, useReceiveGoods } from '@/hooks/useGoodsReceipts';
+import { useCancelGoodsReceipt, useGoodsReceiptList, useReceiptLines, useReceiveGoods } from '@/hooks/useGoodsReceipts';
 import { useCanUse, useCanView } from '@/hooks/usePermission';
 import { cn } from '@/lib/cn';
+import { decSum } from '@/lib/decimal';
 import { fmtDate, fmtMD, fmtMDHM, fmtNum, fmtTon, todayStr } from '@/lib/format';
 import { withIGa } from '@/lib/josa';
 import { permissionNeedText } from '@/lib/permissions';
@@ -42,6 +47,9 @@ type HistoryScope = 'line' | 'all';
 
 const RECENT_COUNT = 5;
 const lotHref = (lotNo: string): string => `/lots/trace?lot=${encodeURIComponent(lotNo)}`;
+/** 입고 줄 상태 글: 닫힌 발주는 상태 이름, 다 받았으면 입고 끝 */
+const lineDoneText = (line: ReceiptLine): string | null =>
+  line.isClosed ? (line.purchaseOrderStatus === 'CANCELLED' ? '발주 취소' : `잔량 마감 ${fmtTon(line.closedTon)}`) : line.isFullyReceived ? '입고 끝' : null;
 
 export function GoodsReceiptScreen() {
   const url = useUrlParams();
@@ -130,7 +138,7 @@ export function GoodsReceiptScreen() {
                           {line.itemName} <span className="text-ink-3">· {line.supplierName}</span>
                         </span>
                         <span className="flex items-center gap-2 text-cap text-ink-3">
-                          <span data-pet-field="입고예정" className="whitespace-nowrap">{line.isFullyReceived ? '입고 끝' : `입고예정 ${fmtTon(line.remainingTon)}`}</span>
+                          <span data-pet-field="입고예정" className="whitespace-nowrap">{lineDoneText(line) ?? `입고예정 ${fmtTon(line.remainingTon)}`}</span>
                           <Progress value={ratioPercent(line.receivedTon, line.orderedTon)} tone={line.isFullyReceived ? 'ok' : 'run'} showLabel={false} label="입고 진행" className="flex-1" />
                         </span>
                       </MasterItem>
@@ -159,6 +167,7 @@ export function GoodsReceiptScreen() {
                   >
                     <span className="flex items-center gap-2 text-sm text-ink">
                       <b className="font-mono font-semibold">{receipt.goodsReceiptNo}</b>
+                      {receipt.reversedGoodsReceiptNo ? <Badge tone="neutral">입고 취소</Badge> : receipt.reversalGoodsReceiptNo ? <Badge tone="neutral">취소됨</Badge> : null}
                       <span data-pet-field="입고 톤" className="ml-auto tabular-nums">
                         {fmtTon(receipt.receivedTon)}
                       </span>
@@ -177,7 +186,7 @@ export function GoodsReceiptScreen() {
             )
           }
         </QueryBoundary>
-        <MasterNote>입고 등록이 곧 입고 확정이에요. 원료 LOT이 바로 만들어지고 고칠 수 없어요. 입고 검사는 하지 않아요.</MasterNote>
+        <MasterNote>입고 등록이 곧 입고 확정이에요. 원료 LOT이 바로 만들어지고 고칠 수 없어요. 잘못 받은 입고는 LOT을 쓰기 전에 입고 취소로 되돌려요. 입고 검사는 하지 않아요.</MasterNote>
       </MasterPane>
       <PageMain>
         {active ? (
@@ -232,6 +241,16 @@ function ReceiptWork({
   const [confirming, setConfirming] = useState(false);
   const [done, setDone] = useState<GoodsReceiptResult | null>(null);
   const [scope, setScope] = useState<HistoryScope>('line');
+  const [cancelling, setCancelling] = useState<GoodsReceiptView | null>(null);
+  const cancelReceipt = useCancelGoodsReceipt({
+    success: (reversal) => `${reversal.reversedGoodsReceiptNo ?? ''} 입고를 취소했어요. 원료 LOT은 입고 취소가 되고 입고예정이 되돌아와요`,
+    onSuccess: (reversal) => {
+      setCancelling(null);
+      setDone(null);
+      // 이 품목의 입고를 취소했으면 되돌아온 양만큼 입고 톤 기본값도 늘린다
+      if (reversal.purchaseOrderItemId === line.purchaseOrderItemId) setReceivedTon(trimTonText(decSum([line.remainingTon, reversal.receivedTon.replace(/^-/, '')])));
+    },
+  });
 
   const receive = useReceiveGoods({
     success: (result) => `입고를 확정했어요. 원료 LOT ${withIGa(result.lotNo)} 만들어졌어요`,
@@ -287,7 +306,11 @@ function ReceiptWork({
       <StatBar petKey="card:goodsReceipts.summary">
         <Kpi flat label="발주" value={fmtNum(line.orderedTon, 3)} unit="t" />
         <Kpi flat label="입고 누계" value={fmtNum(line.receivedTon, 3)} unit="t" sub={`발주 대비 ${Math.round(ratioPercent(line.receivedTon, line.orderedTon))}%`} />
-        <Kpi flat label="입고예정" value={fmtNum(line.remainingTon, 3)} unit="t" sub={line.isFullyReceived ? '입고 끝' : '발주 − 입고 누계 · 나눠서 입고할 수 있어요'} />
+        {line.isClosed ? (
+          <Kpi flat label={line.purchaseOrderStatus === 'CANCELLED' ? '취소한 양' : '마감한 잔량'} value={fmtNum(line.closedTon, 3)} unit="t" sub="입고예정에서 빠졌어요 · 더는 입고하지 않아요" />
+        ) : (
+          <Kpi flat label="입고예정" value={fmtNum(line.remainingTon, 3)} unit="t" sub={line.isFullyReceived ? '입고 끝' : '발주 − 입고 누계 · 나눠서 입고할 수 있어요'} />
+        )}
       </StatBar>
 
       {done ? (
@@ -306,7 +329,11 @@ function ReceiptWork({
       <div className="grid grid-cols-[minmax(0,1fr)_280px] gap-4">
         <Card petKey="card:goodsReceipts.form">
           <CardHead title="입고 등록" meta="등록하면 바로 확정돼요" />
-          {line.isFullyReceived ? (
+          {line.isClosed ? (
+            <CardBody>
+              <EmptyNote>{line.purchaseOrderStatus === 'CANCELLED' ? '취소한 발주라 입고하지 않아요' : '잔량 마감한 발주라 더는 입고하지 않아요'}</EmptyNote>
+            </CardBody>
+          ) : line.isFullyReceived ? (
             <CardBody>
               <EmptyNote>이 발주 품목은 모두 입고했어요</EmptyNote>
             </CardBody>
@@ -336,7 +363,7 @@ function ReceiptWork({
                 </Field>
               </CardBody>
               <CardFoot>
-                <span className="text-cap text-ink-3">확정하면 원료 LOT이 만들어지고 재고·MRP 잔량에 바로 반영돼요. 확정한 입고는 고칠 수 없어요.</span>
+                <span className="text-cap text-ink-3">확정하면 원료 LOT이 만들어지고 재고·MRP 잔량에 바로 반영돼요. 확정한 입고는 고칠 수 없고, LOT을 쓰기 전에만 입고 취소할 수 있어요.</span>
                 <Button
                   variant="primary"
                   icon="check"
@@ -397,12 +424,16 @@ function ReceiptWork({
                   <Th>야드</Th>
                   <Th>원료 LOT</Th>
                   <Th>확정</Th>
+                  <Th />
                 </tr>
               </thead>
               <tbody>
                 {history.map((receipt) => (
                   <tr key={receipt.id} data-selected={done?.goodsReceiptId === receipt.id} data-pet-item="goodsReceipt" data-pet-item-title={receipt.goodsReceiptNo}>
-                    <Td className="font-mono">{receipt.goodsReceiptNo}</Td>
+                    <Td className="font-mono">
+                      {receipt.goodsReceiptNo}
+                      {receipt.reversedGoodsReceiptNo ? <span className="block font-sans text-cap text-ink-3">{receipt.reversedGoodsReceiptNo} 취소</span> : null}
+                    </Td>
                     <Td className="font-mono">{receipt.purchaseOrderNo}</Td>
                     <Td>{receipt.itemName}</Td>
                     <Td>{fmtDate(receipt.receivedDate)}</Td>
@@ -420,6 +451,31 @@ function ReceiptWork({
                     <Td className="text-cap text-ink-3">
                       {receipt.confirmedEmployeeName ?? '-'} · {fmtMDHM(receipt.createdAt)}
                     </Td>
+                    <Td align="right">
+                      {receipt.reversedGoodsReceiptNo ? (
+                        <span title={receipt.cancelReason ?? undefined}>
+                          <Badge tone="neutral">입고 취소</Badge>
+                        </span>
+                      ) : receipt.reversalGoodsReceiptNo ? (
+                        <span title={receipt.cancelReason ?? undefined} className="text-cap text-ink-3">
+                          취소됨 · {receipt.reversalGoodsReceiptNo}
+                        </span>
+                      ) : receipt.isCancellable ? (
+                        <Button
+                          size="sm"
+                          variant="danger-ghost"
+                          disabled={!canReceive}
+                          title={canReceive ? undefined : permissionNeedText([PERMISSION.GOODS_RECEIPT_CONFIRM])}
+                          onClick={() => setCancelling(receipt)}
+                        >
+                          입고 취소
+                        </Button>
+                      ) : receipt.lotNo ? (
+                        <span className="text-cap text-ink-3" title="원료 LOT을 이미 투입·배정했거나 잔량이 줄어 입고를 취소할 수 없어요">
+                          LOT 사용함
+                        </span>
+                      ) : null}
+                    </Td>
                   </tr>
                 ))}
               </tbody>
@@ -427,6 +483,31 @@ function ReceiptWork({
           )}
         </CardBody>
       </Card>
+
+      {cancelling ? (
+        <ReasonDialog
+          id={`gr-cancel-${cancelling.id}`}
+          title="입고를 취소할까요?"
+          confirmLabel="입고 취소"
+          reasonLabel="취소 사유"
+          pending={cancelReceipt.isPending}
+          error={cancelReceipt.error}
+          onCancel={() => {
+            setCancelling(null);
+            cancelReceipt.reset();
+          }}
+          onConfirm={(reason) => cancelReceipt.mutate({ goodsReceiptId: cancelling.id, reason })}
+        >
+          <KvList
+            items={[
+              { label: '입고', value: `${cancelling.goodsReceiptNo} · ${cancelling.purchaseOrderNo}` },
+              { label: '원료 · 입고 톤', value: `${cancelling.itemName} ${fmtTon(cancelling.receivedTon)}` },
+              { label: '원료 LOT', value: cancelling.lotNo ?? '-' },
+            ]}
+          />
+          <p className="text-cap text-ink-3">원료 LOT을 아직 쓰지 않았을 때만 취소돼요(투입·배정 전). 원래 입고는 남고 음수 입고가 더해지며, LOT은 입고 취소·잔량 0이 되고 입고예정이 되돌아와요.</p>
+        </ReasonDialog>
+      ) : null}
 
       {confirming ? (
         <ConfirmDialog

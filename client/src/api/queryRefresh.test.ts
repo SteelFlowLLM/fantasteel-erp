@@ -1,7 +1,8 @@
 import { QueryClient } from '@tanstack/react-query';
 import { describe, expect, it } from 'vitest';
 import { messengerKeys } from '@/api/messenger';
-import { INDEPENDENT_QUERY_ROOTS, isIndependentQuery, refreshAfterAction } from '@/api/queryRefresh';
+import { ApiError } from '@/api/errors';
+import { INDEPENDENT_QUERY_ROOTS, isIndependentQuery, isStaleError, refreshAfterAction } from '@/api/queryRefresh';
 import { queryKeys } from '@/api/queryKeys';
 
 async function fetchCount(queryClient: QueryClient, queryKey: readonly unknown[]): Promise<{ n: number }> {
@@ -53,5 +54,15 @@ describe('변경 뒤 조회 다시 부르기 (이슈 #476)', () => {
     await fetchCount(queryClient, ['llm', 'settings']);
     await refreshAfterAction(queryClient, [['llm', 'settings']]);
     expect(queryClient.getQueryState(['llm', 'settings'])?.isInvalidated).toBe(true);
+  });
+});
+
+describe('다른 곳에서 먼저 고쳐 막힌 오류 (COM-001, 이슈 #498)', () => {
+  it('COM-001만 저장이 막힌 오류로 본다', () => {
+    expect(isStaleError(new ApiError('COM-001'))).toBe(true);
+    expect(isStaleError(new ApiError('COM-003'))).toBe(false);
+    expect(isStaleError(new ApiError('COM-002'))).toBe(false);
+    expect(isStaleError(new Error('COM-001'))).toBe(false);
+    expect(isStaleError(null)).toBe(false);
   });
 });

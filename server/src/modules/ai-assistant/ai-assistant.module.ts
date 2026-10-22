@@ -2,9 +2,11 @@ import { forwardRef, Module } from '@nestjs/common';
 import { AiResearchModule } from '../ai-research/ai-research.module';
 import { BusinessEventModule } from '../business-event/business-event.module';
 import { DashboardModule } from '../dashboard/dashboard.module';
+import { FactoryAgentModule } from '../factory-agent/factory-agent.module';
 import { IntegrationModule } from '../integration/integration.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { LlmModule } from '../llm/llm.module';
+import { MasterDataModule } from '../master-data/master-data.module';
 import { MeetingMinutesModule } from '../meeting-minutes/meeting-minutes.module';
 import { MessageActionModule } from '../message-action/message-action.module';
 import { MrpModule } from '../mrp/mrp.module';
@@ -64,6 +66,9 @@ import { SttModule } from '../stt/stt.module';
     SttModule,
     // 내 일정 조회·일정 고치기 카드가 일정 화면과 같은 service를 쓴다 (이슈 #398)
     ScheduleEventModule,
+    // Agent 위험 후보·기준정보 조회 도구와 아침 브리핑이 각 화면과 같은 service를 쓴다 (이슈 #506)
+    FactoryAgentModule,
+    MasterDataModule,
     // 심층 조사 카드(이슈 #408)가 조사 만들기 service를 쓴다. 심층 조사도 이 모듈의 웹 도구를 써서 서로 부르므로 forwardRef
     forwardRef(() => AiResearchModule),
   ],

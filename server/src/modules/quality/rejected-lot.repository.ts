@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { INSPECTION_RESULT, LOT_TYPE } from '@fantasteel/shared';
+import { BUSINESS_EVENT_TYPE, INSPECTION_RESULT, LOT_TYPE } from '@fantasteel/shared';
 import type { Prisma } from '../../generated/prisma/client';
 import type { Tx } from '../../prisma/prisma.service';
 import { inspectedLotSelect, inspectionDetailSelect } from './quality.repository';
@@ -56,6 +56,17 @@ export class RejectedLotRepository {
   findInspectionsByLotIds(tx: Tx, lotIds: number[]) {
     if (!lotIds.length) return Promise.resolve([]);
     return tx.qualityInspection.findMany({ where: { lotId: { in: lotIds } }, select: inspectionDetailSelect });
+  }
+
+  /** LOT별로 불합격 처리 상태를 마지막으로 지정한 시각 (작업 로그 DISPOSITION_SET의 발생 시각). 지정한 적 없는 LOT은 빠진다 */
+  async findDispositionTimes(tx: Tx, lotIds: number[]): Promise<Map<number, Date>> {
+    if (!lotIds.length) return new Map();
+    const rows = await tx.businessEvent.groupBy({
+      by: ['targetId'],
+      where: { businessEventType: BUSINESS_EVENT_TYPE.DISPOSITION_SET, targetType: 'lot', targetId: { in: lotIds } },
+      _max: { createdAt: true },
+    });
+    return new Map(rows.flatMap((r) => (r._max.createdAt ? [[r.targetId, r._max.createdAt] as const] : [])));
   }
 
   lotExists(tx: Tx, lotId: number): Promise<boolean> {

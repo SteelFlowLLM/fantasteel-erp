@@ -63,4 +63,22 @@ describe('구매 트랜잭션 쿼리', () => {
 
     expect(overlaps).toBe(0);
   });
+
+  it('입고 취소 → 잔량 마감 → 발주 취소 동안 쿼리가 겹치지 않는다 (이슈 #500)', async () => {
+    const order = async (ton: string) => {
+      const pr = await purchasing.create(purchaser, { itemId: ore.id, requestedTon: ton, desiredReceiptDate: '2026-11-30' });
+      await purchasing.approve(purchaseHead, pr.id);
+      return purchasing.createPurchaseOrder(purchaser, { supplierId: ore.defaultSupplierId ?? 0, items: [{ purchaseRequisitionId: pr.id, orderedTon: ton }] });
+    };
+    const partial = await order('6');
+    const receipt = await purchasing.confirmGoodsReceipt(purchaser, { purchaseOrderItemId: partial.items[0].purchaseOrderItemId, receivedTon: '2', receivedDate: '2026-09-15' });
+    await purchasing.confirmGoodsReceipt(purchaser, { purchaseOrderItemId: partial.items[0].purchaseOrderItemId, receivedTon: '1', receivedDate: '2026-09-15' });
+    const untouched = await order('3');
+
+    overlaps = 0;
+    expect(await purchasing.cancelGoodsReceipt(purchaser, receipt.id, { reason: '오입고' })).toMatchObject({ receivedTon: '-2.000', reversedGoodsReceiptNo: receipt.goodsReceiptNo, cancelReason: '오입고' });
+    expect(await purchasing.closePurchaseOrder(purchaser, partial.id, { reason: '잔량 포기' })).toMatchObject({ purchaseOrderStatus: 'CLOSED', totalClosedTon: '5.000' });
+    expect(await purchasing.cancelPurchaseOrder(purchaser, untouched.id, { reason: '공급 중단' })).toMatchObject({ purchaseOrderStatus: 'CANCELLED', statusChange: { reason: '공급 중단' } });
+    expect(overlaps).toBe(0);
+  });
 });

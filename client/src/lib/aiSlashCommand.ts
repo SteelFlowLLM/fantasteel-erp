@@ -1,7 +1,8 @@
 // 철강맨AI 입력칸 / 명령 (이슈 #410, 문서에 없는 기능): 입력칸 맨 앞에서 /를 치면 명령 고르기 창을 열고, 보낼 때 명령과 질문을 가른다.
-// 명령은 아래 다섯 낱말과 똑같을 때만이다. 다른 글(/usr 경로 등)은 보통 질문으로 보내고, 명령 낱말을 글로 보내려면 //로 시작한다.
+// 명령은 아래 여섯 낱말과 똑같을 때만이다. 다른 글(/usr 경로 등)은 보통 질문으로 보내고, 명령 낱말을 글로 보내려면 //로 시작한다.
+// /브리핑(이슈 #506)은 오늘 브리핑 질문을 보내는 명령이다.
 
-export type AiSlashCommandKey = 'research' | 'web' | 'browser' | 'newChat' | 'threads';
+export type AiSlashCommandKey = 'research' | 'web' | 'browser' | 'newChat' | 'threads' | 'briefing';
 
 export interface AiSlashCommand {
   key: AiSlashCommandKey;
@@ -20,6 +21,7 @@ export const AI_SLASH_COMMANDS: readonly AiSlashCommand[] = [
   { key: 'browser', name: '브라우저', takesQuestion: true, description: '이번 질문만 브라우저를 켜고 물어요', hint: '이번 질문만 브라우저를 켜고 보내요' },
   { key: 'newChat', name: '새대화', takesQuestion: false, description: '새 대화를 시작해요', hint: 'Enter를 누르면 새 대화를 시작해요' },
   { key: 'threads', name: '목록', takesQuestion: false, description: '지난 대화 목록을 열어요', hint: 'Enter를 누르면 대화 목록을 열어요' },
+  { key: 'briefing', name: '브리핑', takesQuestion: false, description: '오늘 일정·업무·결재·알림·Agent 위험을 정리해요', hint: 'Enter를 누르면 오늘 브리핑을 받아요 (먼저 할 일 3가지를 정리해 줘요)' },
 ];
 
 export const AI_SLASH_NEED_QUESTION = '명령 뒤에 질문을 적어 주세요';
