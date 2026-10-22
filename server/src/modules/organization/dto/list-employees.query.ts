@@ -1,6 +1,6 @@
 import { Transform, Type } from 'class-transformer';
 import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
-import { ROLE, type Role } from '@fantasteel/shared';
+import { EMPLOYEE_KEYWORD_MAX, ROLE, type Role } from '@fantasteel/shared';
 
 /** 사원 목록 조건. 명세는 페이징만 정했고, 거르기는 사원 관리 화면이 쓰는 조건이다 */
 export class ListEmployeesQuery {
@@ -21,7 +21,7 @@ export class ListEmployeesQuery {
   /** 이름·사원번호 일부 */
   @IsOptional()
   @IsString()
-  @MaxLength(50)
+  @MaxLength(EMPLOYEE_KEYWORD_MAX)
   keyword?: string;
 
   @IsOptional()

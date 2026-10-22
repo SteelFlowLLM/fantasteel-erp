@@ -114,6 +114,7 @@ export function toEventView(e: ServerEvent): BusinessEventView {
       productionPlanId: numberField(e, 'productionPlanId'),
       purchaseOrderId: numberField(e, 'purchaseOrderId'),
       shipmentRequestId: numberField(e, 'shipmentRequestId'),
+      isAgentCandidate: e.isAgentCandidate,
     }),
     salesOrderId: e.salesOrderId,
     salesOrderNo: e.salesOrderNo,

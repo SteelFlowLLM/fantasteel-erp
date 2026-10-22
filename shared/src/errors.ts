@@ -21,6 +21,10 @@ export const ERROR_CODE = {
   'PUR-001': { message: '승인권자(부서장) 미지정', status: 409 },
   'PUR-002': { message: '승인 전 발주 불가', status: 409 },
   'PUR-003': { message: '발주 미입고량 초과', status: 409 },
+  'PUR-004': { message: '입고가 있는 발주는 취소할 수 없습니다', status: 409 },
+  'PUR-005': { message: '일부 입고된 발주만 잔량 마감할 수 있습니다', status: 409 },
+  'PUR-006': { message: '사용한 원료 LOT의 입고는 취소할 수 없습니다', status: 409 },
+  'PUR-007': { message: '취소·마감된 발주입니다', status: 409 },
   'ACT-001': { message: '초안 필수값 미확정', status: 400 },
   // 🟡 VOC-는 정의서 9.3에 없다 (Voice2ERP, 2026-10-15). 팀 확인 후 정의서에 올린다.
   'VOC-001': { message: '회의록을 찾을 수 없습니다', status: 404 },

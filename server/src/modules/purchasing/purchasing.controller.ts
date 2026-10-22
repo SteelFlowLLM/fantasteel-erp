@@ -1,8 +1,8 @@
 import { Body, Controller, Get, HttpCode, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
 import { PERMISSION, type AuthUser, type GoodsReceiptView, type PageResult, type PurchaseOrderView, type PurchaseRequisitionDetail, type PurchaseRequisitionSummary } from '@fantasteel/shared';
 import { CurrentUser, RequirePermission } from '../../common/auth/auth.decorators';
-import { CreateGoodsReceiptDto, ListGoodsReceiptsQuery } from './dto/goods-receipt.dto';
-import { CreatePurchaseOrderDto, ListPurchaseOrdersQuery } from './dto/purchase-order.dto';
+import { CancelGoodsReceiptDto, CreateGoodsReceiptDto, ListGoodsReceiptsQuery } from './dto/goods-receipt.dto';
+import { CreatePurchaseOrderDto, ListPurchaseOrdersQuery, PurchaseOrderReasonDto } from './dto/purchase-order.dto';
 import { CreatePurchaseRequisitionDto, ListPurchaseRequisitionsQuery, RejectPurchaseRequisitionDto, ResubmitPurchaseRequisitionDto } from './dto/purchase-requisition.dto';
 import { PurchasingService } from './purchasing.service';
 
@@ -65,6 +65,22 @@ export class PurchasingController {
     return this.service.createPurchaseOrder(user, dto);
   }
 
+  /** 입고 누계가 0인 발주만 (API-284, BP-PUR-02 반대 거래). 연결 구매요청은 발주 취소가 된다 */
+  @Post('purchase-orders/:id/cancel')
+  @HttpCode(200)
+  @RequirePermission(PERMISSION.PURCHASE_ORDER_CONFIRM, 'USE')
+  cancelPurchaseOrder(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Body() dto: PurchaseOrderReasonDto): Promise<PurchaseOrderView> {
+    return this.service.cancelPurchaseOrder(user, id, dto);
+  }
+
+  /** 일부만 입고된 발주의 남은 양을 닫는다 (API-285). MRP 입고예정에서 빠진다 */
+  @Post('purchase-orders/:id/close')
+  @HttpCode(200)
+  @RequirePermission(PERMISSION.PURCHASE_ORDER_CONFIRM, 'USE')
+  closePurchaseOrder(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Body() dto: PurchaseOrderReasonDto): Promise<PurchaseOrderView> {
+    return this.service.closePurchaseOrder(user, id, dto);
+  }
+
   /** 입고 기록과 생성된 원료 LOT. 물류·관리자도 VIEW로 본다 */
   @Get('goods-receipts')
   @RequirePermission(PERMISSION.GOODS_RECEIPT_CONFIRM, 'VIEW')
@@ -77,6 +93,14 @@ export class PurchasingController {
   @RequirePermission(PERMISSION.GOODS_RECEIPT_CONFIRM, 'USE')
   confirmGoodsReceipt(@CurrentUser() user: AuthUser, @Body() dto: CreateGoodsReceiptDto): Promise<GoodsReceiptView> {
     return this.service.confirmGoodsReceipt(user, dto);
+  }
+
+  /** 원료 LOT을 아직 쓰지 않은 입고만 (API-286). 음수 입고(반대 거래)를 남기고 그 행을 돌려준다 */
+  @Post('goods-receipts/:id/cancel')
+  @HttpCode(200)
+  @RequirePermission(PERMISSION.GOODS_RECEIPT_CONFIRM, 'USE')
+  cancelGoodsReceipt(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Body() dto: CancelGoodsReceiptDto): Promise<GoodsReceiptView> {
+    return this.service.cancelGoodsReceipt(user, id, dto);
   }
 
   @Get('purchase-orders/:id')

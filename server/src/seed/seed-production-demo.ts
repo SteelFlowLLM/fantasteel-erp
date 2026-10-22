@@ -13,6 +13,7 @@ import { NumberingService } from '../common/numbering/numbering.service';
 import { seoulDateOnly, seoulToday } from '../common/time/seoul-date';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { FactoryAgentService } from '../modules/factory-agent/factory-agent.service';
 import { ProductionSimulationService } from '../modules/production/production-simulation.service';
 import { isItemApplicable } from '../modules/quality/inspection-judge';
 import { QualityService } from '../modules/quality/quality.service';
@@ -110,7 +111,14 @@ async function main() {
 
     const coilLots = await prisma.lot.findMany({ where: { productionResult: { productionPlanId: planIds.coil }, lotType: { in: [LOT_TYPE.HEAT, LOT_TYPE.SLAB] } }, orderBy: { id: 'asc' } });
     const quality = app.get(QualityService);
-    for (const lot of coilLots) await quality.registerQualityInspection({ lotId: lot.id, values: await passingValues(prisma, lot.id) }, inspector);
+    // 검사 등록은 Agent 감지를 기다리지 않는다(#496). 다음 단계와 앱 종료 전에 감지가 끝나도록 검사마다 기다린다
+    const agent = app.get(FactoryAgentService);
+    const inspect = async (input: Parameters<QualityService['registerQualityInspection']>[0]) => {
+      const saved = await quality.registerQualityInspection(input, inspector);
+      await agent.idle();
+      return saved;
+    };
+    for (const lot of coilLots) await inspect({ lotId: lot.id, values: await passingValues(prisma, lot.id) });
     logger.log(`코일 계획 히트·슬래브 ${coilLots.length}건 검사 합격 → 열연 투입 화면에서 배정할 수 있어요`);
 
     // 불합격 관리 시연: 슬래브 계획의 슬래브 2매만 검사 불합격 (히트·나머지 슬래브는 판정 대기로 둔다).
@@ -120,7 +128,7 @@ async function main() {
     for (const [index, sample] of REJECTED_SLABS.entries()) {
       const lot = slabLots[index];
       if (!lot) throw new Error(`슬래브 계획에 불합격 시연용 슬래브(${index + 1}번째)가 없습니다`);
-      await quality.registerQualityInspection({ lotId: lot.id, values: await passingValues(prisma, lot.id, sample.values) }, inspector);
+      await inspect({ lotId: lot.id, values: await passingValues(prisma, lot.id, sample.values) });
       if (sample.disposition) {
         const { updatedAt } = await prisma.lot.findUniqueOrThrow({ where: { id: lot.id }, select: { updatedAt: true } });
         await rejected.setLotDisposition(lot.id, { ...sample.disposition, expectedUpdatedAt: updatedAt.toISOString() }, inspector);
@@ -130,7 +138,7 @@ async function main() {
 
     // 히트 연쇄 불합격 시연: 수주 4 계획의 히트만 성분 불합격으로 판정한다 (슬래브는 판정 대기로 둔다)
     const failedHeat = await prisma.lot.findFirstOrThrow({ where: { productionResult: { productionPlanId: planIds.heatFail }, lotType: LOT_TYPE.HEAT }, orderBy: { id: 'asc' } });
-    await quality.registerQualityInspection({ lotId: failedHeat.id, values: await passingValues(prisma, failedHeat.id, FAILED_HEAT_VALUES) }, inspector);
+    await inspect({ lotId: failedHeat.id, values: await passingValues(prisma, failedHeat.id, FAILED_HEAT_VALUES) });
     const childSlabs = await prisma.lot.count({ where: { productionResult: { productionPlanId: planIds.heatFail }, lotType: LOT_TYPE.SLAB } });
     logger.log(`히트 ${failedHeat.lotNo} 성분 불합격 (P 0.0580) → 하위 슬래브 ${childSlabs}매 연쇄 불합격`);
     logger.log('완료: 슬래브 계획(히트·슬래브 8매 판정 대기, 슬래브 2매 불합격), 코일 계획(열연 투입 대기), 시작 전 계획 1건, 히트 불합격 계획(히트 + 하위 슬래브)');

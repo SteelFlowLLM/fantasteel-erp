@@ -13,6 +13,9 @@ import type {
   ShipmentRequestStatus,
 } from './codes';
 
+/** LOT 목록의 번호 조건(lotNo) 최대 글자 수. 서버 DTO와 화면이 같은 값을 쓴다 (넘으면 서버가 400이라 검색 결과가 통째로 사라진다, 이슈 #498) */
+export const LOT_NO_FILTER_MAX = 60;
+
 /** 추적 방향: backward = 어디서 왔나(코일 → 원료), forward = 어디로 갔나(원료·히트 → 슬래브·코일·출하) */
 export const TRACE_DIRECTION = {
   BACKWARD: 'backward',
@@ -42,6 +45,20 @@ export interface LotSummary {
   remainingTon: string | null;
   /** 자기 검사 판정. 검사가 없으면 null (원료·용선은 검사하지 않는다) */
   inspectionResult: InspectionResult | null;
+}
+
+/**
+ * LOT 목록 한 줄 + 화면이 줄마다 상세를 따로 부르지 않게 하는 연결 값 (GET /lots?withLinks=true, 이슈 #498).
+ * 값은 LOT 상세(GET /lots/:id)와 같은 규칙으로 구한다.
+ */
+export interface LotListItem extends LotSummary {
+  /** 원료 LOT의 원료 종류 (규격 기준). 원료가 아니면 null */
+  rawMaterialType: RawMaterialType | null;
+  /** 슬래브·코일의 상위 히트와 그 히트의 검사 판정(검사가 없으면 null) */
+  heat: { id: number; lotNo: string; inspectionResult: InspectionResult | null } | null;
+  disposition: { dispositionStatus: DispositionStatus; dispositionReason: string | null } | null;
+  /** 해제되지 않은 마지막 배정. 없으면 null */
+  allocation: { id: number; allocationPurpose: AllocationPurpose; allocationStatus: AllocationStatus } | null;
 }
 
 /** 연결된 부모(투입)·자식(산출) LOT */

@@ -1,8 +1,9 @@
 // 입고 API (REQ-PUR-004, REQ-LOT-003·004, BP-PUR-02, 업무 프로세스 10장 "입고: 상태값 없음").
 // 입고 등록 = 입고 확정(수정 없음). 미입고량을 넘으면 PUR-003. 야드는 원료의 기본 야드로 자동 지정하고,
 // 입고 1건마다 원료 LOT(RM-원료코드-YYMMDD-NNN) 1개를 만든다. 규칙·작업 로그는 서버가 한다.
+// 입고 취소는 원료 LOT을 쓰기 전에만 되고, 원래 입고는 두고 음수 입고 1행(반대 거래)을 더한다.
 // 두 데이터 모드 모두 실제 서버를 부른다 (api/server/purchaseOrders.ts).
-import type { PurchaseOrderStatus } from '@/codes';
+import type { LotStatus, PurchaseOrderStatus } from '@/codes';
 import type { PurchaseOrderView } from '@/api/purchasing';
 import { serverMasterDataApi } from '@/api/server/masterData';
 import { serverGoodsReceiptApi, serverPurchaseOrderApi } from '@/api/server/purchaseOrders';
@@ -20,6 +21,8 @@ export interface GoodsReceiptView {
   goodsReceiptNo: string;
   purchaseOrderId: number;
   purchaseOrderNo: string;
+  /** 발주 상태 (발주 조회 권한이 없어도 입고 응답에 들어 있다) */
+  purchaseOrderStatus: PurchaseOrderStatus;
   purchaseOrderItemId: number;
   itemId: number;
   itemCode: string;
@@ -28,12 +31,23 @@ export interface GoodsReceiptView {
   receivedDate: string;
   lotId: number | null;
   lotNo: string | null;
+  /** 원료 LOT의 지금 상태 (취소 행은 null) */
+  lotStatus: LotStatus | null;
   yardId: number | null;
   yardName: string | null;
   createdAt: string;
   supplierName: string;
-  /** 입고를 확정한 사원 (ERD에 칸이 없어 작업 로그 GOODS_RECEIPT_CONFIRMED로 본다) */
+  /** 입고를 확정한 사원 (ERD에 칸이 없어 작업 로그 GOODS_RECEIPT_CONFIRMED로 본다). 취소 행은 취소한 사원 */
   confirmedEmployeeName: string | null;
+  /** 이 행이 입고 취소면 취소한 원래 입고 (receivedTon은 음수, LOT 없음) */
+  reversedGoodsReceiptId: number | null;
+  reversedGoodsReceiptNo: string | null;
+  /** 이 입고를 취소했으면 취소 행 번호 */
+  reversalGoodsReceiptNo: string | null;
+  /** 입고 취소 사유 (원래 입고·취소 행 모두) */
+  cancelReason: string | null;
+  /** 지금 입고 취소할 수 있는지 (서버가 LOT 상태·잔량·투입·배정과 발주 상태로 정한다) */
+  isCancellable: boolean;
 }
 
 /** 입고할 발주 품목 (미입고량 = 발주량 − 입고 누계, 저장하지 않고 계산) */
@@ -54,7 +68,18 @@ export interface ReceiptLine {
   remainingTon: string;
   /** 입고하면 들어갈 원료 기본 야드 */
   defaultYardName: string | null;
+  /** 미입고량이 0 (발주 취소·잔량 마감한 발주도 0) */
   isFullyReceived: boolean;
+  /** 발주 취소·잔량 마감해 더는 입고하지 않는 발주 */
+  isClosed: boolean;
+  /** 발주 취소·잔량 마감으로 닫은 양 */
+  closedTon: string;
+}
+
+/** 입고 취소 (사유 필수, 500자) */
+export interface GoodsReceiptCancelInput {
+  goodsReceiptId: number;
+  reason: string;
 }
 
 export interface GoodsReceiptInput {
@@ -101,6 +126,8 @@ function receiptLinesOf(orders: readonly PurchaseOrderView[], defaultYardNameOf:
           remainingTon: line.remainingTon,
           defaultYardName: defaultYardNameOf(line.itemCode),
           isFullyReceived: decCmp(line.remainingTon, 0) <= 0,
+          isClosed: po.purchaseOrderStatus === 'CANCELLED' || po.purchaseOrderStatus === 'CLOSED',
+          closedTon: line.closedTon,
         }),
       ),
     )
@@ -122,4 +149,7 @@ export const goodsReceiptApi = {
 
   /** 입고 확정 (등록 = 확정): 원료 LOT 생성, 발주 상태 갱신 (입고 누계·미입고량은 계산값) */
   receive: (input: GoodsReceiptInput): Promise<GoodsReceiptResult> => serverGoodsReceiptApi.receive(input),
+
+  /** 입고 취소: 원료 LOT을 썼으면 PUR-006, 취소·마감된 발주면 PUR-007. 취소 행(음수 입고)을 돌려준다 */
+  cancel: (input: GoodsReceiptCancelInput): Promise<GoodsReceiptView> => serverGoodsReceiptApi.cancel(input),
 };

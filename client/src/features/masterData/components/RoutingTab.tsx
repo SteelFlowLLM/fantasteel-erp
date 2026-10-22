@@ -49,7 +49,7 @@ function RoutingCard({ routing, canEdit, onGoTab }: { routing: MasterRoutingView
   const [adding, setAdding] = useState('');
   const fieldErrors = useMasterDataFieldErrors();
   const title = `${ITEM_TYPE_LABEL[routing.itemType]} 라우팅`;
-  const save = useAction(masterDataApi.saveRouting, { success: `${title}을 저장했어요`, onError: fieldErrors.takeFrom });
+  const save = useAction(masterDataApi.saveRouting, { success: `${title}을 저장했어요`, onError: fieldErrors.takeFrom, refreshOnStale: true });
   const dirty = !isSameDraft(steps, initial);
 
   const available = Object.values(PROCESS_TYPE).filter((p) => !steps.some((s) => s.processType === p) && !(routing.itemType === 'SLAB' && p === 'HOT_ROLLING'));

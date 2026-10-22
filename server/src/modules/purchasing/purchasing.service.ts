@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import {
   BUSINESS_EVENT_TYPE,
   ITEM_TYPE,
+  LOT_STATUS,
   NOTIFICATION_TYPE,
   PERMISSION,
   PURCHASE_ORDER_STATUS,
@@ -9,8 +10,10 @@ import {
   type AuthUser,
   type BusinessEventType,
   type GoodsReceiptView,
+  type LotStatus,
   type PageResult,
   type PurchaseOrderStatus,
+  type PurchaseOrderStatusChange,
   type PurchaseOrderView,
   type PurchaseRequisitionDetail,
   type PurchaseRequisitionStatus,
@@ -25,8 +28,8 @@ import { seoulToday } from '../../common/time/seoul-date';
 import { Prisma, type PurchaseRequisition } from '../../generated/prisma/client';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
-import type { CreateGoodsReceiptDto, ListGoodsReceiptsQuery } from './dto/goods-receipt.dto';
-import type { CreatePurchaseOrderDto, ListPurchaseOrdersQuery } from './dto/purchase-order.dto';
+import type { CancelGoodsReceiptDto, CreateGoodsReceiptDto, ListGoodsReceiptsQuery } from './dto/goods-receipt.dto';
+import type { CreatePurchaseOrderDto, ListPurchaseOrdersQuery, PurchaseOrderReasonDto } from './dto/purchase-order.dto';
 import type { CreatePurchaseRequisitionDto, ListPurchaseRequisitionsQuery, RejectPurchaseRequisitionDto, ResubmitPurchaseRequisitionDto } from './dto/purchase-requisition.dto';
 import { PurchasingRepository, type PurchaseOrderFilter, type RequisitionFilter, type RequisitionStatusChange } from './purchasing.repository';
 
@@ -100,7 +103,39 @@ const ALREADY_DONE: Record<PurchaseRequisitionStatus, string> = {
   APPROVED: '이미 승인된 요청이에요',
   REJECTED: '이미 반려된 요청이에요',
   ORDERED: '이미 발주된 요청이에요',
+  ORDER_CANCELLED: '발주가 취소된 요청이에요. 같은 원료가 필요하면 새로 구매요청해 주세요',
 };
+
+/** 더는 입고하지 않는 발주 (BP-PUR-02 반대 거래) */
+const ENDED_PURCHASE_ORDER: Partial<Record<PurchaseOrderStatus, string>> = {
+  CANCELLED: '이미 취소된 발주예요',
+  CLOSED: '이미 잔량 마감한 발주예요',
+};
+
+/** 이미 취소·마감한 발주에 다시 취소·마감할 때 (구매요청 ALREADY_DONE과 같은 COM-001) */
+function assertNotEnded(status: PurchaseOrderStatus): void {
+  const ended = ENDED_PURCHASE_ORDER[status];
+  if (ended) throw new AppException('COM-001', ended);
+}
+
+/** 발주 취소·잔량 마감·입고 취소 사유는 필수 (작업 로그 reason) */
+function requireReason(value: string): string {
+  const reason = value.trim();
+  if (!reason) throw new AppException('COM-004', '사유를 입력해 주세요');
+  return reason;
+}
+
+const sumTon = (tons: { receivedTon: Prisma.Decimal }[]) => tons.reduce((sum, r) => sum.plus(r.receivedTon), new Prisma.Decimal(0));
+
+/**
+ * 입고 누계(입고 취소 행까지 더한 값)로 정한 발주 상태: 모든 품목을 다 받았으면 입고 완료, 하나라도 받았으면 부분 입고, 하나도 없으면 발주 확정.
+ * 입고 확정과 입고 취소가 함께 쓴다
+ */
+export function receiptStatusOf(lines: { orderedTon: Prisma.Decimal; receivedTon: Prisma.Decimal }[]): PurchaseOrderStatus {
+  if (lines.every((l) => l.receivedTon.gte(l.orderedTon))) return PURCHASE_ORDER_STATUS.RECEIVED;
+  if (lines.some((l) => l.receivedTon.gt(0))) return PURCHASE_ORDER_STATUS.PARTIALLY_RECEIVED;
+  return PURCHASE_ORDER_STATUS.CONFIRMED;
+}
 
 /**
  * 동시에 같은 행을 만들어 unique 위반(P2002)이 나면 트랜잭션 전체를 다시 해서 앞 거래가 커밋한 결과를 보고 판단하게 한다
@@ -284,15 +319,116 @@ export class PurchasingService {
     const page = query.page ?? 1;
     const size = query.size ?? DEFAULT_PAGE_SIZE;
     const [total, rows] = await Promise.all([this.repository.countPurchaseOrders(this.prisma, filter), this.repository.findPurchaseOrders(this.prisma, filter, { skip: (page - 1) * size, take: size })]);
-    const ordered = await this.latestEvents(this.prisma, BUSINESS_EVENT_TYPE.PURCHASE_ORDER_CREATED, 'purchase_order', rows.map((r) => r.id));
-    return { items: rows.map((row) => this.toPurchaseOrderView(row, ordered.get(row.id)?.actorName ?? null)), page, size, total };
+    return { items: await this.purchaseOrderViews(rows), page, size, total };
   }
 
   async purchaseOrderDetail(id: number): Promise<PurchaseOrderView> {
     const row = await this.repository.findPurchaseOrder(this.prisma, id);
     if (!row) throw new AppException('COM-003', '발주를 찾을 수 없어요');
-    const ordered = await this.latestEvents(this.prisma, BUSINESS_EVENT_TYPE.PURCHASE_ORDER_CREATED, 'purchase_order', [row.id]);
-    return this.toPurchaseOrderView(row, ordered.get(row.id)?.actorName ?? null);
+    return (await this.purchaseOrderViews([row]))[0];
+  }
+
+  /** 발주자(PURCHASE_ORDER_CREATED)와 취소·마감 기록(PURCHASE_ORDER_CANCELLED·CLOSED)을 작업 로그에서 붙인다 */
+  private async purchaseOrderViews(rows: PurchaseOrderRow[]): Promise<PurchaseOrderView[]> {
+    const idsOf = (status: PurchaseOrderStatus) => rows.filter((r) => r.purchaseOrderStatus === status).map((r) => r.id);
+    const [ordered, cancelled, closed] = await Promise.all([
+      this.latestEvents(this.prisma, BUSINESS_EVENT_TYPE.PURCHASE_ORDER_CREATED, 'purchase_order', rows.map((r) => r.id)),
+      this.latestEvents(this.prisma, BUSINESS_EVENT_TYPE.PURCHASE_ORDER_CANCELLED, 'purchase_order', idsOf(PURCHASE_ORDER_STATUS.CANCELLED)),
+      this.latestEvents(this.prisma, BUSINESS_EVENT_TYPE.PURCHASE_ORDER_CLOSED, 'purchase_order', idsOf(PURCHASE_ORDER_STATUS.CLOSED)),
+    ]);
+    return rows.map((row) => {
+      const change = cancelled.get(row.id) ?? closed.get(row.id);
+      return this.toPurchaseOrderView(row, ordered.get(row.id)?.actorName ?? null, change ? { reason: change.reason, employeeName: change.actorName, at: change.at.toISOString() } : null);
+    });
+  }
+
+  // ── 발주 취소·잔량 마감 (BP-PUR-02 반대 거래, 이슈 #500) ──
+
+  /**
+   * 입고 누계가 0인 발주(CONFIRMED)를 취소한다. 연결 구매요청은 ORDER_CANCELLED가 되어 같은 계획·원료로 새로 요청할 수 있다.
+   * 상태는 조건부 UPDATE로 바꿔 그사이 입고가 들어왔으면 0건이라 COM-001 (입고 확정은 발주 행을 잠그고 상태를 다시 읽어 PUR-007)
+   */
+  async cancelPurchaseOrder(user: AuthUser, id: number, dto: PurchaseOrderReasonDto): Promise<PurchaseOrderView> {
+    const reason = requireReason(dto.reason);
+    await retryOnNumberConflict(() =>
+      this.prisma.$transaction(async (tx) => {
+        const before = await this.mustFindPurchaseOrderStatus(tx, id);
+        const status = before.purchaseOrderStatus as PurchaseOrderStatus;
+        assertNotEnded(status);
+        if (status === PURCHASE_ORDER_STATUS.PARTIALLY_RECEIVED) throw new AppException('PUR-004', '입고된 양이 있어 취소할 수 없어요. 남은 양만 닫으려면 잔량 마감을 해 주세요');
+        if (status === PURCHASE_ORDER_STATUS.RECEIVED) throw new AppException('PUR-004', '전량 입고된 발주예요. 잘못 받은 입고가 있으면 입고를 먼저 취소해 주세요');
+        await this.changePurchaseOrderStatus(tx, before.id, PURCHASE_ORDER_STATUS.CONFIRMED, PURCHASE_ORDER_STATUS.CANCELLED);
+
+        const lines = await this.repository.findPurchaseOrderLines(tx, before.id);
+        // 발주 등록과 같은 순서(id)로 바꿔 교착을 피한다
+        const requisitionIds = lines.map((l) => l.purchaseRequisitionId).sort((a, b) => a - b);
+        for (const requisitionId of requisitionIds) {
+          const changed = await this.repository.updateRequisitionIfStatus(tx, requisitionId, PURCHASE_REQUISITION_STATUS.ORDERED, { purchaseRequisitionStatus: PURCHASE_REQUISITION_STATUS.ORDER_CANCELLED });
+          if (changed === 0) throw new AppException('COM-001', '연결된 구매요청의 상태가 바뀌었어요. 다시 조회해 주세요');
+        }
+        const requisitionNoOf = new Map((await this.repository.findRequisitionNos(tx, requisitionIds)).map((r) => [r.id, r.purchaseRequisitionNo]));
+        await this.businessEventRecorder.record(tx, {
+          type: BUSINESS_EVENT_TYPE.PURCHASE_ORDER_CANCELLED,
+          actor: user,
+          target: { table: 'purchase_order', id: before.id },
+          before: { purchaseOrderNo: before.purchaseOrderNo, purchaseOrderStatus: status },
+          // 구매요청 ORDER_CANCELLED 전환에 맞는 이벤트 종류가 없어 발주 로그에 연결된 요청을 남긴다 (발주 등록과 같다)
+          after: {
+            purchaseOrderNo: before.purchaseOrderNo,
+            purchaseOrderStatus: PURCHASE_ORDER_STATUS.CANCELLED,
+            items: lines.map((l) => ({
+              purchaseOrderItemId: l.id,
+              purchaseRequisitionId: l.purchaseRequisitionId,
+              purchaseRequisitionNo: requisitionNoOf.get(l.purchaseRequisitionId) ?? null,
+              purchaseRequisitionStatus: PURCHASE_REQUISITION_STATUS.ORDER_CANCELLED,
+              itemId: l.itemId,
+              orderedTon: l.orderedTon.toFixed(3),
+            })),
+          },
+          reason,
+        });
+      }),
+    );
+    return this.purchaseOrderDetail(id);
+  }
+
+  /**
+   * 일부만 입고된 발주(PARTIALLY_RECEIVED)를 잔량 마감(CLOSED)한다. 남은 양은 MRP 입고예정에서 빠지고 더는 입고하지 않는다.
+   * 구매요청은 ORDERED 그대로 두고, 같은 계획·원료의 새 요청은 막지 않는다 (findOpenRequisitionForPlan)
+   */
+  async closePurchaseOrder(user: AuthUser, id: number, dto: PurchaseOrderReasonDto): Promise<PurchaseOrderView> {
+    const reason = requireReason(dto.reason);
+    await retryOnNumberConflict(() =>
+      this.prisma.$transaction(async (tx) => {
+        const before = await this.mustFindPurchaseOrderStatus(tx, id);
+        const status = before.purchaseOrderStatus as PurchaseOrderStatus;
+        assertNotEnded(status);
+        if (status === PURCHASE_ORDER_STATUS.CONFIRMED) throw new AppException('PUR-005', '아직 입고가 없는 발주예요. 잔량 마감 대신 발주 취소를 해 주세요');
+        if (status === PURCHASE_ORDER_STATUS.RECEIVED) throw new AppException('PUR-005', '전량 입고된 발주라 마감할 잔량이 없어요');
+        await this.changePurchaseOrderStatus(tx, before.id, PURCHASE_ORDER_STATUS.PARTIALLY_RECEIVED, PURCHASE_ORDER_STATUS.CLOSED);
+
+        // 상태를 바꿔 발주 행을 잡은 뒤 읽어 그사이 확정된 입고까지 마감량에 넣는다
+        const lines = (await this.repository.findPurchaseOrderLines(tx, before.id)).map((l) => {
+          const received = sumTon(l.goodsReceipts);
+          return { purchaseOrderItemId: l.id, itemId: l.itemId, orderedTon: l.orderedTon, receivedTon: received, closedTon: Prisma.Decimal.max(l.orderedTon.minus(received), 0) };
+        });
+        const closedTon = lines.reduce((sum, l) => sum.plus(l.closedTon), new Prisma.Decimal(0)).toFixed(3);
+        await this.businessEventRecorder.record(tx, {
+          type: BUSINESS_EVENT_TYPE.PURCHASE_ORDER_CLOSED,
+          actor: user,
+          target: { table: 'purchase_order', id: before.id },
+          before: { purchaseOrderNo: before.purchaseOrderNo, purchaseOrderStatus: status, remainingTon: closedTon },
+          after: {
+            purchaseOrderNo: before.purchaseOrderNo,
+            purchaseOrderStatus: PURCHASE_ORDER_STATUS.CLOSED,
+            closedTon,
+            items: lines.map((l) => ({ purchaseOrderItemId: l.purchaseOrderItemId, itemId: l.itemId, orderedTon: l.orderedTon.toFixed(3), receivedTon: l.receivedTon.toFixed(3), closedTon: l.closedTon.toFixed(3) })),
+          },
+          reason,
+        });
+      }),
+    );
+    return this.purchaseOrderDetail(id);
   }
 
   // ── 발주 등록 (REQ-PUR-003, BP-PUR-01) ────────────────
@@ -326,6 +462,8 @@ export class PurchasingService {
       const pr = requisitions.find((r) => r.id === line.purchaseRequisitionId);
       if (!pr) throw new AppException('COM-003', '구매요청을 찾을 수 없어요');
       if (pr.purchaseRequisitionStatus === PURCHASE_REQUISITION_STATUS.ORDERED) throw new AppException('COM-001', `${pr.purchaseRequisitionNo}는 이미 발주된 요청이에요`);
+      // 발주 품목 1행 = 구매요청 1건(unique)이라 취소된 발주의 요청은 다시 발주하지 않는다
+      if (pr.purchaseRequisitionStatus === PURCHASE_REQUISITION_STATUS.ORDER_CANCELLED) throw new AppException('COM-001', `${pr.purchaseRequisitionNo}는 발주가 취소된 요청이에요. 새로 구매요청해 주세요`);
       if (pr.purchaseRequisitionStatus !== PURCHASE_REQUISITION_STATUS.APPROVED) throw new AppException('PUR-002', `${pr.purchaseRequisitionNo}는 아직 승인되지 않았어요`);
       if (line.orderedTon.gt(pr.requestedTon)) throw new AppException('COM-004', `${pr.purchaseRequisitionNo}의 발주량이 요청량 ${pr.requestedTon.toFixed(3)}t보다 많아요`);
       // 잘못된 공급업체 차단(API-149): 품목 기본 공급업체가 있으면 그 공급업체로만 발주한다
@@ -367,8 +505,22 @@ export class PurchasingService {
       this.repository.countGoodsReceipts(this.prisma, query.purchaseOrderId),
       this.repository.findGoodsReceipts(this.prisma, query.purchaseOrderId, { skip: (page - 1) * size, take: size }),
     ]);
-    const confirmed = await this.latestEvents(this.prisma, BUSINESS_EVENT_TYPE.GOODS_RECEIPT_CONFIRMED, 'goods_receipt', rows.map((r) => r.id));
-    return { items: rows.map((row) => this.toGoodsReceiptView(row, confirmed.get(row.id)?.actorName ?? null)), page, size, total };
+    // 입고 취소 작업 로그의 대상은 원래 입고라 취소 행은 원래 입고 id로 찾는다
+    const originalIdOf = (row: GoodsReceiptRow) => row.reversedGoodsReceiptId ?? row.id;
+    const [confirmed, cancelled] = await Promise.all([
+      this.latestEvents(this.prisma, BUSINESS_EVENT_TYPE.GOODS_RECEIPT_CONFIRMED, 'goods_receipt', rows.filter((r) => r.reversedGoodsReceiptId === null).map((r) => r.id)),
+      this.latestEvents(this.prisma, BUSINESS_EVENT_TYPE.GOODS_RECEIPT_CANCELLED, 'goods_receipt', rows.filter((r) => r.reversedGoodsReceiptId !== null || r.reversal !== null).map(originalIdOf)),
+    ]);
+    return {
+      items: rows.map((row) => {
+        const cancel = cancelled.get(originalIdOf(row));
+        const actorName = row.reversedGoodsReceiptId === null ? confirmed.get(row.id)?.actorName : cancel?.actorName;
+        return this.toGoodsReceiptView(row, actorName ?? null, cancel?.reason ?? null);
+      }),
+      page,
+      size,
+      total,
+    };
   }
 
   /**
@@ -381,7 +533,7 @@ export class PurchasingService {
     // 실제로 들어온 원료를 기록하는 일이라 미래 날짜는 받지 않는다
     if (dto.receivedDate > seoulToday()) throw new AppException('COM-004', '입고일은 오늘 이후로 할 수 없어요');
     const receiptId = await retryOnNumberConflict(() => this.prisma.$transaction((tx) => this.confirmGoodsReceiptInTx(tx, user, dto.purchaseOrderItemId, receivedTon, receivedDate)));
-    return this.toGoodsReceiptView(await this.repository.findGoodsReceipt(this.prisma, receiptId), user.employeeName);
+    return this.toGoodsReceiptView(await this.repository.findGoodsReceipt(this.prisma, receiptId), user.employeeName, null);
   }
 
   /** 입고 id를 돌려준다 */
@@ -389,9 +541,11 @@ export class PurchasingService {
     if ((await this.repository.lockPurchaseOrderByItemId(tx, purchaseOrderItemId)).length === 0) throw new AppException('COM-003', '발주 품목을 찾을 수 없어요');
     const line = await this.repository.findPurchaseOrderItemForReceipt(tx, purchaseOrderItemId);
     if (!line) throw new AppException('COM-003', '발주 품목을 찾을 수 없어요');
-    const item = await this.repository.findReceiptItem(tx, line.itemId);
     const order = line.purchaseOrder;
-    const receivedOf = (l: (typeof order.purchaseOrderItems)[number]) => l.goodsReceipts.reduce((sum, r) => sum.plus(r.receivedTon), new Prisma.Decimal(0));
+    // 발주 취소·잔량 마감과 겹치면 잠금을 얻은 뒤 읽은 상태로 막는다
+    if (ENDED_PURCHASE_ORDER[order.purchaseOrderStatus as PurchaseOrderStatus]) throw new AppException('PUR-007', `${order.purchaseOrderNo}는 취소·마감된 발주라 입고할 수 없어요`);
+    const item = await this.repository.findReceiptItem(tx, line.itemId);
+    const receivedOf = (l: (typeof order.purchaseOrderItems)[number]) => sumTon(l.goodsReceipts);
     const self = order.purchaseOrderItems.find((l) => l.id === line.id);
     const receivedBefore = self ? receivedOf(self) : new Prisma.Decimal(0);
     const remaining = line.orderedTon.minus(receivedBefore);
@@ -407,9 +561,8 @@ export class PurchasingService {
       yardId: item.defaultYardId,
       ton: receivedTon,
     });
-    const allReceived = order.purchaseOrderItems.every((l) => (l.id === line.id ? receivedBefore.plus(receivedTon) : receivedOf(l)).gte(l.orderedTon));
-    const status = allReceived ? PURCHASE_ORDER_STATUS.RECEIVED : PURCHASE_ORDER_STATUS.PARTIALLY_RECEIVED;
-    if (status !== order.purchaseOrderStatus) await this.repository.updatePurchaseOrderStatus(tx, order.id, status);
+    const status = receiptStatusOf(order.purchaseOrderItems.map((l) => ({ orderedTon: l.orderedTon, receivedTon: l.id === line.id ? receivedBefore.plus(receivedTon) : receivedOf(l) })));
+    if (status !== order.purchaseOrderStatus) await this.changePurchaseOrderStatus(tx, order.id, order.purchaseOrderStatus as PurchaseOrderStatus, status);
 
     await this.businessEventRecorder.record(tx, {
       type: BUSINESS_EVENT_TYPE.GOODS_RECEIPT_CONFIRMED,
@@ -436,7 +589,102 @@ export class PurchasingService {
     return receipt.id;
   }
 
+  /**
+   * 입고 취소(반대 거래): 원래 입고는 그대로 두고 같은 발주 품목에 음수 입고 1행을 더한다. 그 입고로 만든 원료 LOT을 아직 쓰지 않았을 때만
+   * (투입·배정 없음, 잔량 = 처음 양) 잔량 0·RECEIPT_CANCELLED로 바꾸고, 발주 상태는 입고 누계로 다시 정한다. 취소 행을 돌려준다
+   */
+  async cancelGoodsReceipt(user: AuthUser, id: number, dto: CancelGoodsReceiptDto): Promise<GoodsReceiptView> {
+    const reason = requireReason(dto.reason);
+    const reversalId = await retryOnNumberConflict(() => this.prisma.$transaction((tx) => this.cancelGoodsReceiptInTx(tx, user, id, reason)));
+    return this.toGoodsReceiptView(await this.repository.findGoodsReceipt(this.prisma, reversalId), user.employeeName, reason);
+  }
+
+  /** 취소 행 id를 돌려준다. 잠금 순서는 입고 확정과 같은 발주 → 원료 LOT (원료 FIFO 투입은 LOT만 잠가 교착이 없다) */
+  private async cancelGoodsReceiptInTx(tx: Tx, user: AuthUser, id: number, reason: string): Promise<number> {
+    const receipt = await this.repository.findGoodsReceiptForCancel(tx, id);
+    if (!receipt) throw new AppException('COM-003', '입고를 찾을 수 없어요');
+    if (receipt.reversedGoodsReceiptId !== null) throw new AppException('COM-004', '입고 취소 기록은 다시 취소할 수 없어요');
+    await this.repository.lockPurchaseOrderByItemId(tx, receipt.purchaseOrderItemId);
+    // 같은 입고를 두 번 취소하면 뒤 요청은 잠금을 기다린 뒤 여기서 막힌다 (reversed_goods_receipt_id unique도 막는다)
+    if (await this.repository.findReversalOf(tx, receipt.id)) throw new AppException('COM-001', `${receipt.goodsReceiptNo}는 이미 취소된 입고예요`);
+    const line = await this.repository.findPurchaseOrderItemForReceipt(tx, receipt.purchaseOrderItemId);
+    if (!line) throw new AppException('COM-003', '발주 품목을 찾을 수 없어요');
+    const order = line.purchaseOrder;
+    const orderStatus = order.purchaseOrderStatus as PurchaseOrderStatus;
+    // 발주 취소는 입고 누계가 0일 때만 되므로 취소한 발주에 되돌릴 입고는 남지 않는다. 잔량 마감한 발주는 LOT을 안 썼으면 되돌린다
+    if (orderStatus === PURCHASE_ORDER_STATUS.CANCELLED) throw new AppException('PUR-007', `${order.purchaseOrderNo}는 취소된 발주라 입고를 취소할 수 없어요`);
+
+    const lot = await this.repository.findLotOfReceipt(tx, receipt.id);
+    if (!lot) throw new AppException('COM-003', '이 입고로 만든 원료 LOT을 찾을 수 없어요');
+    // 잠금 순서: 발주 → 작업 로그 채번 → 원료 LOT. 제선 실적은 시작 작업 로그(EV 채번 잠금)를 남긴 뒤 원료 LOT을 FIFO로 잠그므로
+    // LOT을 먼저 잡고 작업 로그를 남기면 서로 기다린다(교착)
+    await this.numbering.lockDocumentNumber(tx, 'BUSINESS_EVENT');
+    const lotBefore = await this.repository.cancelRawMaterialLot(tx, lot.id);
+    if (!lotBefore) throw new AppException('PUR-006', `원료 LOT ${lot.lotNo} · 이미 투입·배정했거나 잔량이 줄어 입고를 취소할 수 없어요`);
+
+    const item = await this.repository.findReceiptItem(tx, line.itemId);
+    const today = seoulToday();
+    const reversalNo = await this.numbering.nextDocumentNumber(tx, 'GOODS_RECEIPT');
+    const reversal = await this.repository.createGoodsReceipt(tx, {
+      goodsReceiptNo: reversalNo,
+      purchaseOrderItemId: receipt.purchaseOrderItemId,
+      receivedTon: receipt.receivedTon.neg(),
+      receivedDate: parseDate(today, '취소일'),
+      reversedGoodsReceiptId: receipt.id,
+    });
+    const receivedOf = (l: (typeof order.purchaseOrderItems)[number]) => sumTon(l.goodsReceipts);
+    const self = order.purchaseOrderItems.find((l) => l.id === line.id);
+    const receivedBefore = self ? receivedOf(self) : new Prisma.Decimal(0);
+    const receivedAfter = receivedBefore.minus(receipt.receivedTon);
+    // 잔량 마감한 발주는 닫힌 채로 두고 입고 누계만 줄인다 (MRP 입고예정에서는 이미 빠져 있다)
+    const status =
+      orderStatus === PURCHASE_ORDER_STATUS.CLOSED
+        ? orderStatus
+        : receiptStatusOf(order.purchaseOrderItems.map((l) => ({ orderedTon: l.orderedTon, receivedTon: l.id === line.id ? receivedAfter : receivedOf(l) })));
+    if (status !== orderStatus) await this.changePurchaseOrderStatus(tx, order.id, orderStatus, status);
+
+    await this.businessEventRecorder.record(tx, {
+      type: BUSINESS_EVENT_TYPE.GOODS_RECEIPT_CANCELLED,
+      actor: user,
+      target: { table: 'goods_receipt', id: receipt.id },
+      lotIds: [lot.id],
+      // LOT 변경 전 값은 조건부 UPDATE가 돌려준 값이다 (재고 상태였던 것은 UPDATE 조건)
+      before: { purchaseOrderStatus: orderStatus, cumulativeReceivedTon: receivedBefore.toFixed(3), lotStatus: LOT_STATUS.AVAILABLE, remainingTon: lotBefore.remainingTonBefore },
+      // 대상이 원래 입고라 goodsReceiptNo는 원래 입고 번호(작업 로그 화면의 대상 번호), 취소 행 번호는 따로 둔다
+      after: {
+        goodsReceiptNo: receipt.goodsReceiptNo,
+        reversalGoodsReceiptNo: reversalNo,
+        purchaseOrderId: order.id,
+        purchaseOrderNo: order.purchaseOrderNo,
+        purchaseOrderItemId: receipt.purchaseOrderItemId,
+        itemId: line.itemId,
+        itemCode: item.itemCode,
+        receivedTon: receipt.receivedTon.neg().toFixed(3),
+        receivedDate: today,
+        lotId: lot.id,
+        lotNo: lot.lotNo,
+        lotStatus: LOT_STATUS.RECEIPT_CANCELLED,
+        remainingTon: '0.000',
+        purchaseOrderStatus: status,
+        cumulativeReceivedTon: receivedAfter.toFixed(3),
+      },
+      reason,
+    });
+    return reversal.id;
+  }
+
   // ── 계산·모양 ─────────────────────────────────────────
+
+  /** 발주 상태가 from일 때만 to로 바꾼다. 그사이 입고 확정·다른 처리로 바뀌었으면 0건이라 COM-001 */
+  private async changePurchaseOrderStatus(tx: Tx, id: number, from: PurchaseOrderStatus, to: PurchaseOrderStatus): Promise<void> {
+    if ((await this.repository.changePurchaseOrderStatus(tx, id, from, to)) === 0) throw new AppException('COM-001', '다른 사람이 먼저 처리했거나 그사이 입고가 바뀐 발주예요. 다시 조회해 주세요');
+  }
+
+  private async mustFindPurchaseOrderStatus(tx: Tx, id: number) {
+    const row = await this.repository.findPurchaseOrderStatus(tx, id);
+    if (!row) throw new AppException('COM-003', '발주를 찾을 수 없어요');
+    return row;
+  }
 
   /** 승인·반려 전 확인: 부서장 지정(PUR-001) → 요청자 소속 부서의 부서장(COM-002) → 본인 요청 아님 → 승인 대기(COM-001) */
   private async mustFindForDecision(tx: Tx, user: AuthUser, id: number): Promise<RequisitionChangeRow> {
@@ -544,12 +792,12 @@ export class PurchasingService {
     return this.detailOf(this.prisma, await this.mustFindRequisition(this.prisma, id));
   }
 
-  /** 대상별 가장 최근 작업 로그의 사원·시각 (ERD에 칸이 없는 반려 일시·발주자·입고 확정자) */
-  private async latestEvents(tx: Tx, type: BusinessEventType, targetType: string, ids: number[]): Promise<Map<number, { actorName: string | null; at: Date }>> {
-    const latest = new Map<number, { actorName: string | null; at: Date }>();
+  /** 대상별 가장 최근 작업 로그의 사원·시각·사유 (ERD에 칸이 없는 반려 일시·발주자·입고 확정자·취소·마감 사유) */
+  private async latestEvents(tx: Tx, type: BusinessEventType, targetType: string, ids: number[]): Promise<Map<number, { actorName: string | null; at: Date; reason: string | null }>> {
+    const latest = new Map<number, { actorName: string | null; at: Date; reason: string | null }>();
     if (ids.length === 0) return latest;
     for (const e of await this.repository.findEvents(tx, type, targetType, ids)) {
-      if (!latest.has(e.targetId)) latest.set(e.targetId, { actorName: e.actorEmployee?.employeeName ?? null, at: e.createdAt });
+      if (!latest.has(e.targetId)) latest.set(e.targetId, { actorName: e.actorEmployee?.employeeName ?? null, at: e.createdAt, reason: e.reason });
     }
     return latest;
   }
@@ -600,12 +848,17 @@ export class PurchasingService {
     };
   }
 
-  private toGoodsReceiptView(row: GoodsReceiptRow, confirmedEmployeeName: string | null): GoodsReceiptView {
+  private toGoodsReceiptView(row: GoodsReceiptRow, confirmedEmployeeName: string | null, cancelReason: string | null): GoodsReceiptView {
+    const purchaseOrderStatus = row.purchaseOrderItem.purchaseOrder.purchaseOrderStatus as PurchaseOrderStatus;
+    const lot = row.lot;
+    // cancelRawMaterialLotForReceipt.sql과 같은 조건 (화면 단추용. 취소할 때 서버가 잠근 뒤 다시 본다)
+    const lotUnused = lot !== null && lot.lotStatus === LOT_STATUS.AVAILABLE && lot.remainingTon !== null && lot.initialTon !== null && lot.remainingTon.eq(lot.initialTon) && lot._count.lotRelationsAsParentLot === 0 && lot._count.allocations === 0;
     return {
       id: row.id,
       goodsReceiptNo: row.goodsReceiptNo,
       purchaseOrderId: row.purchaseOrderItem.purchaseOrderId,
       purchaseOrderNo: row.purchaseOrderItem.purchaseOrder.purchaseOrderNo,
+      purchaseOrderStatus,
       purchaseOrderItemId: row.purchaseOrderItemId,
       itemId: row.purchaseOrderItem.itemId,
       itemCode: row.purchaseOrderItem.item.itemCode,
@@ -614,18 +867,27 @@ export class PurchasingService {
       receivedDate: dateOnly(row.receivedDate),
       lotId: row.lot?.id ?? null,
       lotNo: row.lot?.lotNo ?? null,
+      lotStatus: (row.lot?.lotStatus ?? null) as LotStatus | null,
       yardId: row.lot?.yardId ?? null,
       yardName: row.lot?.yard?.yardName ?? null,
       confirmedEmployeeName,
+      reversedGoodsReceiptId: row.reversedGoodsReceiptId,
+      reversedGoodsReceiptNo: row.reversedGoodsReceipt?.goodsReceiptNo ?? null,
+      reversalGoodsReceiptNo: row.reversal?.goodsReceiptNo ?? null,
+      cancelReason,
+      isCancellable: row.reversedGoodsReceiptId === null && row.reversal === null && lotUnused && purchaseOrderStatus !== PURCHASE_ORDER_STATUS.CANCELLED,
       createdAt: row.createdAt.toISOString(),
     };
   }
 
-  private toPurchaseOrderView(row: PurchaseOrderRow, orderedEmployeeName: string | null): PurchaseOrderView {
+  private toPurchaseOrderView(row: PurchaseOrderRow, orderedEmployeeName: string | null, statusChange: PurchaseOrderStatusChange | null): PurchaseOrderView {
     const zero = new Prisma.Decimal(0);
+    // 발주 취소·잔량 마감한 발주는 더 들어올 양이 없어 미입고량을 0으로 두고 남은 양은 닫은 양으로 보인다
+    const ended = ENDED_PURCHASE_ORDER[row.purchaseOrderStatus as PurchaseOrderStatus] !== undefined;
     const lines = row.purchaseOrderItems.map((line) => {
-      const received = line.goodsReceipts.reduce((sum, r) => sum.plus(r.receivedTon), zero);
-      return { line, received, remaining: line.orderedTon.minus(received) };
+      const received = sumTon(line.goodsReceipts);
+      const open = Prisma.Decimal.max(line.orderedTon.minus(received), zero);
+      return { line, received, remaining: ended ? zero : open, closed: ended ? open : zero };
     });
     const total = (pick: (l: (typeof lines)[number]) => Prisma.Decimal) => lines.reduce((sum, l) => sum.plus(pick(l)), zero).toFixed(3);
     return {
@@ -638,9 +900,11 @@ export class PurchasingService {
       totalOrderedTon: total((l) => l.line.orderedTon),
       totalReceivedTon: total((l) => l.received),
       totalRemainingTon: total((l) => l.remaining),
+      totalClosedTon: total((l) => l.closed),
+      statusChange,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
-      items: lines.map(({ line, received, remaining }) => ({
+      items: lines.map(({ line, received, remaining, closed }) => ({
         purchaseOrderItemId: line.id,
         purchaseRequisitionId: line.purchaseRequisitionId,
         purchaseRequisitionNo: line.purchaseRequisition.purchaseRequisitionNo,
@@ -651,6 +915,7 @@ export class PurchasingService {
         expectedReceiptDate: line.expectedReceiptDate ? dateOnly(line.expectedReceiptDate) : null,
         receivedTon: received.toFixed(3),
         remainingTon: remaining.toFixed(3),
+        closedTon: closed.toFixed(3),
       })),
     };
   }

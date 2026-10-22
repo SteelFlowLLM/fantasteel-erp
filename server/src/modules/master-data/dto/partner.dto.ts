@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsIn, IsNotEmpty, IsString, Matches } from 'class-validator';
+import { IsDateString, IsIn, IsNotEmpty, IsOptional, IsString, Matches } from 'class-validator';
 import { YARD_TYPE, type YardType } from '@fantasteel/shared';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
@@ -25,6 +25,11 @@ export class UpdateCustomerDto {
   @IsString()
   @IsNotEmpty({ message: '고객사명을 입력해 주세요' })
   customerName!: string;
+
+  /** 불러온 시각. 그 사이 다른 사람이 고쳤으면 COM-001 (이슈 #498). 보내지 않으면 비교하지 않는다 */
+  @IsOptional()
+  @IsDateString({ strict: true }, { message: 'expectedUpdatedAt은 시각(ISO 8601)으로 보내 주세요' })
+  expectedUpdatedAt?: string | null;
 }
 
 /** API-182. 품목별 기본 공급업체는 품목 수정(API-167)에서 지정한다 */
@@ -45,6 +50,11 @@ export class UpdateSupplierDto {
   @IsString()
   @IsNotEmpty({ message: '공급업체명을 입력해 주세요' })
   supplierName!: string;
+
+  /** 불러온 시각. 그 사이 다른 사람이 고쳤으면 COM-001 (이슈 #498). 보내지 않으면 비교하지 않는다 */
+  @IsOptional()
+  @IsDateString({ strict: true }, { message: 'expectedUpdatedAt은 시각(ISO 8601)으로 보내 주세요' })
+  expectedUpdatedAt?: string | null;
 }
 
 /** API-185. 야드 안 위치는 관리하지 않는다 (REQ-MST-008) */
@@ -68,4 +78,9 @@ export class UpdateYardDto {
   @IsString()
   @IsNotEmpty({ message: '야드명을 입력해 주세요' })
   yardName!: string;
+
+  /** 불러온 시각. 그 사이 다른 사람이 고쳤으면 COM-001 (이슈 #498). 보내지 않으면 비교하지 않는다 */
+  @IsOptional()
+  @IsDateString({ strict: true }, { message: 'expectedUpdatedAt은 시각(ISO 8601)으로 보내 주세요' })
+  expectedUpdatedAt?: string | null;
 }

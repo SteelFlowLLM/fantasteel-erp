@@ -32,6 +32,15 @@ export class NumberingService {
     return formatDocumentNumber(kind, nextSequence(prefix, last), at);
   }
 
+  /**
+   * 그 날짜 업무 번호의 앞부분 잠금만 잡고 번호는 받지 않는다. 잠금 순서를 맞추려고 채번보다 먼저 잡을 때 쓴다
+   * (예: 원료 LOT을 잠그기 전에 작업 로그 EV 잠금을 잡아, EV → 원료 LOT 순으로 잠그는 제선 실적과 교착하지 않게).
+   * 트랜잭션 잠금이라 같은 트랜잭션의 뒤 nextDocumentNumber는 다시 잡고 그대로 다음 번호를 받는다
+   */
+  async lockDocumentNumber(tx: Tx, kind: DocumentNumberKind, at: Date = new Date()): Promise<void> {
+    await this.repository.lockPrefix(tx, documentNumberPrefix(kind, at));
+  }
+
   /** 원료 RM-원료코드- · 용선 HM-고로- · 히트 HT-전로- (+YYMMDD-순번). 슬래브·코일은 number-format의 formatSlabNumber·formatCoilNumber */
   async nextLotNumber(tx: Tx, kind: DatedLotKind, code: string, at: Date = new Date()): Promise<string> {
     const prefix = lotNumberPrefix(kind, code, at);

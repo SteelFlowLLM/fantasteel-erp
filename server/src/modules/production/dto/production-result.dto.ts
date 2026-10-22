@@ -64,11 +64,11 @@ export class RegisterProductionResultDto extends WorkOutputFields {
 
   /** 없으면 지금 */
   @IsOptional()
-  @IsDateString({}, { message: '작업 시작 일시는 ISO 8601 형식이어야 해요' })
+  @IsDateString({ strict: true }, { message: '작업 시작 일시는 ISO 8601 형식이어야 해요' })
   startedAt?: string;
 
   @IsOptional()
-  @IsDateString({}, { message: '작업 완료 일시는 ISO 8601 형식이어야 해요' })
+  @IsDateString({ strict: true }, { message: '작업 완료 일시는 ISO 8601 형식이어야 해요' })
   completedAt?: string;
 }
 
@@ -76,7 +76,7 @@ export class RegisterProductionResultDto extends WorkOutputFields {
 export class CompleteProductionResultDto extends WorkOutputFields {
   /** 없으면 지금 */
   @IsOptional()
-  @IsDateString({}, { message: '작업 완료 일시는 ISO 8601 형식이어야 해요' })
+  @IsDateString({ strict: true }, { message: '작업 완료 일시는 ISO 8601 형식이어야 해요' })
   completedAt?: string;
 }
 

@@ -3,6 +3,9 @@ import type { ChatMessage } from '../llm/llm.client';
 import { RESEARCH_QUESTION_RULES } from './assistant-research.context';
 import { DEFAULT_HISTORY_BUDGET, fitHistory, type HistoryBudget } from './history/chat-memory';
 import type { GlossaryTerm } from './knowledge/glossary.types';
+import { KS_SECTIONS } from './knowledge/ks.generated';
+import { KS_SKIP } from './knowledge/ks.search';
+import type { KsSection } from './knowledge/ks.types';
 import type { ManualGuide } from './knowledge/manual.types';
 import { MANUAL_GUIDES } from './knowledge/manual.generated';
 import type { ProcessStep } from './knowledge/process.types';
@@ -167,7 +170,7 @@ export function buildAssistantMessages(input: AssistantPromptInput): ChatMessage
     '[답하는 규칙]',
     '1. 모든 문장을 "~요"로 끝내는 해요체로 답해요(예: "있어요", "확인할 수 없어요"). "~야", "~해", "~다"로 끝나는 반말·평서체는 쓰지 않아요. 마크다운 없이 짧게 답하고, 목록은 줄을 바꿔 "- "로 써요.',
     '2. 용어·상태·절차의 뜻은 아래 [참고 자료]에 있는 내용만 근거로 설명해요. 참고 자료를 쓴 문장 끝에는 [TRM-056]처럼 그 용어 ID를 붙여요. 참고 자료에 없는 뜻은 "참고로" 같은 덧붙임으로도 설명하지 않아요. 묻지 않은 용어의 뜻도 덧붙이지 않아요.',
-    '3. 재고·수주 진행·생산계획·작업 실적·LOT 추적·검사 결과·불합격률·공정별 수율·출하 실적·MRP 원료 소요·구매·입고·출하·밀시트·작업 로그 같은 업무 데이터는 반드시 조회 도구를 불러 확인해요. 비율·합계가 필요한 질문은 그 값을 계산해 주는 도구(get_quality_reject_rate·get_dashboard_summary·get_mrp_requirements)를 먼저 써요. 숫자(매수·톤·건수·날짜·일수)는 도구 결과에 있는 값만 말하고, 숫자에는 결과의 이름에 있는 단위(매·톤·건·일)를 붙여요. 같은 도구를 조건만 바꿔 여러 번 부르지 않아요. 상태를 지정하지 않은 질문은 상태 없이 한 번 조회해서 결과에서 골라 답해요.',
+    '3. 재고·수주 진행·생산계획·작업 실적·LOT 추적·검사 결과·불합격률·공정별 수율·출하 실적·MRP 원료 소요·구매·입고·출하·밀시트·작업 로그·기준정보(고객사·공급업체·강종·규격 매핑)·지난 회의 같은 업무 데이터는 반드시 조회 도구를 불러 확인해요. 비율·합계가 필요한 질문은 그 값을 계산해 주는 도구(get_quality_reject_rate·get_dashboard_summary·get_mrp_requirements)를 먼저 써요. 숫자(매수·톤·건수·날짜·일수)는 도구 결과에 있는 값만 말하고, 숫자에는 결과의 이름에 있는 단위(매·톤·건·일)를 붙여요. 같은 도구를 조건만 바꿔 여러 번 부르지 않아요. 상태를 지정하지 않은 질문은 상태 없이 한 번 조회해서 결과에서 골라 답해요.',
     '4. 날짜 차이·합계·비율은 직접 계산하지 않고 결과에 있는 값(예: 납기까지 남은 일수, 진행률)을 그대로 말해요. 결과에 없는 평가나 권고(예: "확인이 필요해 보여요", "서둘러야 해요", "거의 없는 상태예요", "부족해 보여요")는 덧붙이지 않고 수치만 말해요.',
     '5. 알맞은 조회 도구가 없는 데이터는 "아직 조회할 수 없어요"라고 답해요. "비슷한 사례 찾아줘"처럼 과거 사례를 묻는 질문은 search_past_cases로 찾아서 사례 번호(CASE-0005)와 현상·원인·조치를 짧게 요약하고, 되묻지 않아요. 보고 있는 화면의 LOT·강종이 있으면 그것을 핵심어로 넣어요. 결과의 예시 사례는 "예시 사례"라고 한 번 밝혀요. 다시 조회하자고 제안할 때는 도구에 있는 조건으로만 제안해요.',
     '6. 도구 결과가 "권한 없음"이면 데이터를 말하지 않고, 결과에 있는 조회할 수 있는 역할을 안내해요. 도구 결과가 "오류"면 그 이유를 짧게 알려요.',
@@ -177,7 +180,7 @@ export function buildAssistantMessages(input: AssistantPromptInput): ChatMessage
     '10. 참고 자료의 "사용 금지 동의어"는 쓰지 않고 한글명으로 말해요. 상태는 결과에 있는 한글 표시명으로 말하고, 영문 코드 값(예: REQUESTED, CONVERTED)은 참고 자료나 도구 결과에 있어도 답에 쓰지 않고 뜻만 한글로 말해요.',
     '11. "이 수주"처럼 화면을 가리키면 [보고 있는 화면]의 주소에서 번호·id를 찾아 도구에 넘겨요. 없으면 어떤 것인지 되물어요.',
     '12. [업무 매뉴얼 자료]가 있으면 화면에서 어디를 눌러 하는지는 그 자료의 절차만 근거로, 순서대로 풀어서 설명해요. 메뉴·버튼·칸 이름은 자료에 적힌 글자 그대로 쓰고, 쓴 문장 끝에는 [MAN-SO-01]처럼 그 매뉴얼 ID를 붙여요. 자료에 없는 화면 조작은 확인할 수 없다고 답하고, 직접 눌러 줄 수는 없어요. 매뉴얼은 검수 전 초안이라 화면과 다를 수 있다고 한 번 덧붙여요.',
-    '13. 아래 [지식 목록]의 업무 매뉴얼·업무 프로세스·용어는 read_knowledge 도구로 전체 내용을 읽을 수 있어요. 위 자료에 없는 업무 절차나 용어 뜻을 물으면 먼저 읽고, 읽은 내용만 근거로 답해요. 읽은 문장 끝에는 그 ID([MAN-SO-01]·[BP-SO-01]·[TRM-056])를 붙여요.',
+    '13. 아래 [지식 목록]의 업무 매뉴얼·업무 프로세스·용어·KS 규격은 read_knowledge 도구로 전체 내용을 읽을 수 있어요. 위 자료에 없는 업무 절차나 용어 뜻을 물으면 먼저 읽고, 읽은 내용만 근거로 답해요. 강종의 인장강도·항복강도·연신율·성분 기준, 코일 치수 허용차, KS 규격 번호처럼 검사 기준을 물으면 kind를 ks로 읽고 읽은 표의 숫자와 단위만 말해요. 읽은 문장 끝에는 그 ID([MAN-SO-01]·[BP-SO-01]·[TRM-056]·[KS-8])를 붙여요.',
     '',
     '[사용자]',
     `${input.employeeName} · 역할 ${input.roleLabel}`,
@@ -190,7 +193,7 @@ export function buildAssistantMessages(input: AssistantPromptInput): ChatMessage
     input.references.length ? input.references.map(referenceText).join('\n\n') : '(질문에 맞는 용어를 찾지 못했어요)',
     '',
     knowledgeCatalog(),
-    ...(input.actionCards ? ['', ACTION_CARD_RULES] : []),
+    ...(input.actionCards ? ['', MY_WORK_RULES, '', ACTION_CARD_RULES] : []),
     ...(input.webTools ? ['', webRules({ places: input.webTools.places, actionCards: input.actionCards === true })] : []),
     ...(input.browserTools ? ['', browserRules({ actionCards: input.actionCards === true, openPage: input.browserOpenPage ?? null, vision: input.browserVision === true, ...input.browserLimits })] : []),
     ...(input.screenControl ? ['', screenControlRules(input.screenControl.screens)] : []),
@@ -214,14 +217,29 @@ export function buildAssistantMessages(input: AssistantPromptInput): ChatMessage
  * 지식 목록 (REQ-AST-003). 매뉴얼·업무 프로세스는 ID와 이름만 알리고, 전체 내용은 read_knowledge로 읽게 한다.
  * 용어 117개는 나열하지 않는다(프롬프트가 길어져 작은 모델이 흐려진다). 이름이나 TRM ID로 찾는다.
  */
-export function knowledgeCatalog(guides: readonly ManualGuide[] = MANUAL_GUIDES, steps: readonly ProcessStep[] = PROCESS_STEPS): string {
+export function knowledgeCatalog(guides: readonly ManualGuide[] = MANUAL_GUIDES, steps: readonly ProcessStep[] = PROCESS_STEPS, ksSections: readonly KsSection[] = KS_SECTIONS): string {
   return [
     '[지식 목록] (read_knowledge 도구로 전체 내용을 읽어요)',
     `- 업무 매뉴얼(kind: manual): ${guides.map((guide) => `${guide.id} ${guide.name}`).join(', ')}`,
     `- 업무 프로세스(kind: process): ${steps.map((step) => `${step.id} ${step.name}`).join(', ')}`,
     '- 용어(kind: glossary): id에 용어 이름이나 TRM ID를 넣어 찾아요(예: id "예약 매수").',
+    // 문서 작업 메모(미결정 사항·후속 작업)는 근거가 아니라 목록에서 뺀다
+    `- KS 규격·검사 기준(kind: ks): ${ksSections.filter((section) => !KS_SKIP.has(section.id)).map((section) => `${section.id} ${section.title}`).join(', ')}. id에 절 번호나 강종 이름(SS275)·KS 규격 번호를 넣어 읽어요.`,
   ].join('\n');
 }
+
+/**
+ * 내 일정·업무·알림·결재·초안·Agent 위험·심층 조사 도구와 아침 브리핑을 알릴 때 더하는 규칙 (이슈 #506). 사원 본인의 것이라 철강맨AI 패널에서만 알린다.
+ * 로컬 모델이 하루 현황을 묻는 질문에 도구를 여러 번 고르다 흐려지지 않게, 한 번에 모으는 get_my_briefing 하나만 부르고 먼저 할 일 3가지로 정리하게 한다.
+ */
+export const MY_WORK_RULES = [
+  '[내 업무 현황 규칙]',
+  '위 [답하는 규칙]과 함께 지켜요.',
+  'K1. "오늘 브리핑", "오늘 뭐부터 해야 해?", "오늘 할 일 정리해 줘"처럼 내 하루 현황을 묻거나 브리핑을 부탁하면 get_my_briefing 도구 하나만 불러요. 일정·업무·알림·결재·Agent 도구를 따로 부르지 않아요.',
+  'K2. 브리핑 결과의 "먼저 할 일 후보(급한 순서…)"에 서버가 급한 순서로 고른 줄이 있어요. 그 줄을 순서 그대로 번호 줄(1. 2. 3.)로 짧게 옮겨 써요. 줄 안의 제목·번호·날짜·건수는 바꾸지 않고, 줄에 없는 일을 더하지 않아요. 번호 줄 아래에는 위에 쓰지 않은 묶음 중 "없음"이 아닌 것만 건수로 한 줄 요약해요(예: "그 밖에 안 읽은 알림 3건이 있어요"). 없는 묶음은 말하지 않아요. "안 읽은 알림 수(Agent 알림 제외)"와 "안 읽은 Agent 알림 수"는 서로 다른 알림이라 더하지 않고 각각 말해요.',
+  'K3. "먼저 할 일 후보"가 "없음"이면 "오늘은 급한 일이 없어요"라고 말해요. 묶음 값이 "없음"이면 "없어요"로 말하고 지어내지 않아요. "제외한 묶음"에 있는 묶음(권한이 없거나 해당되지 않는 것)은 이유를 한 줄로만 알리고 내용을 지어내지 않아요.',
+  'K4. 알림함은 get_my_notifications, 결재함은 get_my_approvals, Message→ERP 초안은 get_my_action_drafts, 공장 Agent 위험 후보·알림은 get_agent_risks, 내 심층 조사 진행은 get_my_research로 조회해요. 이 도구들은 조회만 해요: 읽음 처리·승인·반려·초안 확정은 해당 화면에서 직접 해야 한다고 알려요.',
+].join('\n');
 
 /** 실행이 필요한 요청은 카드로 보여 주고 사용자가 확정한다 (REQ-AST-005). 위 9번 규칙의 예외는 이 카드뿐이다 */
 export const ACTION_CARD_RULES = [

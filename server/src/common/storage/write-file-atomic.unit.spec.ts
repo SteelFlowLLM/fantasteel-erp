@@ -36,6 +36,15 @@ describe('writeFileAtomic (#487)', () => {
     expect(await readFile(file, 'utf8')).toBe('{"apiKey":"2"}');
   });
 
+  itPosix('설정 폴더를 새로 만들면 0700이고, 이미 있는 폴더의 mode는 바꾸지 않는다 (#497)', async () => {
+    await writeFileAtomic(join(dir, 'fresh', 'settings', 'a.json'), '{}');
+    expect((await stat(join(dir, 'fresh', 'settings'))).mode & 0o777).toBe(0o700);
+    await mkdir(join(dir, 'shared'), { mode: 0o755 });
+    await chmod(join(dir, 'shared'), 0o755);
+    await writeFileAtomic(join(dir, 'shared', 'b.json'), '{}');
+    expect((await stat(join(dir, 'shared'))).mode & 0o777).toBe(0o755);
+  });
+
   itPosix('mode를 따로 주면 그 값으로 쓴다', async () => {
     const file = join(dir, 'c.json');
     await writeFileAtomic(file, '{}', 0o640);

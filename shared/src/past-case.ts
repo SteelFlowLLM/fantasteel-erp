@@ -209,3 +209,6 @@ export function canModifyPastCase(user: Pick<AuthUser, 'employeeId' | 'roleCode'
   if (user.roleCode === ROLE.ADMIN || user.employeeId === pastCase.createdEmployeeId) return true;
   return pastCase.createdEmployeeDepartmentId !== null && user.headDepartmentIds.includes(pastCase.createdEmployeeDepartmentId);
 }
+
+/** 과거 사례 검색어 최대 글자 수. 서버 DTO와 화면이 같은 값을 쓴다 (이슈 #498) */
+export const PAST_CASE_QUERY_MAX = 200;

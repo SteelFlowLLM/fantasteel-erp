@@ -188,6 +188,21 @@ export interface ReproductionCheck {
   reproductionNeedQty: number;
 }
 
+/**
+ * 생산계획 하나의 연결 수주 품목 표시값과 재생산 판단 (GET /production-plans/reproduction-checks, 이슈 #498).
+ * 계획 상세(GET :id)의 같은 값이다. 불합격 LOT 목록처럼 계획 여러 개의 값이 한꺼번에 필요한 화면이 쓴다.
+ */
+export interface PlanReproductionCheck {
+  productionPlanId: number;
+  customerName: string | null;
+  itemCode: string;
+  itemType: ItemType;
+  /** 품목 납기 'YYYY-MM-DD' */
+  dueDate: string | null;
+  /** 수주 연결이 없으면(수주 취소로 해제) null */
+  reproduction: ReproductionCheck | null;
+}
+
 /** 생산계획 상세 (GET /production-plans/:id) */
 export interface ProductionPlanDetail extends ProductionPlanSummary {
   salesOrderItem: {
@@ -407,6 +422,22 @@ export interface HotRollingDetail {
   results: ProductionResultView[];
   /** 이 계획의 열연 실적이 만든 코일 */
   coils: HotRollingCoil[];
+}
+
+/**
+ * 열연 투입 목록의 코일 계획 한 줄 (GET /production-plans/hot-rolling, 이슈 #498).
+ * 값은 열연 투입 화면(HotRollingDetail)과 같은 규칙으로 구하고, 후보·배정·실적 같은 무거운 값은 뺐다.
+ */
+export interface HotRollingPlanListItem {
+  plan: ProductionPlanSummary;
+  /** 대응 슬래브 규격. 기준정보(규격 이론중량·수율·슬래브 매핑)가 모자라 정할 수 없으면 null */
+  slabItemCode: string | null;
+  shortageQty: number;
+  usableCoilQty: number;
+  failedCoilQty: number;
+  confirmedAllocationQty: number;
+  neededQty: number;
+  isRollable: boolean;
 }
 
 // ── 실적 시뮬레이션 (REQ-PRD-007, BP-SEED-01) ─────────────

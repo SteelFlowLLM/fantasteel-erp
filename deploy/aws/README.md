@@ -51,7 +51,9 @@ Nest ──Tailscale──▶ Mac LLM 서버·음성 서버(8001)
 - **로그인 실패 제한**: 사원번호별 5번·IP별 20번 틀리면 5분 막는다(메모리, 서버 한 대 가정, 재시작하면 비워짐). 사용자 IP는 Caddy가 붙인 `X-Forwarded-For`로 읽는다(서버가 루프백에서 온 값만 믿는다).
 - **받아쓰기 제한 시간**: 음성 서버의 긴 전사(최대 1시간)가 기본 5분 대기에 끊기지 않게 서버가 받아쓰기 요청에만 대기 시간을 맞춘다.
 - **스트리밍**: Caddy는 `/api/v1`·`/socket.io`에 압축을 걸지 않고 응답을 모으지 않는다(철강맨AI 답이 한꺼번에 나오지 않게).
-- **요청 본문 상한**: 파일을 올리는 경로(회의 녹음·음성 시험 오디오·메신저 첨부)만 510MB까지 받고, 나머지 API는 13MB(철강맨AI 질문에 실린 사진까지), 실시간 연결·화면은 2MB다. 새 파일 올리기 경로를 서버에 더하면 `Caddyfile`의 `@bigUpload` 목록에도 더한다.
+- **설정 파일 권한**: 서버가 `STORAGE_DIR/settings/`에 쓰는 설정 파일(LLM·음성·철강맨 부르기·브라우저)에는 API 키가 들어 있어 새로 쓸 때 폴더 0700·파일 0600으로 만든다. 이 버전 전에 만든 파일·폴더는 권한이 그대로이니 서버에서 한 번 맞춘다: `chmod 700 "$STORAGE_DIR/settings" && chmod 600 "$STORAGE_DIR"/settings/*.json`.
+- **EC2 메타데이터(IMDSv2)**: ERP 서버가 관리자가 넣은 주소로 요청을 보내므로 인스턴스 자격 증명이 새지 않게 IMDSv2를 필수로 두고 hop limit을 1로 한다(서버 코드도 메타데이터 주소를 막지만 한 겹 더): `aws ec2 modify-instance-metadata-options --instance-id <id> --http-tokens required --http-put-response-hop-limit 1`.
+- **요청 본문 상한**: 파일을 올리는 경로(회의 녹음·음성 시험 오디오·메신저 첨부)만 510MiB까지 받고, 나머지 API는 13MiB(철강맨AI 질문에 실린 사진까지), 실시간 연결·화면은 2MiB다. Caddy는 `MB`를 10^6바이트, `MiB`를 2^20바이트로 읽고 서버 상한은 2^20 기준이라 `Caddyfile`에는 `MiB`로 적는다. 새 파일 올리기 경로를 서버에 더하면 `Caddyfile`의 `@bigUpload` 목록에도 더한다(`deploy-caddyfile.unit.spec.ts`가 서버의 업로드 경로와 이 목록·크기를 맞춰 본다).
 
 ## 4. 외부 연결
 
@@ -73,7 +75,7 @@ curl -sI https://<도메인>/login | head -1    # HTTP/2 200
 - 브라우저로 `https://<도메인>` → 로그인 → 대시보드가 뜬다. 사원 메뉴가 사원 권한대로 보인다.
 - 메신저 두 계정(시크릿 창)으로 메시지가 실시간으로 간다(웹소켓).
 - 철강맨AI 질문의 답이 **조금씩 흐르듯** 나온다(Caddy가 모으지 않는다). Mac이 켜져 있으면 답, 꺼져 있으면 `AST-003` 안내.
-- 회의 녹음(수 MB)을 올려 전사가 끝난다. 녹음 올리기 경로(`/api/v1/meeting-minutes/audio`)는 Caddy·서버 상한(500MB)을 모두 지난다.
+- 회의 녹음(수 MB)을 올려 전사가 끝난다. 녹음 올리기 경로(`/api/v1/meeting-minutes/audio`)는 Caddy·서버 상한(500MiB)을 모두 지난다.
 - 쿠키가 `Secure`·`HttpOnly`로 오고, 한 사원번호를 6번 틀리면 `AUTH-003`(429)이다.
 - `free -h`로 램·스왑을 본다. 서버 프로세스가 1.5GB를 넘으면 pm2가 다시 띄운다.
 

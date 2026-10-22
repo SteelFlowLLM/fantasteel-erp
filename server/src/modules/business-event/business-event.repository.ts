@@ -44,6 +44,11 @@ export class BusinessEventRepository {
     return tx.salesOrder.findMany({ where: { id: { in: ids } }, select: { id: true, salesOrderNo: true } });
   }
 
+  /** 메시지 없는 초안의 payload (Agent 대응 후보인지 가린다) */
+  findMessagelessDrafts(tx: Tx, ids: number[]) {
+    return tx.actionDraft.findMany({ where: { id: { in: ids }, messageId: null }, select: { id: true, payload: true } });
+  }
+
   findMessages(tx: Tx, ids: number[]) {
     return tx.message.findMany({ where: { id: { in: ids } }, select: { id: true, chatRoomId: true } });
   }

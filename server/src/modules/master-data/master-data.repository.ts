@@ -3,9 +3,9 @@ import type { ItemType } from '@fantasteel/shared';
 import type { Prisma } from '../../generated/prisma/client';
 import type { Tx } from '../../prisma/prisma.service';
 
-const CUSTOMER_SELECT = { id: true, customerCode: true, customerName: true } as const;
-const SUPPLIER_SELECT = { id: true, supplierCode: true, supplierName: true } as const;
-const YARD_SELECT = { id: true, yardCode: true, yardName: true, yardType: true } as const;
+const CUSTOMER_SELECT = { id: true, customerCode: true, customerName: true, updatedAt: true } as const;
+const SUPPLIER_SELECT = { id: true, supplierCode: true, supplierName: true, updatedAt: true } as const;
+const YARD_SELECT = { id: true, yardCode: true, yardName: true, yardType: true, updatedAt: true } as const;
 const STEEL_GRADE_SELECT = { id: true, steelGradeCode: true, steelGradeName: true, standardNo: true, updatedAt: true } as const;
 const SPEC_SELECT = { id: true, itemCode: true, steelGradeId: true, thicknessMm: true, widthMm: true, lengthMm: true, theoreticalWeightTon: true } as const;
 
@@ -103,6 +103,11 @@ export class MasterDataRepository {
     return tx.yard.findUnique({ where: { id }, select: { id: true, yardType: true } });
   }
 
+  /** 수정 뒤 돌려줄 행 (updateMany는 행을 돌려주지 않는다) */
+  findYardView(tx: Tx, id: number) {
+    return tx.yard.findUnique({ where: { id }, select: YARD_SELECT });
+  }
+
   findSupplier(tx: Tx, id: number) {
     return tx.supplier.findUnique({ where: { id }, select: { id: true } });
   }
@@ -127,8 +132,9 @@ export class MasterDataRepository {
     return tx.item.create({ data, select: { id: true } });
   }
 
-  updateItem(tx: Tx, id: number, data: Prisma.ItemUncheckedUpdateInput) {
-    return tx.item.update({ where: { id }, data, select: { id: true } });
+  /** readUpdatedAt이 있으면 그 시각 그대로일 때만 바꾼다 (동시 수정 방지). 바꿨으면 true */
+  async updateItem(tx: Tx, id: number, data: Prisma.ItemUncheckedUpdateManyInput, readUpdatedAt?: Date): Promise<boolean> {
+    return (await tx.item.updateMany({ where: { id, updatedAt: readUpdatedAt }, data })).count === 1;
   }
 
   createSteelGrade(tx: Tx, data: { steelGradeCode: string; steelGradeName: string; standardNo: string }) {
@@ -176,8 +182,8 @@ export class MasterDataRepository {
     return tx.routing.create({ data, select: { id: true } });
   }
 
-  updateRouting(tx: Tx, id: number, data: { sequenceNo?: number; plannedYieldRate?: string | null }) {
-    return tx.routing.update({ where: { id }, data, select: { id: true } });
+  async updateRouting(tx: Tx, id: number, data: { sequenceNo?: number; plannedYieldRate?: string | null }, readUpdatedAt?: Date): Promise<boolean> {
+    return (await tx.routing.updateMany({ where: { id, updatedAt: readUpdatedAt }, data })).count === 1;
   }
 
   findSpecificConsumption(tx: Tx, id: number) {
@@ -201,12 +207,17 @@ export class MasterDataRepository {
     return tx.customer.findUnique({ where, select: CUSTOMER_SELECT });
   }
 
+  /** 수정 뒤 돌려줄 행 (updateMany는 행을 돌려주지 않는다) */
+  findSupplierView(tx: Tx, id: number) {
+    return tx.supplier.findUnique({ where: { id }, select: SUPPLIER_SELECT });
+  }
+
   createCustomer(tx: Tx, data: { customerCode: string; customerName: string }) {
     return tx.customer.create({ data, select: CUSTOMER_SELECT });
   }
 
-  updateCustomer(tx: Tx, id: number, customerName: string) {
-    return tx.customer.update({ where: { id }, data: { customerName }, select: CUSTOMER_SELECT });
+  async updateCustomer(tx: Tx, id: number, customerName: string, readUpdatedAt?: Date): Promise<boolean> {
+    return (await tx.customer.updateMany({ where: { id, updatedAt: readUpdatedAt }, data: { customerName } })).count === 1;
   }
 
   findSupplierByCode(tx: Tx, supplierCode: string) {
@@ -217,8 +228,8 @@ export class MasterDataRepository {
     return tx.supplier.create({ data, select: SUPPLIER_SELECT });
   }
 
-  updateSupplier(tx: Tx, id: number, supplierName: string) {
-    return tx.supplier.update({ where: { id }, data: { supplierName }, select: SUPPLIER_SELECT });
+  async updateSupplier(tx: Tx, id: number, supplierName: string, readUpdatedAt?: Date): Promise<boolean> {
+    return (await tx.supplier.updateMany({ where: { id, updatedAt: readUpdatedAt }, data: { supplierName } })).count === 1;
   }
 
   findYardByCode(tx: Tx, yardCode: string) {
@@ -229,8 +240,8 @@ export class MasterDataRepository {
     return tx.yard.create({ data, select: YARD_SELECT });
   }
 
-  updateYard(tx: Tx, id: number, yardName: string) {
-    return tx.yard.update({ where: { id }, data: { yardName }, select: YARD_SELECT });
+  async updateYard(tx: Tx, id: number, yardName: string, readUpdatedAt?: Date): Promise<boolean> {
+    return (await tx.yard.updateMany({ where: { id, updatedAt: readUpdatedAt }, data: { yardName } })).count === 1;
   }
 
   // ── 삭제 ([05] 7-2: 참조가 없을 때만). 쓰는 곳 이름을 돌려준다 (없으면 빈 배열) ──
@@ -317,7 +328,7 @@ export class MasterDataRepository {
     await tx.item.delete({ where: { id } });
   }
 
-  updateProductionSetting(tx: Tx, id: number, data: { heatCapacityTon?: string; deliveryRiskDays?: number }) {
-    return tx.productionSetting.update({ where: { id }, data, select: { id: true } });
+  async updateProductionSetting(tx: Tx, id: number, data: { heatCapacityTon?: string; deliveryRiskDays?: number }, readUpdatedAt?: Date): Promise<boolean> {
+    return (await tx.productionSetting.updateMany({ where: { id, updatedAt: readUpdatedAt }, data })).count === 1;
   }
 }
