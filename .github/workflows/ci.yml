@@ -1,0 +1,71 @@
+# PR마다 타입 검사와 테스트를 돌린다 (이슈 #548). 쓰는 법: docs/GIT-GUIDE.md 6장.
+name: CI
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+# 같은 PR에 새 커밋이 올라오면 앞의 실행은 멈춘다
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: 타입 검사·단위 테스트
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      # 서버 테스트·.env.example이 localhost:54322를 쓴다 (로컬 npm run db와 같은 포트)
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: fantasteel
+        ports: ['54322:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          # 서버 테스트(Jest)가 ESM 패키지(NestJS)를 require로 불러와서 Node 24.9 이상이 필요하다
+          node-version: 24
+          cache: npm
+      - run: cp server/.env.example server/.env
+      - run: npm ci
+      # TypedSQL 타입은 스키마가 들어간 DB에 접속해야 만들어진다. 없으면 typecheck가 실패한다
+      - run: npm run migrate:deploy -w @fantasteel/server
+      - run: npm run generate:sql -w @fantasteel/server
+      - run: npm run typecheck
+      - run: npm run test:unit -w @fantasteel/server
+      - run: npm run test -w @fantasteel/client
+
+  db-test:
+    name: 서버 DB 테스트
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: fantasteel
+        ports: ['54322:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: cp server/.env.example server/.env
+      - run: npm ci
+      - run: npm run migrate:deploy -w @fantasteel/server
+      - run: npm run generate:sql -w @fantasteel/server
+      # 묶음마다 테스트 전용 DB(fs_*)를 새로 만들어 마이그레이션·시드 뒤 돌린다 (server/scripts/test.mjs)
+      - run: npm test
