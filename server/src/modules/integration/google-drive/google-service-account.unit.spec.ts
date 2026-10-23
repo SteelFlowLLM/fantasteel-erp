@@ -1,5 +1,6 @@
 // Google 서비스 계정(이슈 #395) 순수 단위: 키 읽기(파일·JSON·base64·잘못된 값), JWT 서명, .env 폴더, 토큰 기억·한 번만 요청.
 import { generateKeyPairSync, verify } from 'node:crypto';
+import { resolve } from 'node:path';
 import { AppException } from '../../../common/errors/app.exception';
 import { effectiveDriveFolder, loadServiceAccountConfig, parseServiceAccountKey, readEnvDriveFolder, serviceAccountSignature } from './google-drive.env';
 import { buildServiceAccountAssertion, GoogleServiceAccount, JWT_BEARER_GRANT_TYPE, parseServiceAccountTokenResponse, SERVICE_ACCOUNT_SCOPE } from './google-service-account';
@@ -64,7 +65,8 @@ describe('parseServiceAccountKey', () => {
 });
 
 describe('loadServiceAccountConfig', () => {
-  const files: Record<string, string> = { '/srv/server/secrets/key.json': keyJson(), '/abs/key.json': keyJson({ client_email: 'abs@p.iam.gserviceaccount.com' }) };
+  // 상대 경로는 운영체제 방식으로 풀린다 (Windows에서는 D:\srv\server\...)
+  const files: Record<string, string> = { [resolve('/srv/server', 'secrets/key.json')]: keyJson(), '/abs/key.json': keyJson({ client_email: 'abs@p.iam.gserviceaccount.com' }) };
   const readFile = (path: string): string => {
     const content = files[path];
     if (content === undefined) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
@@ -94,7 +96,7 @@ describe('loadServiceAccountConfig', () => {
     expect(loadServiceAccountConfig({ GOOGLE_SERVICE_ACCOUNT_KEY_FILE: 'secrets/none.json' }, '/srv/server', readFile)).toEqual({
       configured: true,
       key: null,
-      error: 'GOOGLE_SERVICE_ACCOUNT_KEY_FILE: 키 파일을 찾을 수 없어요 (/srv/server/secrets/none.json)',
+      error: `GOOGLE_SERVICE_ACCOUNT_KEY_FILE: 키 파일을 찾을 수 없어요 (${resolve('/srv/server', 'secrets/none.json')})`,
     });
     const bad = loadServiceAccountConfig({ GOOGLE_SERVICE_ACCOUNT_KEY: keyJson({ type: 'x' }) }, '/srv/server', readFile);
     expect(bad).toMatchObject({ configured: true, key: null });

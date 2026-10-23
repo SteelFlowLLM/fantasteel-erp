@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { promisify } from 'node:util';
 import type { SttLocalServerActionInput, SttLocalServerActionView, SttLocalServerView } from '@fantasteel/shared';
 import { AppException } from '../../common/errors/app.exception';
@@ -35,9 +35,9 @@ export function busyWarning(transcribing: number, action: 'restart' | 'stop'): s
   return `음성 서버가 회의 녹음 ${transcribing}건을 받아쓰는 중이에요. 지금 ${action === 'restart' ? '다시 켜면' : '끄면'} 그 전사는 실패하고 녹음을 다시 올려야 해요`;
 }
 
-/** 화면에 보일 경로: 홈 폴더를 ~로 줄인다 */
+/** 화면에 보일 경로: 홈 폴더를 ~로 줄인다 (Windows 개발 PC의 `\` 구분자도 본다) */
 export function tildePath(path: string, home = homedir()): string {
-  return home && path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path;
+  return home && (path.startsWith(`${home}/`) || path.startsWith(`${home}${sep}`)) ? `~${path.slice(home.length)}` : path;
 }
 
 /** `launchctl print`의 state·pid 줄 */

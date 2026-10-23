@@ -19,9 +19,25 @@ export async function writeFileAtomic(file: string, content: string, mode: numbe
   const temp = `${file}.${randomUUID()}.tmp`;
   try {
     await writeFile(temp, content, { encoding: 'utf8', mode });
-    await rename(temp, file);
+    await renameWithRetry(temp, file);
   } finally {
     // 바꿔 끼웠으면 임시 파일은 이미 없다
     await rm(temp, { force: true });
+  }
+}
+
+/** Windows는 다른 요청이 대상 파일을 열어 둔 동안 rename을 EPERM·EACCES·EBUSY로 잠깐 막는다. 잠깐 기다렸다 다시 바꿔 끼운다 */
+const RENAME_RETRY_CODES = new Set(['EPERM', 'EACCES', 'EBUSY']);
+const RENAME_RETRIES = 10;
+
+async function renameWithRetry(from: string, to: string): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await rename(from, to);
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (process.platform !== 'win32' || !code || !RENAME_RETRY_CODES.has(code) || attempt >= RENAME_RETRIES) throw e;
+      await new Promise((r) => setTimeout(r, 10 * (attempt + 1)));
+    }
   }
 }
