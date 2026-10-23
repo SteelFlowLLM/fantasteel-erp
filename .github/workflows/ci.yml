@@ -30,10 +30,11 @@ jobs:
         ports: ['54322:5432']
         options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          # 서버 테스트(Jest)가 ESM 패키지(NestJS)를 require로 불러와서 Node 24.9 이상이 필요하다
+          node-version: 24
           cache: npm
       - run: cp server/.env.example server/.env
       - run: npm ci
@@ -57,10 +58,10 @@ jobs:
         ports: ['54322:5432']
         options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
       - run: cp server/.env.example server/.env
       - run: npm ci
