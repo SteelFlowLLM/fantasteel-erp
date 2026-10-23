@@ -102,3 +102,16 @@ npm install
 - 막히면 공유한다. `--force`로 남의 기록을 덮어쓰지 않는다.
 
 적용 후 확인: `npm run typecheck`, `npm run dev` (로그인: [backend/seed.md](backend/seed.md)의 사원번호, 비밀번호는 server/.env의 `SEED_PASSWORD`).
+
+## 6. CI (GitHub Actions)
+
+`develop`·`main`으로 가는 PR과 `develop` push마다 `.github/workflows/ci.yml`이 두 검사를 함께 돌린다. PR 화면 아래 "Checks"에서 결과를 본다.
+
+| 검사 | 하는 일 |
+|---|---|
+| 타입 검사·단위 테스트 | 시험 Postgres에 마이그레이션 → `generate:sql` → `npm run typecheck` → 서버 `test:unit` → 화면 테스트 |
+| 서버 DB 테스트 | `npm test` (서버 7개 묶음, 테스트 전용 DB `fs_*`) |
+
+- 둘 다 통과해야 머지한다. 실패하면 "Details"에서 로그를 보고, 로컬에서 같은 명령으로 다시 돌려 고친다.
+- CI는 `server/.env.example`을 그대로 쓰고 공용 DB(Supabase)에 접속하지 않는다. 비밀 값이 필요 없다.
+- 같은 PR에 새 커밋을 올리면 앞의 실행은 멈추고 새로 돈다.
