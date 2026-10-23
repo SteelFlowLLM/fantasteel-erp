@@ -4,7 +4,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { AiExtractionStatus } from '@fantasteel/shared';
 import { seoulToday } from '../../common/time/seoul-date';
 import { LlmClient, LlmRequestError } from '../llm/llm.client';
-import { LlmSettingsStore } from '../llm/llm-settings.store';
+import { llmEndpointOf, LlmSettingsStore } from '../llm/llm-settings.store';
 import { LLM_PROFILE } from '../llm/llm-profiles';
 
 /**
@@ -75,7 +75,7 @@ export class DraftExtractor {
         { role: 'system' as const, content: systemPrompt(await guide(), writtenAt) },
         { role: 'user' as const, content },
       ];
-      const extracted = parseJsonObject(await this.llm.chat(settings, settings.model, messages, LLM_PROFILE.MESSAGE_EXTRACT, undefined, extractTimeoutMs()));
+      const extracted = parseJsonObject(await this.llm.chat(llmEndpointOf(settings), settings.model, messages, LLM_PROFILE.MESSAGE_EXTRACT, undefined, extractTimeoutMs()));
       if (!extracted) this.logger.warn('AI 추출 답이 JSON 객체가 아니라 빈 초안으로 만듭니다');
       return extracted ? { values: extracted, status: null } : { values: null, status: 'NOT_JSON' };
     } catch (error) {

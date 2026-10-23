@@ -7,6 +7,9 @@ export const LLM_DEFAULT_BASE_URL = 'http://127.0.0.1:1234/v1';
 /** Unsloth Studio 기본 주소 (이 Mac에서 켰을 때). API 키가 꼭 있어야 한다 */
 export const LLM_UNSLOTH_BASE_URL = 'http://127.0.0.1:8888/v1';
 
+/** Ollama 기본 주소 (OpenAI 호환 /v1). 키는 없어도 된다 */
+export const LLM_OLLAMA_BASE_URL = 'http://127.0.0.1:11434/v1';
+
 /**
  * 철강맨AI 첫 요청(시스템 지시 + 도구 설명)이 들어가려면 필요한 문맥 길이(토큰, 가정값). 이보다 작으면 AI 연결 화면이 경고한다.
  * 2026-10-21 측정: 조회 도구 28개 설명 13,445자 + 시스템 지시 3,766자(웹·브라우저·Notion·Drive를 켜면 더 는다)에 지난 대화·도구 결과·답 자리를 더했다
@@ -23,8 +26,13 @@ export interface LlmSettingsView {
   baseUrl: string;
   /** 고른 모델 id. 아직 안 골랐으면 null */
   model: string | null;
-  /** API 키는 돌려주지 않고 있는지만 알린다 */
+  /** API 키는 돌려주지 않고 있는지만 알린다 (지금 주소의 키) */
   hasApiKey: boolean;
+  /**
+   * 서버(주소의 출처 `http://호스트:포트`)마다 저장한 API 키. 키 값은 돌려주지 않는다.
+   * 주소를 바꿔도 그 서버에 저장한 키를 다시 쓰고, 다른 서버로는 보내지 않는다
+   */
+  apiKeysByOrigin: Record<string, LlmApiKeyView[]>;
   /**
    * 관리자가 정한 사진 지원 여부 (LM Studio가 아닐 때만 쓴다). null이면 모름: 사진 첨부를 막지 않는다.
    * Unsloth Studio가 모델 정보를 알려 주면 그 값이 먼저다
@@ -36,11 +44,37 @@ export interface LlmSettingsView {
   contextLength: number | null;
 }
 
+/**
+ * 저장한 API 키 하나. 앞의 키부터 쓰고, 키가 막히면(401·402·403·429) 다음 키로 넘어간다.
+ * 상태는 이 서버가 켜진 뒤 마지막으로 그 키를 썼을 때의 결과다 (껐다 켜면 모름)
+ */
+export interface LlmApiKeyView {
+  /** 키를 가리키는 값 (키의 해시 앞부분). 저장·연결 확인 때 이 id로 저장된 키를 고른다 */
+  id: string;
+  /** 키 끝 4자리 (`…80cc`) */
+  hint: string;
+  state: LlmApiKeyState | null;
+  /** 마지막으로 쓴 때 (ISO). 아직 안 썼으면 null */
+  usedAt: string | null;
+}
+
+/** ok: 통했다, rejected: 키가 틀렸거나 권한 없음(401·403), limited: 요청 한도·결제(402·429) */
+export type LlmApiKeyState = 'ok' | 'rejected' | 'limited';
+
+/** 저장된 키는 id로, 새 키는 값(value)으로 보낸다 (둘 중 하나). 보낸 순서가 쓰는 순서다 */
+export interface LlmApiKeyInput {
+  id?: string;
+  value?: string;
+}
+
+/** 한 서버에 넣을 수 있는 API 키 수 */
+export const LLM_API_KEYS_MAX = 10;
+
 export interface LlmSettingsInput {
   baseUrl: string;
   model: string | null;
-  /** 보내지 않으면 그대로 두고, 빈 문자열이면 지운다 */
-  apiKey?: string;
+  /** 이 주소(출처)의 API 키 목록. 보내지 않으면 그 주소에 저장된 키를 그대로 두고, 빈 배열이면 모두 지운다 */
+  apiKeys?: LlmApiKeyInput[];
   /** 보내지 않으면 그대로, null이면 모름으로 */
   visionSupport?: boolean | null;
   reasoningSupport?: boolean | null;
@@ -49,8 +83,8 @@ export interface LlmSettingsInput {
 
 export interface LlmConnectionTestInput {
   baseUrl: string;
-  /** 보내지 않으면 저장된 API 키를 쓴다 */
-  apiKey?: string;
+  /** 보내지 않으면 그 주소(출처)에 저장된 API 키를 쓴다 */
+  apiKeys?: LlmApiKeyInput[];
 }
 
 export interface LlmModelView {

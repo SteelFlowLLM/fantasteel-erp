@@ -1,7 +1,8 @@
-import { Transform } from 'class-transformer';
-import { LLM_START_SITE_PATTERN, LLM_START_SITES_MAX } from '@fantasteel/shared';
+import { applyDecorators } from '@nestjs/common';
+import { Transform, Type } from 'class-transformer';
+import { LLM_API_KEYS_MAX, LLM_START_SITE_PATTERN, LLM_START_SITES_MAX } from '@fantasteel/shared';
 import { IsAllowedServerHost } from '../../../common/net/server-url';
-import { ArrayMaxSize, IsArray, IsBoolean, IsInt, Matches, IsNotEmpty, IsOptional, IsString, IsUrl, Max, MaxLength, Min, ValidateIf } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsInt, Matches, IsNotEmpty, IsOptional, IsString, IsUrl, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 /**
@@ -10,6 +11,33 @@ const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? val
  */
 const URL_OPTIONS = { protocols: ['http', 'https'], require_protocol: true, require_tld: false };
 const URL_MESSAGE = 'http:// 또는 https://로 시작하는 주소를 입력해 주세요';
+
+/** 저장된 키는 id로, 새 키는 값(value)으로. 둘 중 하나만 */
+export class LlmApiKeyInputDto {
+  @ValidateIf((o: LlmApiKeyInputDto) => o.value === undefined)
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  id?: string;
+
+  @ValidateIf((o: LlmApiKeyInputDto) => o.id === undefined)
+  @Transform(trim)
+  @IsString()
+  @IsNotEmpty({ message: 'API 키를 넣어 주세요' })
+  @MaxLength(500)
+  value?: string;
+}
+
+/** 보내지 않으면 그 주소에 저장된 키를 그대로, 빈 배열이면 모두 지운다. 보낸 순서가 쓰는 순서 */
+function ApiKeysField(): PropertyDecorator {
+  return applyDecorators(
+    IsOptional(),
+    IsArray(),
+    ArrayMaxSize(LLM_API_KEYS_MAX, { message: `API 키는 ${LLM_API_KEYS_MAX}개까지 넣을 수 있어요` }),
+    ValidateNested({ each: true }),
+    Type(() => LlmApiKeyInputDto),
+  );
+}
 
 export class UpdateLlmSettingsDto {
   @Transform(trim)
@@ -24,12 +52,8 @@ export class UpdateLlmSettingsDto {
   @IsNotEmpty({ message: '모델을 골라 주세요' })
   model!: string | null;
 
-  /** 보내지 않으면 그대로, 빈 문자열이면 지운다 */
-  @IsOptional()
-  @Transform(trim)
-  @IsString()
-  @MaxLength(500)
-  apiKey?: string;
+  @ApiKeysField()
+  apiKeys?: LlmApiKeyInputDto[];
 
   /** 사진·생각 정도 지원 (LM Studio가 아닐 때만 쓴다, 이슈 #465). 보내지 않으면 그대로, null이면 모름 */
   @IsOptional()
@@ -54,12 +78,9 @@ export class TestLlmConnectionDto {
   @IsAllowedServerHost('AI 서버')
   baseUrl!: string;
 
-  /** 보내지 않으면 저장된 API 키를 쓴다 */
-  @IsOptional()
-  @Transform(trim)
-  @IsString()
-  @MaxLength(500)
-  apiKey?: string;
+  /** 보내지 않으면 그 주소에 저장된 API 키를 쓴다 */
+  @ApiKeysField()
+  apiKeys?: LlmApiKeyInputDto[];
 }
 
 export class UpdateLlmBrowserSettingsDto {
