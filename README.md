@@ -19,7 +19,7 @@ npm run dev        # DB(54322) · shared · 서버(8787) · 화면(5173)
 
 브라우저에서 http://localhost:5173 을 엽니다(포트는 `client/package.json`의 `dev` 스크립트 `next dev -p 5173`).
 
-- 처음 열면 **로그인** 화면(`/login`)이 나옵니다. 시드 사원번호(`docs/backend/seed.md`)와 비밀번호 `fantasteel`로 들어갑니다.
+- 처음 열면 **로그인** 화면(`/login`)이 나옵니다. 시드 사원번호(`docs/backend/seed.md`)와 시드 비밀번호로 들어갑니다. 비밀번호는 팀에서 따로 받아 `server/.env`의 `SEED_PASSWORD`에 넣습니다.
 - 화면 데이터는 서버 DB에 있습니다. 처음 상태로 되돌리려면 `npm run db:reset`, 화면에 볼 거래 데이터가 필요하면 그 뒤 `npm run seed:demo -w @fantasteel/server`.
 - `npm install`은 설치 뒤 shared 빌드와 Prisma Client 생성도 자동으로 합니다.
 
@@ -82,7 +82,7 @@ npm run build -w @fantasteel/client
 | `npm run test:voice` | 음성 서버(`tools/voice-sidecar`) API 키 시험 (파이썬 3) |
 | `npm run typecheck` | shared·server·client 타입 검사 |
 
-DB만 따로 띄우려면 `npm run db`. 테스트 계정은 [docs/backend/seed.md](docs/backend/seed.md) (비밀번호 `fantasteel`).
+DB만 따로 띄우려면 `npm run db`. 테스트 계정은 [docs/backend/seed.md](docs/backend/seed.md) (비밀번호는 `server/.env`의 `SEED_PASSWORD`).
 
 ### 공용 DB(Supabase)를 쓸 때
 

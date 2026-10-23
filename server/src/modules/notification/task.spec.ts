@@ -17,7 +17,7 @@ let headCookie: string;
 let purchaseId: number;
 let headId: number;
 
-async function login(employeeNo: string, password = process.env.SEED_PASSWORD ?? 'fantasteel'): Promise<string> {
+async function login(employeeNo: string, password = process.env.SEED_PASSWORD!): Promise<string> {
   const res = await fetch(`${baseUrl}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ employeeNo, password }) });
   if (!res.ok) throw new Error(`로그인 실패 (HTTP ${res.status})`);
   return (res.headers.get('set-cookie') ?? '').split(';')[0];

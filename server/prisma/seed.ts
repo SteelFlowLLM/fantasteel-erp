@@ -21,8 +21,14 @@ const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:54322/fantasteel' }),
 });
 
-/** 테스트 계정 비밀번호 (모든 사원 같음). 로컬·시연용 */
-const SEED_PASSWORD = process.env.SEED_PASSWORD ?? 'fantasteel';
+/** 테스트 계정 비밀번호 (모든 사원 같음). 공개 저장소에 남지 않게 기본값을 두지 않고 server/.env에서만 받는다 (이슈 #546) */
+const SEED_PASSWORD = readSeedPassword();
+
+function readSeedPassword(): string {
+  const value = process.env.SEED_PASSWORD;
+  if (!value) throw new Error('SEED_PASSWORD가 없어요. 팀에서 받은 시드 비밀번호를 server/.env의 SEED_PASSWORD에 넣어 주세요');
+  return value;
+}
 
 // ── 조직 ────────────────────────────────────────────────
 

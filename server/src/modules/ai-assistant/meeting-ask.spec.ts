@@ -46,7 +46,7 @@ beforeAll(async () => {
   baseUrl = `http://127.0.0.1:${(app.getHttpServer().address() as AddressInfo).port}/api/v1`;
   prisma = app.get(PrismaService);
   startId = (await prisma.meetingMinutes.aggregate({ _max: { id: true } }))._max.id ?? 0;
-  const res = await fetch(`${baseUrl}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ employeeNo: '2207005', password: process.env.SEED_PASSWORD ?? 'fantasteel' }) });
+  const res = await fetch(`${baseUrl}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ employeeNo: '2207005', password: process.env.SEED_PASSWORD! }) });
   cookie = (res.headers.get('set-cookie') ?? '').split(';')[0];
   employeeId = (await prisma.employee.findUniqueOrThrow({ where: { employeeNo: '2207005' } })).id;
 }, 60_000);
@@ -431,7 +431,7 @@ describe('회의 질문 저장 (2026-10-21)', () => {
     expect(panel.items.some((t) => t.id === threadId)).toBe(false);
 
     // 다른 사원에게는 이 대화가 보이지 않는다
-    const login = await fetch(`${baseUrl}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ employeeNo: '1702004', password: process.env.SEED_PASSWORD ?? 'fantasteel' }) });
+    const login = await fetch(`${baseUrl}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ employeeNo: '1702004', password: process.env.SEED_PASSWORD! }) });
     const other = (login.headers.get('set-cookie') ?? '').split(';')[0];
     expect((await call<AiChatThreadView | null>('GET', `/ai-assistant/meeting-threads/${meetingId}`, undefined, other)).body.data).toBeNull();
     expect((await call('GET', `/ai-assistant/threads/${threadId}`, undefined, other)).body.error?.code).toBe('AST-001');

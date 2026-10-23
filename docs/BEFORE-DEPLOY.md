@@ -6,12 +6,13 @@
 
 **상황**
 - GitHub 저장소(`SteelFlowLLM/fantasteel-erp`)가 공개(PUBLIC)다.
-- 시드 사원 15명의 사원번호와 공통 비밀번호 `fantasteel`, 관리자 사원번호가 문서에 적혀 있다: `docs/backend/seed.md:7`, `docs/backend/auth.md:85`, `README.md:22·85`, `docs/SERVER-GUIDE.md:23`, `docs/CLIENT-GUIDE.md:39`, `docs/GIT-GUIDE.md:104`, `CLAUDE.template.md:34`.
+- 시드 공통 비밀번호는 #546에서 문서·코드에서 지웠다(`SEED_PASSWORD`는 기본값 없이 `server/.env`에서만 받는다). 하지만 예전 커밋에는 남아 있고, 사원번호는 문서에 그대로 있다.
+- 시드는 이미 있는 사원의 비밀번호를 바꾸지 않는다. 새 `SEED_PASSWORD`를 정해도 운영 DB(Supabase)의 사원은 예전 비밀번호 그대로라 따로 바꿔야 한다.
 - 이대로 공개 주소에 서버를 열면 누구나 관리자로 로그인할 수 있다. 로그인 실패 제한(#489)은 처음부터 맞는 비밀번호를 넣는 것은 막지 못한다.
 
 **할 일 (공개 배포 전에 하나 이상)**
 - [ ] 저장소를 비공개로 바꾼다 (GitHub Settings → General → Danger Zone).
-- [ ] 운영 DB를 시드할 때 `SEED_PASSWORD`로 다른 비밀번호를 쓴다.
+- [ ] 새 공통 비밀번호를 정해 팀에 따로 알리고, 운영 DB 사원의 비밀번호를 그 값으로 바꾼다.
 - [ ] 비밀번호 바꾸기·초기화 기능을 만든다. 첫 로그인 때 바꾸게 한다 (지금 없음, `docs/backend/organization.md` 8장).
 - [ ] 로그아웃하면 토큰을 끊는다 (지금은 로그아웃해도 JWT가 12시간 유효).
 - [ ] 위가 끝나기 전까지는 Tailscale 안에서만 열거나, Caddy `basic_auth`·IP 제한을 건다.

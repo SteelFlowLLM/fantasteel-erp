@@ -39,11 +39,11 @@ describe('서버 호출 계층 (api/http.ts)', () => {
     useServer((c) => {
       if (!c.url.endsWith('/auth/login')) return ok({ value: 1 });
       const body = c.body as { password: string };
-      return body.password === 'fantasteel' ? ok({ employeeId: 3, employeeNo: SEED_EMPLOYEE_NO.sales }) : fail(401, 'AUTH-001', '사원번호 또는 비밀번호가 올바르지 않습니다');
+      return body.password === 'test-password' ? ok({ employeeId: 3, employeeNo: SEED_EMPLOYEE_NO.sales }) : fail(401, 'AUTH-001', '사원번호 또는 비밀번호가 올바르지 않습니다');
     });
     await expect(serverLogin(SEED_EMPLOYEE_NO.sales, 'wrong')).rejects.toThrow('사원번호 또는 비밀번호가 올바르지 않습니다');
     await expect(serverRequest('GET', '/x')).rejects.toMatchObject({ code: 'COM-002' });
-    await serverLogin(SEED_EMPLOYEE_NO.sales, 'fantasteel');
+    await serverLogin(SEED_EMPLOYEE_NO.sales, 'test-password');
     await expect(serverRequest('GET', '/sales-orders', { query: { page: 1, size: 20, skip: undefined } })).resolves.toEqual({ value: 1 });
     expect(calls.map((c) => `${c.method} ${c.url.replace(/^.*\/api\/v1/, '')}`)).toEqual(['POST /auth/login', 'POST /auth/login', 'GET /sales-orders?page=1&size=20']);
   });
@@ -55,7 +55,7 @@ describe('서버 호출 계층 (api/http.ts)', () => {
     const stop = onServerSessionLost(lost);
     actAs(SEED_EMPLOYEE_NO.sales);
     resetServerSessionForTest(SEED_EMPLOYEE_NO.sales);
-    await serverLogin(SEED_EMPLOYEE_NO.logistics, 'fantasteel');
+    await serverLogin(SEED_EMPLOYEE_NO.logistics, 'test-password');
     calls = [];
     await expect(serverRequest('GET', '/a')).rejects.toMatchObject({ code: 'COM-002', detail: '다른 탭에서 다른 계정으로 로그인했어요. 다시 로그인해 주세요' });
     expect(calls).toHaveLength(0);

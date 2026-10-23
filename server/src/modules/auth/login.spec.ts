@@ -13,7 +13,7 @@ let app: INestApplication;
 let baseUrl: string;
 let prisma: PrismaService;
 
-const PASSWORD = process.env.SEED_PASSWORD ?? 'fantasteel';
+const PASSWORD = process.env.SEED_PASSWORD!;
 /** 구매 사원 정다은 */
 const PURCHASE = '2207005';
 /** 물류 사원 권예진: 퇴사 처리를 시험하고 되돌린다 */

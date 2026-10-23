@@ -49,7 +49,7 @@ const llmClient = {
 const llmSettings = { read: async () => ({ baseUrl: 'http://127.0.0.1:1/v1', model: 'test-model', apiKey: null }) };
 
 async function login(employeeNo: string): Promise<string> {
-  const res = await fetch(`${baseUrl}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ employeeNo, password: process.env.SEED_PASSWORD ?? 'fantasteel' }) });
+  const res = await fetch(`${baseUrl}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ employeeNo, password: process.env.SEED_PASSWORD! }) });
   if (!res.ok) throw new Error(`로그인 실패 (HTTP ${res.status})`);
   return (res.headers.get('set-cookie') ?? '').split(';')[0];
 }

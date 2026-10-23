@@ -14,7 +14,7 @@ let adminCookie: string;
 /** 영업 사원 박서영 — 사원 관리·부서·권한 관리 권한 없음 */
 let salesCookie: string;
 
-async function login(employeeNo: string, password = process.env.SEED_PASSWORD ?? 'fantasteel'): Promise<string> {
+async function login(employeeNo: string, password = process.env.SEED_PASSWORD!): Promise<string> {
   const res = await fetch(`${baseUrl}/auth/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
