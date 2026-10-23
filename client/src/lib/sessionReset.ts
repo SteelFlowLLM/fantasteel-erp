@@ -4,6 +4,7 @@
 import type { QueryClient } from '@tanstack/react-query';
 import { clearAiChipPreferences } from '@/lib/aiChipPreferences';
 import { useAiChatStore } from '@/stores/useAiChatStore';
+import { useBriefingStore } from '@/stores/useBriefingStore';
 import { useMessageComposeStore } from '@/stores/useMessageComposeStore';
 import { useMessengerLiveStore } from '@/stores/useMessengerLiveStore';
 import { useOutboxStore } from '@/stores/useOutboxStore';
@@ -16,6 +17,7 @@ export function clearSessionData(queryClient: QueryClient): void {
   useMessageComposeStore.setState({ replyTo: null, editing: null, deleting: null, tasking: null });
   useMessengerLiveStore.getState().reset();
   useAiChatStore.getState().clear();
+  useBriefingStore.getState().reset();
   // 철강맨AI 칩 설정(Drive·브라우저 등)은 이 브라우저에 저장돼 있어 다음 사원에게 켜진 채 시작하지 않게 지운다
   clearAiChipPreferences();
 }

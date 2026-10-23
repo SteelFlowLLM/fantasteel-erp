@@ -887,6 +887,7 @@
         navigate: null, // (href) => void — '이 화면으로 가기'. 없으면 링크를 누른다
         screenHrefs: null, // { <SCREEN 키>: 주소 } — 다른 화면의 카드를 물으면 그 화면으로 데려갈 때 쓴다
         askAi: null, // (question, history) => Promise<{ text, sources? }> — 있으면 대화 창에 AI 연결 ON·OFF가 생긴다
+        commands: null, // { <낱말>: () => string | void } — 대화 창에 '/낱말'만 치면 AI 연결과 상관없이 이것을 부르고, 돌려준 글로 답한다
         onExplain: null, // () => void — 화면 설명(호버 설명·항목·용어·화면 안내)을 시작할 때 부른다. 설명 대상을 가리는 창을 닫는 데 쓴다
       },
       options || {},
@@ -4695,6 +4696,14 @@
       if (!text) return;
       chat.asked.add(text);
       addMsg('me', text);
+      const word = text.slice(1).trim();
+      const command = text.startsWith('/') && o.commands && Object.prototype.hasOwnProperty.call(o.commands, word) ? o.commands[word] : null;
+      if (typeof command === 'function') {
+        const said = command();
+        talkBack();
+        addMsg('pet', typeof said === 'string' && said ? said : '알겠어요!');
+        return;
+      }
       const typing = addMsg('pet', '•••');
       typing.classList.add('fp-msg--typing');
       if (S.mode === 'ground' && S.base === 'idle') player.set('think', true);

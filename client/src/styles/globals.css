@@ -3,6 +3,7 @@
 @import 'tailwindcss';
 @import './icons.css';
 @import './wake-orb.css';
+@import './morning-briefing.css';
 
 @theme {
   /* 색: B안 토큰만 쓰도록 기본 팔레트를 비운다 */
