@@ -30,8 +30,9 @@ import {
   type BriefingSeverity,
   type BriefingSourceKey,
 } from '@/features/briefing/lib/briefingRules';
-import { BriefingCancelled, createBriefingRunner, typingPause } from '@/features/briefing/lib/briefingRunner';
+import { BriefingCancelled, createBriefingRunner, typingPause, waitForSources } from '@/features/briefing/lib/briefingRunner';
 import { useBriefingSources } from '@/features/briefing/useBriefingSources';
+import { useFocusTrap } from '@/hooks/useFocusTrap';
 import { useMe } from '@/hooks/useMe';
 import { cn } from '@/lib/cn';
 import { todayStr } from '@/lib/format';
@@ -41,12 +42,10 @@ import { useBriefingStore } from '@/stores/useBriefingStore';
 import { useShellStore } from '@/stores/useShellStore';
 
 const PHASES = ['인사', '생각', '조회', '읽기', '정리', '설명', '끝'] as const;
-/** 자료 하나를 이만큼 기다려도 안 오면 없는 것으로 보고 넘어간다 */
-const SOURCE_TIMEOUT_MS = 8_000;
 const SPARK_MARK: Record<BriefingSeverity, string> = { danger: '!', wait: '?', run: 'i', ok: '♪' };
 const SPARK_BG: Record<BriefingSeverity, string> = { danger: 'bg-danger', wait: 'bg-wait', run: 'bg-run', ok: 'bg-ok' };
 
-type RowState = 'idle' | 'active' | 'done';
+type RowState = 'idle' | 'active' | 'done' | 'failed';
 
 interface Line {
   id: number;
@@ -62,7 +61,7 @@ export function BriefingDialog({ open, onClose }: { open: boolean; onClose: () =
   const seed = String(me.employeeId);
   const playId = useBriefingStore((s) => s.playId);
   const replay = useBriefingStore((s) => s.openBriefing);
-  const [today] = useState(todayStr);
+  const [today, setToday] = useState(todayStr);
   const read = useBriefingSources(today, open);
   const readRef = useRef(read);
   readRef.current = read;
@@ -74,6 +73,8 @@ export function BriefingDialog({ open, onClose }: { open: boolean; onClose: () =
   const [face, setFaceState] = useState<{ key: BriefingFace; nonce: number }>({ key: 'greet', nonce: 0 });
   const [spark, setSpark] = useState<BriefingSeverity | null>(null);
   const [lines, setLines] = useState<Line[]>([]);
+  /** 줄이 다 써진 뒤 스크린 리더에 한 번 알리는 문장 (글자가 들어오는 동안은 읽지 않는다) */
+  const [announcement, setAnnouncement] = useState('');
   const [rows, setRows] = useState<Partial<Record<BriefingSourceKey, RowState>>>({});
   const [ruleRow, setRuleRow] = useState<RowState>('idle');
   const [cards, setCards] = useState<BriefingCard[] | null>(null);
@@ -126,6 +127,7 @@ export function BriefingDialog({ open, onClose }: { open: boolean; onClose: () =
         await runner.wait(id, typingPause(chars[i] ?? ''));
       }
       setLines((prev) => prev.map((l) => (l.id === lineId ? { ...l, shown: total } : l)));
+      setAnnouncement(splitEmphasis(text).map((p) => p.text).join(''));
     },
     [runner],
   );
@@ -140,10 +142,14 @@ export function BriefingDialog({ open, onClose }: { open: boolean; onClose: () =
     const id = runner.start();
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) runner.skip();
     const keys = readRef.current.keys;
+    // 오늘은 재생을 시작할 때마다 새로 구하고(Asia/Seoul), 자료도 옛 값을 쓰지 않게 다시 조회한다
+    setToday(todayStr());
+    void readRef.current.refetch();
     completedRef.current = false;
     setStartedAt(new Date());
     setSourceKeys(keys);
     setLines([]);
+    setAnnouncement('');
     setRows({});
     setRuleRow('idle');
     setCards(null);
@@ -167,21 +173,27 @@ export function BriefingDialog({ open, onClose }: { open: boolean; onClose: () =
 
       faceIf('searching');
       setPhase(2);
-      for (const key of keys) {
-        setRows((prev) => ({ ...prev, [key]: 'active' }));
-        setStatus(`${BRIEFING_SOURCE_LABEL[key]} 조회 중…`);
-        await runner.wait(id, 140);
-        const deadline = Date.now() + SOURCE_TIMEOUT_MS;
-        while (readRef.current.state[key] === 'loading' && Date.now() < deadline) await runner.pause(id, 120);
-        setRows((prev) => ({ ...prev, [key]: 'done' }));
-      }
+      const failed = await waitForSources(
+        runner,
+        id,
+        keys,
+        (key) => readRef.current.state[key],
+        {
+          onStart: async (key) => {
+            setRows((prev) => ({ ...prev, [key]: 'active' }));
+            setStatus(`${BRIEFING_SOURCE_LABEL[key]} 조회 중…`);
+            await runner.wait(id, 140);
+          },
+          onSettle: (key, bad) => setRows((prev) => ({ ...prev, [key]: bad ? 'failed' : 'done' })),
+        },
+      );
 
       faceIf('reading');
       setPhase(3);
       setRuleRow('active');
       setStatus(`규칙 ${briefingRuleCount(me.roleCode, head)}개에 맞춰 읽는 중…`);
       await runner.wait(id, 350);
-      const built = buildBriefingCards(me.roleCode, readRef.current.sources, head);
+      const built = buildBriefingCards(me.roleCode, readRef.current.sources, head, failed);
       setCards(built);
       setRuleRow('done');
 
@@ -221,7 +233,6 @@ export function BriefingDialog({ open, onClose }: { open: boolean; onClose: () =
 
   useEffect(() => {
     if (!open) return;
-    panelRef.current?.focus({ preventScroll: true });
     void play();
     return () => {
       runner.cancel();
@@ -232,6 +243,8 @@ export function BriefingDialog({ open, onClose }: { open: boolean; onClose: () =
   }, [open, playId]);
 
   const close = onClose;
+  // 근거 창이 떠 있는 동안은 그 창이 Tab을 가둔다. 브리핑 창은 닫힐 때 원래 자리로 초점을 돌려준다
+  useFocusTrap(panelRef, open, open && drawer === null);
 
   const openDrawer = (index: number) => {
     const card = cards?.[index];
@@ -412,7 +425,10 @@ export function BriefingDialog({ open, onClose }: { open: boolean; onClose: () =
                 <path fill="#fff" d="M7 1h1v1h-1z M5 2h3v1h-3z M3 3h5v1h-5z M1 4h7v1h-7z M3 5h5v1h-5z M5 6h3v1h-3z" />
               </svg>
               <div className="rounded-[3px] border-2 border-nav-dark bg-surface text-sm leading-[21px] text-ink shadow-[4px_4px_0_rgba(27,37,49,0.12)]">
-                <div ref={logRef} className="briefing-log h-39 overflow-auto px-3.5 pt-4 pb-3" aria-live="polite">
+                <div ref={logRef} className="briefing-log h-39 overflow-auto px-3.5 pt-4 pb-3">
+                  <div className="sr-only" aria-live="polite">
+                    {announcement}
+                  </div>
                   {lines.map((line, index) => {
                     const typing = line.shown < plainLength(line.text);
                     return (
@@ -483,12 +499,13 @@ export function BriefingDialog({ open, onClose }: { open: boolean; onClose: () =
 }
 
 function SourceRow({ label, value, state, rule = false }: { label: string; value: string; state: RowState; rule?: boolean }) {
+  const failed = state === 'failed';
   return (
     <div
       className={cn(
         'flex items-center gap-[7px] py-[3px] text-xs transition-colors duration-200',
         rule && 'mt-[3px] border-t border-dashed border-line pt-1.5',
-        state === 'active' ? 'text-run' : state === 'done' ? (rule ? 'text-ai-strong' : 'text-ink-2') : 'text-ink-disabled',
+        failed ? 'text-danger' : state === 'active' ? 'text-run' : state === 'done' ? (rule ? 'text-ai-strong' : 'text-ink-2') : 'text-ink-disabled',
       )}
     >
       <span
@@ -498,12 +515,14 @@ function SourceRow({ label, value, state, rule = false }: { label: string; value
           state === 'active' && 'briefing-spin border-run',
           state === 'done' && (rule ? 'border-ai bg-ai' : 'border-ok bg-ok'),
           state === 'idle' && 'border-line-strong',
+          failed && 'border-danger bg-danger text-[9px] leading-none font-bold text-white',
         )}
       >
+        {failed ? '!' : null}
         {state === 'done' ? <span className="mb-px h-[3px] w-[5px] -rotate-45 border-b-2 border-l-2 border-white" /> : null}
       </span>
       {label}
-      <b className="ml-auto font-mono text-[11.5px] font-semibold">{state === 'done' ? value : ''}</b>
+      <b className="ml-auto font-mono text-[11.5px] font-semibold">{failed ? '읽지 못함' : state === 'done' ? value : ''}</b>
     </div>
   );
 }

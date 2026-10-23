@@ -898,18 +898,47 @@ function quietCard(): BriefingCard {
   };
 }
 
+/** 자료를 읽지 못했을 때 한 장. 조용한 날로 보이지 않게 무엇을 못 읽었는지 알린다 */
+export function failedSourcesCard(failed: readonly BriefingSourceKey[]): BriefingCard {
+  const names = failed.map((key) => BRIEFING_SOURCE_LABEL[key]);
+  const list = names.join(', ');
+  return {
+    key: 'sources-failed',
+    severity: 'wait',
+    title: '일부 자료를 못 읽었어요',
+    value: `${failed.length}건`,
+    summary: list,
+    rule: '자료 조회 실패 또는 시간 초과',
+    say: `읽지 못한 자료가 있어요: **${list}**. 그 부분은 빠졌으니 '조용하다'고 믿지 말고 화면에서 직접 확인해 주세요.`,
+    detail: {
+      crumb: '대시보드',
+      ruleExpr: '자료 조회 = 실패 또는 시간 초과',
+      memo: `읽지 못한 자료(${list})로 만드는 카드는 빠졌어요. 잠시 뒤 [다시 듣기]를 누르거나 각 화면에서 직접 확인해 주세요.`,
+      columns: [{ label: '읽지 못한 자료' }, { label: '상태' }],
+      rows: names.map((name) => ({ cells: [name, { text: '읽지 못함', tone: 'danger' as const }], highlight: true })),
+      primary: { label: '대시보드 열기', href: '/dashboard' },
+    },
+  };
+}
+
 /**
  * 역할별 브리핑 카드 (최대 4장). 위험 → 확인 필요 → 참고 → 좋은 소식 순서이고,
  * 좋은 소식이 있으면 마지막 한 자리는 좋은 소식으로 남긴다(시안처럼 늘 좋은 말로 끝낸다).
  * 부서장이면 결재 대기를 먼저 넣는다.
+ * 읽지 못한 자료가 있으면 '못 읽었어요' 카드 한 자리를 먼저 잡아 두고, 그때는 조용한 날 카드를 쓰지 않는다.
  */
-export function buildBriefingCards(role: RoleCode, sources: BriefingSources, isDepartmentHead: boolean): BriefingCard[] {
+export function buildBriefingCards(role: RoleCode, sources: BriefingSources, isDepartmentHead: boolean, failed: readonly BriefingSourceKey[] = []): BriefingCard[] {
   const approvals = isDepartmentHead && sources.approvalInbox ? approvalInboxCard(sources.approvalInbox) : null;
   const all = [approvals, ...candidateCards(role, sources)].filter((c): c is BriefingCard => c !== null);
   const sorted = BRIEFING_SEVERITY_ORDER.flatMap((severity) => all.filter((c) => c.severity === severity));
   const good = sorted.filter((c) => c.severity === 'ok');
   const rest = sorted.filter((c) => c.severity !== 'ok');
-  const picked = [...rest.slice(0, good.length > 0 ? BRIEFING_CARD_LIMIT - 1 : BRIEFING_CARD_LIMIT), ...good].slice(0, BRIEFING_CARD_LIMIT);
+  const limit = BRIEFING_CARD_LIMIT - (failed.length > 0 ? 1 : 0);
+  const picked = [...rest.slice(0, good.length > 0 ? limit - 1 : limit), ...good].slice(0, limit);
+  if (failed.length > 0) {
+    const withFailure = [...picked, failedSourcesCard(failed)];
+    return BRIEFING_SEVERITY_ORDER.flatMap((severity) => withFailure.filter((c) => c.severity === severity));
+  }
   return picked.length > 0 ? picked : [quietCard()];
 }
 

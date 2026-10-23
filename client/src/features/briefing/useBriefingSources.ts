@@ -14,19 +14,22 @@ import { canViewWidget } from '@/hooks/useDashboardWidget';
 import { useMe } from '@/hooks/useMe';
 import { canView, isDepartmentHead } from '@/lib/permissions';
 
-/** skipped = 이 역할이 읽지 않거나 볼 권한이 없음, loading = 읽는 중, done = 읽음(실패도 끝난 것으로 본다) */
-export type BriefingSourceState = 'skipped' | 'loading' | 'done';
+/** skipped = 이 역할이 읽지 않거나 볼 권한이 없음, loading = 읽는 중(다시 읽는 중 포함), done = 읽음, error = 조회 실패 */
+export type BriefingSourceState = 'skipped' | 'loading' | 'done' | 'error';
 
 export interface BriefingSourceRead {
   sources: BriefingSources;
   /** 이 사원이 읽는 자료 (왼쪽 "읽은 자료" 순서) */
   keys: BriefingSourceKey[];
   state: Record<BriefingSourceKey, BriefingSourceState>;
+  /** 읽는 자료를 모두 다시 조회한다 (창을 다시 열 때 옛 값으로 카드를 만들지 않게) */
+  refetch: () => Promise<void>;
 }
 
 function stateOf(wanted: boolean, query: UseQueryResult<unknown>): BriefingSourceState {
   if (!wanted) return 'skipped';
-  return query.isPending ? 'loading' : 'done';
+  if (query.isPending || query.isFetching) return 'loading';
+  return query.isError ? 'error' : 'done';
 }
 
 /** 대시보드 위젯과 같은 키로 읽는다 (대시보드가 이미 읽었으면 그 값을 먼저 보인다) */
@@ -87,12 +90,17 @@ export function useBriefingSources(today: string, enabled: boolean): BriefingSou
     taskSummary,
   } satisfies Record<BriefingSourceKey, UseQueryResult<unknown>>;
 
-  const data = <T,>(key: BriefingSourceKey, query: UseQueryResult<T>): T | null => (wants(key) ? (query.data ?? null) : null);
+  const data = <T,>(key: BriefingSourceKey, query: UseQueryResult<T>): T | null => (wants(key) && !query.isError ? (query.data ?? null) : null);
   const state = Object.fromEntries((Object.keys(queries) as BriefingSourceKey[]).map((key) => [key, stateOf(wants(key), queries[key])])) as Record<BriefingSourceKey, BriefingSourceState>;
+
+  const refetch = async () => {
+    await Promise.allSettled((Object.keys(queries) as BriefingSourceKey[]).filter(wants).map((key) => queries[key].refetch()));
+  };
 
   return {
     keys: briefingSourceKeys(me.roleCode, head).filter(wants),
     state,
+    refetch,
     sources: {
       today,
       deliveryRisk: data('deliveryRisk', deliveryRisk),

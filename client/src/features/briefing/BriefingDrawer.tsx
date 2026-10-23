@@ -1,11 +1,13 @@
 'use client';
 
 // 카드를 누르면 오른쪽에서 나오는 근거 창: 철강맨 메모, 근거 표, 규칙 조건식, 그 화면으로 가는 단추.
+import { useRef } from 'react';
 import { Button } from '@/components/Button';
 import { IconButton } from '@/components/IconButton';
 import { BriefingFaceImage } from '@/features/briefing/BriefingFaceImage';
 import { DetailCell, EmphasisText, SeverityChip, isCodeCell } from '@/features/briefing/BriefingParts';
 import type { BriefingCard, BriefingLink } from '@/features/briefing/lib/briefingRules';
+import { useFocusTrap } from '@/hooks/useFocusTrap';
 import { cn } from '@/lib/cn';
 
 const VALUE_TEXT = { danger: 'text-danger', wait: 'text-wait', run: 'text-run', ok: 'text-ok' } as const;
@@ -13,14 +15,19 @@ const VALUE_TEXT = { danger: 'text-danger', wait: 'text-wait', run: 'text-run', 
 export function BriefingDrawer({ card, faceSeed, basis, onBack, onGo }: { card: BriefingCard; faceSeed: string; basis: string; onBack: () => void; onGo: (link: BriefingLink) => void }) {
   const d = card.detail;
   const titleId = `briefing-drawer-${card.key}`;
+  const panelRef = useRef<HTMLElement>(null);
+  // 근거 창이 열리면 초점이 이 안으로 오고, Tab은 안에서만 돌며, 닫으면 눌렀던 카드로 돌아간다
+  useFocusTrap(panelRef, true);
   return (
     <>
       <div aria-hidden="true" className="fixed inset-0 z-[58] bg-[rgba(22,32,43,0.28)]" onMouseDown={onBack} />
       <aside
+        ref={panelRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="briefing-drawer-in fixed inset-y-0 right-0 z-[59] flex w-[min(860px,calc(100dvw/var(--app-zoom)))] flex-col bg-surface shadow-[-16px_0_40px_rgba(10,16,24,0.22)]"
+        className="briefing-drawer-in fixed outline-none inset-y-0 right-0 z-[59] flex w-[min(860px,calc(100dvw/var(--app-zoom)))] flex-col bg-surface shadow-[-16px_0_40px_rgba(10,16,24,0.22)]"
       >
         <div className="flex items-start gap-3 border-b border-line px-4.5 pt-3.5 pb-3">
           <div className="min-w-0 flex-1">
