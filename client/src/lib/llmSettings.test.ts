@@ -1,6 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import type { LlmConnectionView, LlmModelView } from '@fantasteel/shared';
-import { contextLengthValueOf, contextLengthWarning, llmModelOptions, showsSupportChoices, supportChoiceOf, supportValueOf, unslothModelWarning } from './llmSettings';
+import {
+  apiKeyInputsOf,
+  contextLengthValueOf,
+  contextLengthWarning,
+  externalBaseUrlOf,
+  keyOriginOf,
+  llmModelOptions,
+  presetOf,
+  showsSupportChoices,
+  supportChoiceOf,
+  supportValueOf,
+  unslothModelWarning,
+} from './llmSettings';
 
 const model = (id: string, extra: Partial<LlmModelView> = {}): LlmModelView => ({ id, ownedBy: null, type: null, loaded: null, reasoning: null, contextLength: null, ...extra });
 
@@ -87,5 +99,29 @@ describe('문맥 길이', () => {
     expect(contextLengthValueOf('32,768')).toBe(32768);
     expect(contextLengthValueOf('abc')).toBeUndefined();
     expect(contextLengthValueOf('100')).toBeUndefined();
+  });
+});
+
+describe('AI 서버 빠른 선택·서버별 API 키', () => {
+  it('주소로 어느 서버인지 알아본다 (경로·끝 슬래시와 상관없이 호스트·포트로)', () => {
+    expect(presetOf('http://127.0.0.1:1234')).toBe('lmstudio');
+    expect(presetOf('http://127.0.0.1:8888/v1/')).toBe('unsloth');
+    expect(presetOf('http://127.0.0.1:11434/v1')).toBe('ollama');
+    expect(presetOf('https://api.example.com/v1')).toBe('external');
+    expect(presetOf('')).toBe('external');
+  });
+
+  it('키를 묶는 서버 단위는 출처이고, 잘못된 주소면 null', () => {
+    expect(keyOriginOf(' http://127.0.0.1:8888/v1 ')).toBe('http://127.0.0.1:8888');
+    expect(keyOriginOf('127.0.0.1:8888')).toBeNull();
+  });
+
+  it('외부 API는 키를 저장해 둔 외부 서버 주소를 넣고, 없으면 빈 칸', () => {
+    expect(externalBaseUrlOf(['http://127.0.0.1:8888', 'https://api.example.com'])).toBe('https://api.example.com/v1');
+    expect(externalBaseUrlOf(['http://127.0.0.1:8888'])).toBe('');
+  });
+
+  it('저장된 키는 id로, 새 키는 값으로 줄 순서대로 보낸다', () => {
+    expect(apiKeyInputsOf([{ value: 'new' }, { id: 'a1', hint: '…1234', state: 'ok', usedAt: null }])).toEqual([{ value: 'new' }, { id: 'a1' }]);
   });
 });

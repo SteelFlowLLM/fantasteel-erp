@@ -1,5 +1,13 @@
 // AI 연결 화면(/admin/llm)의 모델 목록·Unsloth 안내·지원 여부 고르기 (이슈 #465). 화면 없이 시험하려고 따로 둔다.
-import { LLM_MIN_CONTEXT_TOKENS, type LlmConnectionView } from '@fantasteel/shared';
+import {
+  LLM_DEFAULT_BASE_URL,
+  LLM_MIN_CONTEXT_TOKENS,
+  LLM_OLLAMA_BASE_URL,
+  LLM_UNSLOTH_BASE_URL,
+  type LlmApiKeyInput,
+  type LlmApiKeyView,
+  type LlmConnectionView,
+} from '@fantasteel/shared';
 
 /**
  * 받은 목록에서 대화용 모델만 (임베딩 모델은 답을 만들지 못한다). 불러온 모델을 앞에 둔다.
@@ -71,3 +79,45 @@ export function showsSupportChoices(
   if (result?.connected) return result.serverKind !== 'lmstudio';
   return saved.visionSupport !== null || saved.reasoningSupport !== null || saved.contextLength !== null;
 }
+
+/** 서버 빠른 선택. 누르면 그 서버의 기본 주소와 그 서버에 저장한 키로 바로 연결을 확인한다. 외부 API는 주소를 직접 넣는다 */
+export type LlmServerPreset = 'lmstudio' | 'unsloth' | 'ollama' | 'external';
+
+export const LLM_SERVER_PRESETS: readonly { key: LlmServerPreset; label: string; baseUrl: string | null; hint: string }[] = [
+  { key: 'lmstudio', label: 'LM Studio', baseUrl: LLM_DEFAULT_BASE_URL, hint: 'API 키 없이 연결해요 (인증을 켰을 때만 키)' },
+  { key: 'unsloth', label: 'Unsloth Studio', baseUrl: LLM_UNSLOTH_BASE_URL, hint: 'Settings > API에서 만든 API 키가 꼭 있어야 해요' },
+  { key: 'ollama', label: 'Ollama', baseUrl: LLM_OLLAMA_BASE_URL, hint: 'API 키 없이 연결해요' },
+  { key: 'external', label: '외부 API', baseUrl: null, hint: 'OpenAI 호환 주소(…/v1)와 API 키를 넣어요' },
+];
+
+/** 키를 묶는 서버 단위 (scheme·호스트·포트). 서버와 같은 규칙. 주소가 잘못되면 null */
+export function keyOriginOf(baseUrl: string): string | null {
+  try {
+    return new URL(baseUrl.trim()).origin;
+  } catch {
+    return null;
+  }
+}
+
+/** 주소가 어느 빠른 선택에 해당하는지. 로컬 서버 셋의 주소가 아니면 외부 API */
+export function presetOf(baseUrl: string): LlmServerPreset {
+  const origin = keyOriginOf(baseUrl);
+  const local = LLM_SERVER_PRESETS.find((p) => p.baseUrl !== null && keyOriginOf(p.baseUrl) === origin);
+  return local?.key ?? 'external';
+}
+
+/** 외부 API를 누르면 넣을 주소: 키를 저장해 둔 외부 서버가 있으면 그 주소, 없으면 빈 칸 */
+export function externalBaseUrlOf(savedOrigins: readonly string[]): string {
+  const origin = savedOrigins.find((o) => presetOf(o) === 'external');
+  return origin ? `${origin}/v1` : '';
+}
+
+/** 화면의 키 줄: 저장된 키(id·끝 4자리·상태) 또는 새로 넣은 키(value) */
+export type LlmKeyRow = (LlmApiKeyView & { value?: undefined }) | { id?: undefined; value: string };
+
+/** 서버로 보낼 키 목록. 저장된 키는 id로, 새 키는 값으로 (줄 순서가 쓰는 순서) */
+export function apiKeyInputsOf(rows: readonly LlmKeyRow[]): LlmApiKeyInput[] {
+  return rows.map((row) => (row.value !== undefined ? { value: row.value } : { id: row.id }));
+}
+
+export const API_KEY_STATE_LABEL = { ok: '정상', rejected: '거절됨', limited: '한도 걸림' } as const;

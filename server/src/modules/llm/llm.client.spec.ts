@@ -718,3 +718,41 @@ describe('LlmClient 그 밖의 OpenAI 호환 서버의 관리자 설정 (이슈 
     }
   });
 });
+
+describe('LlmClient API 키 여러 개', () => {
+  const keyed = { baseUrl: 'http://llm.test/v1', apiKey: 'k1', apiKeys: ['k1', 'k2', 'k3'] };
+  const authOf = (call: [string, RequestInit]) => (call[1].headers as Record<string, string>).authorization;
+  const chatCalls = () => fetchMock.mock.calls.filter(([url]) => url.endsWith('/chat/completions'));
+  const status = (code: number) => new Response(JSON.stringify({ error: { message: 'blocked' } }), { status: code });
+
+  beforeEach(() => fetchMock.mockImplementation(async (url) => (url.endsWith('/v1/models') ? Response.json({ data: [{ id: 'm' }] }) : reply('안녕하세요'))));
+
+  it.each([401, 402, 403, 429])('HTTP %i로 막히면 다음 키로 넘어가고, 다음 요청은 통한 키부터 쓴다', async (code) => {
+    const client = new LlmClient();
+    fetchMock.mockImplementationOnce(async () => status(code));
+    await expect(client.chat(keyed, 'm', [], LLM_PROFILE.CONNECTION_TEST)).resolves.toBe('안녕하세요');
+    await client.chat(keyed, 'm', [], LLM_PROFILE.CONNECTION_TEST);
+    expect(chatCalls().map(authOf)).toEqual(['Bearer k1', 'Bearer k2', 'Bearer k2']);
+    expect(client.keyUsageOf('k1')?.state).toBe(code === 401 || code === 403 ? 'rejected' : 'limited');
+    expect(client.keyUsageOf('k2')?.state).toBe('ok');
+    expect(client.keyUsageOf('k3')).toBeNull();
+  });
+
+  it('키가 모두 막히면 몇 개가 막혔는지 알리고, 키와 상관없는 오류(500)는 넘어가지 않는다', async () => {
+    fetchMock.mockImplementation(async () => status(429));
+    await expect(new LlmClient().chat(keyed, 'm', [], LLM_PROFILE.CONNECTION_TEST)).rejects.toThrow('API 키 3개 모두');
+
+    fetchMock.mockReset().mockImplementation(async () => status(500));
+    await expect(new LlmClient().chat(keyed, 'm', [], LLM_PROFILE.CONNECTION_TEST)).rejects.toThrow('HTTP 500');
+    expect(chatCalls()).toHaveLength(1);
+  });
+
+  it('스트리밍도 응답 머리에서 막히면 다음 키로 받는다', async () => {
+    fetchMock.mockImplementationOnce(async () => status(401));
+    fetchMock.mockImplementationOnce(async () => new Response('data: {"choices":[{"delta":{"content":"좋아요"}}]}\n\ndata: [DONE]\n\n', { status: 200 }));
+    const texts: string[] = [];
+    await new LlmClient().streamWithTools(keyed, 'm', [], [], LLM_PROFILE.CONNECTION_TEST, { onThinking: () => undefined, onAnswer: (t) => texts.push(t) });
+    expect(texts.join('')).toBe('좋아요');
+    expect(chatCalls().map(authOf)).toEqual(['Bearer k1', 'Bearer k2']);
+  });
+});

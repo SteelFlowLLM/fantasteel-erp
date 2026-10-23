@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { Agent } from 'undici';
-import type { LlmModelView, LlmServerKind } from '@fantasteel/shared';
+import type { LlmApiKeyState, LlmModelView, LlmServerKind } from '@fantasteel/shared';
 import { createMetadataGuardedAgent, isBlockedLookupError, netFetch } from '../../common/net/guarded-agent';
 import { isBlockedServerHost, redactUrl } from '../../common/net/server-url';
 import type { LlmProfile, LlmReasoning } from './llm-profiles';
@@ -12,6 +12,13 @@ import type { LlmProfile, LlmReasoning } from './llm-profiles';
 const MODELS_TIMEOUT_MS = 15_000;
 /** 서버 종류 탐침(LM Studio·Unsloth 고유 경로)과 모델 정보의 제한 시간. 탐침은 차례로 여러 번 부르므로 5초 그대로 둔다(멈춘 서버에서 연결 확인이 1분 넘게 걸리지 않게) */
 const PROBE_TIMEOUT_MS = 5_000;
+
+/** 키가 막혔다고 보고 다음 키로 넘어가는 상태: 키 틀림·권한 없음(401·403), 결제·요청 한도(402·429) */
+const KEY_FAILOVER_STATUS = new Set([401, 402, 403, 429]);
+
+function keyStateOf(status: number): LlmApiKeyState {
+  return status === 401 || status === 403 ? 'rejected' : status === 402 || status === 429 ? 'limited' : 'ok';
+}
 const CHAT_TIMEOUT_MS = 120_000;
 /** 모델의 생각 설정 지원 여부는 요청마다 묻지 않는다. 모델을 바꾸거나 새로 받으면 이 시간 안에 반영된다 */
 const MODEL_INFO_TTL_MS = 60_000;
@@ -52,6 +59,8 @@ const AGENT_TIMEOUT_MARGIN_MS = 10_000;
 export interface LlmEndpoint {
   baseUrl: string;
   apiKey: string | null;
+  /** 이 서버의 API 키 전부. 있으면 apiKey 대신 앞의 키부터 쓰고, 키가 막히면(401·402·403·429) 다음 키로 넘어간다 */
+  apiKeys?: readonly string[];
   /** 관리자가 AI 연결 화면에서 정한 사진·생각 정도 지원 (LM Studio가 아닐 때만 쓴다). 없거나 null이면 모름 */
   visionSupport?: boolean | null;
   reasoningSupport?: boolean | null;
@@ -259,6 +268,15 @@ export class LlmClient {
   private readonly agents = new Map<number, Agent>();
   /** Unsloth Studio의 모델별 사진 지원·임베딩 여부 (/api/models/check-vision·check-embedding). 열쇠는 `경로|서버 루트|모델` */
   private readonly unslothCheckCache = new Map<string, { at: number; value: boolean | null }>();
+  /** 키 목록(줄바꿈으로 이은 것)마다 마지막으로 통한 키. 서버를 껐다 켜면 앞의 키부터 */
+  private readonly lastGoodKey = new Map<string, string | null>();
+  /** 키마다 마지막으로 쓴 결과 (AI 연결 화면에 보인다) */
+  private readonly keyUsage = new Map<string, { state: LlmApiKeyState; at: Date }>();
+
+  /** 키를 마지막으로 썼을 때의 결과. 이 서버가 켜진 뒤 아직 안 썼으면 null */
+  keyUsageOf(apiKey: string): { state: LlmApiKeyState; at: Date } | null {
+    return this.keyUsage.get(apiKey) ?? null;
+  }
 
   async listModels(endpoint: LlmEndpoint): Promise<LlmModelView[]> {
     const body = await this.request<{ data?: { id: string; owned_by?: string; loaded?: unknown }[] }>(endpoint, 'GET', '/models', undefined, MODELS_TIMEOUT_MS);
@@ -725,13 +743,35 @@ export class LlmClient {
       this.logger.warn(`LLM 주소가 링크 로컬·클라우드 메타데이터라 요청하지 않았어요: ${redactUrl(url)}`);
       throw new LlmRequestError('AI 연결 설정의 주소는 AI 서버로 쓸 수 없는 주소(링크 로컬·클라우드 메타데이터)예요. 주소를 바꿔 주세요', undefined, 'CONNECT');
     }
-    let res: Response;
+    const keys: readonly (string | null)[] = endpoint.apiKeys?.length ? endpoint.apiKeys : [endpoint.apiKey];
+    // 지난번에 통한 키부터 쓴다: 막힌 키를 요청마다 먼저 두드리지 않게
+    const first = keys.indexOf(this.lastGoodKey.get(keys.join('\n')) ?? null);
+    const order = first > 0 ? [...keys.slice(first), ...keys.slice(0, first)] : keys;
+    // 서버 종류를 알아보는 고유 경로(/api/…)는 외부 LLM에서 키와 상관없이 401·403일 수 있어 키 상태로 치지 않는다
+    const probe = path.startsWith('/api/');
+    let res: Response | null = null;
+    for (const [i, key] of order.entries()) {
+      res = await this.sendOnce(url, method, key, payload, signal, timeoutMs);
+      if (probe) break;
+      if (key) this.keyUsage.set(key, { state: keyStateOf(res.status), at: new Date() });
+      if (!KEY_FAILOVER_STATUS.has(res.status) || i === order.length - 1) {
+        if (res.ok) this.lastGoodKey.set(keys.join('\n'), key);
+        break;
+      }
+      await res.body?.cancel().catch(() => undefined);
+      this.logger.warn(`LLM API 키(…${key?.slice(-4) ?? ''})가 HTTP ${res.status}로 막혀 다음 키로 넘어가요: ${redactUrl(url)}`);
+    }
+    return this.checked(res as Response, keys.filter(Boolean).length);
+  }
+
+  /** 키 하나로 한 번 보낸다. 연결 실패는 키를 바꿔도 소용없어 여기서 오류로 끝낸다 */
+  private async sendOnce(url: string, method: 'GET' | 'POST', apiKey: string | null, payload: unknown, signal: AbortSignal, timeoutMs: number): Promise<Response> {
     try {
-      res = await netFetch.run(url, {
+      return await netFetch.run(url, {
         method,
         headers: {
           ...(payload === undefined ? {} : { 'content-type': 'application/json' }),
-          ...(endpoint.apiKey ? { authorization: `Bearer ${endpoint.apiKey}` } : {}),
+          ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
         },
         body: payload === undefined ? undefined : JSON.stringify(payload),
         // 리다이렉트로 메타데이터 같은 다른 곳에 키·질문이 가지 않게 한다 (음성 서버 호출과 같다)
@@ -751,7 +791,13 @@ export class LlmClient {
       this.logger.warn(`LLM 서버에 연결할 수 없어요: ${redactUrl(url)}${causeCodeOf(error)}`);
       throw new LlmRequestError('LLM 서버에 연결할 수 없어요. LLM 서버(LM Studio의 Developer 탭 서버, Unsloth Studio)를 켰는지, 설정한 주소가 맞는지 확인해 주세요', undefined, 'CONNECT');
     }
-    if (res.status === 401 || res.status === 403) throw new LlmRequestError('API 키가 맞지 않거나 권한이 없어요');
+  }
+
+  /** 상태 코드를 확인한다. keyCount는 써 본 키 수 (모두 막혔을 때 알리려고) */
+  private async checked(res: Response, keyCount: number): Promise<Response> {
+    const all = keyCount > 1 ? ` (API 키 ${keyCount}개 모두)` : '';
+    if (res.status === 401 || res.status === 403) throw new LlmRequestError(`API 키가 맞지 않거나 권한이 없어요${all}`);
+    if (res.status === 402 || res.status === 429) throw new LlmRequestError(`API 키의 요청 한도나 결제 한도에 걸렸어요${all}. 잠시 뒤 다시 하거나 AI 연결 화면에서 API 키를 더 넣어 주세요`, res.status);
     if (!res.ok) {
       const message = await errorMessageOf(res);
       // Unsloth Studio: "No model loaded. Call POST /inference/load first. Or enable Model auto-switch …"

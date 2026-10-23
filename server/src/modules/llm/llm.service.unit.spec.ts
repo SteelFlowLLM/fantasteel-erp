@@ -1,4 +1,5 @@
 // LlmService (이슈 #465): 사진·생각 정도 지원 저장, 연결 확인 결과의 서버 종류, Unsloth 모델 없음 안내를 가짜 저장소·클라이언트로 확인한다.
+import { createHash } from 'node:crypto';
 import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,11 +8,20 @@ import { LlmClient, LlmModelNotLoadedError, LlmRequestError, unslothNotLoadedMes
 import { LlmSettingsStore, type LlmSettings } from './llm-settings.store';
 import { LlmService } from './llm.service';
 
-const saved: LlmSettings = { baseUrl: 'http://127.0.0.1:8888/v1', model: 'a/think', apiKey: 'k', visionSupport: null, reasoningSupport: null, contextLength: null };
+const saved: LlmSettings = {
+  baseUrl: 'http://127.0.0.1:8888/v1',
+  model: 'a/think',
+  apiKeys: ['k'],
+  apiKeysByOrigin: { 'http://127.0.0.1:8888': ['k'] },
+  visionSupport: null,
+  reasoningSupport: null,
+  contextLength: null,
+};
+const idOf = (key: string) => createHash('sha256').update(key).digest('hex').slice(0, 16);
 
 function setup(settings: LlmSettings = saved) {
   const store = { read: jest.fn(async () => settings), write: jest.fn(async () => undefined) };
-  const client = { listModels: jest.fn(), serverSummary: jest.fn(), chat: jest.fn(), forgetServerInfo: jest.fn() };
+  const client = { listModels: jest.fn(), serverSummary: jest.fn(), chat: jest.fn(), forgetServerInfo: jest.fn(), keyUsageOf: jest.fn(() => null) };
   const service = new LlmService(store as unknown as LlmSettingsStore, client as unknown as LlmClient, {} as BrowserSettingsStore);
   return { store, client, service };
 }
@@ -25,7 +35,7 @@ describe('LlmService 사진·생각 정도 지원 (이슈 #465)', () => {
       reasoningSupport: true,
       contextLength: 32768,
     });
-    expect(store.write).toHaveBeenLastCalledWith(expect.objectContaining({ apiKey: 'k', visionSupport: null, reasoningSupport: true, contextLength: 32768 }));
+    expect(store.write).toHaveBeenLastCalledWith(expect.objectContaining({ apiKeys: ['k'], visionSupport: null, reasoningSupport: true, contextLength: 32768 }));
   });
 
   it('연결 확인 결과에 서버 종류와 auto-switch를 싣고, 실패하면 둘 다 null', async () => {
@@ -34,7 +44,7 @@ describe('LlmService 사진·생각 정도 지원 (이슈 #465)', () => {
     client.serverSummary.mockResolvedValueOnce({ kind: 'unsloth', autoSwitch: false });
     await expect(service.testConnection({ baseUrl: saved.baseUrl })).resolves.toMatchObject({ connected: true, serverKind: 'unsloth', autoSwitch: false });
     // 키를 보내지 않으면 저장된 키로 확인한다
-    expect(client.listModels).toHaveBeenCalledWith({ baseUrl: saved.baseUrl, apiKey: 'k' });
+    expect(client.listModels).toHaveBeenCalledWith({ baseUrl: saved.baseUrl, apiKey: 'k', apiKeys: ['k'] });
 
     client.listModels.mockRejectedValueOnce(new LlmRequestError('x', undefined, 'NO_MODEL'));
     await expect(service.testConnection({ baseUrl: saved.baseUrl })).resolves.toMatchObject({ connected: false, serverKind: null, autoSwitch: null, error: 'x' });
@@ -46,32 +56,54 @@ describe('LlmService 사진·생각 정도 지원 (이슈 #465)', () => {
     const result = await service.testChat();
     expect(result).toMatchObject({ ok: false, model: 'a/think' });
     expect(result.error).toContain('Settings > API > Model auto-switch');
-    expect(client.chat.mock.calls[0][0]).toEqual({ baseUrl: saved.baseUrl, apiKey: 'k', visionSupport: null, reasoningSupport: true, contextLength: null });
+    expect(client.chat.mock.calls[0][0]).toEqual({ baseUrl: saved.baseUrl, apiKey: 'k', apiKeys: ['k'], visionSupport: null, reasoningSupport: true, contextLength: null });
   });
 });
 
-describe('LlmService 주소가 바뀌면 저장된 키를 보내지 않는다', () => {
-  it('출처가 같으면 저장된 키, 다르면 키 없이 확인하고 실패하면 다시 넣으라고 알린다', async () => {
-    const { client, service } = setup();
+describe('LlmService 서버별 API 키', () => {
+  const twoServers: LlmSettings = { ...saved, apiKeysByOrigin: { 'http://127.0.0.1:8888': ['k'], 'https://llm.example.com': ['e1', 'e2'] } };
+
+  it('주소를 바꾸면 그 서버에 저장한 키로 확인하고, 키가 없는 서버로는 다른 서버의 키를 보내지 않는다', async () => {
+    const { client, service } = setup(twoServers);
     client.listModels.mockResolvedValue([]);
     client.serverSummary.mockResolvedValue({ kind: 'openai', autoSwitch: null });
-    await service.testConnection({ baseUrl: 'http://127.0.0.1:8888/v1/' });
-    expect(client.listModels).toHaveBeenLastCalledWith({ baseUrl: 'http://127.0.0.1:8888/v1', apiKey: 'k' });
     await service.testConnection({ baseUrl: 'https://llm.example.com/v1' });
-    expect(client.listModels).toHaveBeenLastCalledWith({ baseUrl: 'https://llm.example.com/v1', apiKey: null });
-
-    client.listModels.mockRejectedValueOnce(new LlmRequestError('API 키가 맞지 않거나 권한이 없어요'));
-    const failed = await service.testConnection({ baseUrl: 'https://llm.example.com/v1' });
-    expect(failed.error).toBe('API 키가 맞지 않거나 권한이 없어요. 주소가 바뀌어 저장된 API 키를 보내지 않았어요. 새 주소의 API 키를 다시 넣어 주세요');
+    expect(client.listModels).toHaveBeenLastCalledWith({ baseUrl: 'https://llm.example.com/v1', apiKey: 'e1', apiKeys: ['e1', 'e2'] });
+    await service.testConnection({ baseUrl: 'http://127.0.0.1:1234/v1' });
+    expect(client.listModels).toHaveBeenLastCalledWith({ baseUrl: 'http://127.0.0.1:1234/v1', apiKey: null, apiKeys: [] });
+    // 다른 서버의 키 id를 보내도 그 서버로는 가지 않는다
+    await service.testConnection({ baseUrl: 'http://127.0.0.1:1234/v1', apiKeys: [{ id: idOf('k') }] });
+    expect(client.listModels).toHaveBeenLastCalledWith({ baseUrl: 'http://127.0.0.1:1234/v1', apiKey: null, apiKeys: [] });
   });
 
-  it('저장할 때 출처가 바뀌고 키를 보내지 않으면 키를 지우고, 기억해 둔 서버 정보를 버린다', async () => {
-    const { store, client, service } = setup();
-    await service.updateSettings({ baseUrl: 'http://127.0.0.1:1234/v1', model: 'm' });
-    expect(store.write).toHaveBeenLastCalledWith(expect.objectContaining({ apiKey: null }));
-    await service.updateSettings({ baseUrl: 'http://127.0.0.1:1234/v1', model: 'm', apiKey: 'new' });
-    expect(store.write).toHaveBeenLastCalledWith(expect.objectContaining({ apiKey: 'new' }));
-    expect(client.forgetServerInfo).toHaveBeenCalledTimes(2);
+  it('저장: 저장된 키는 id로, 새 키는 값으로 받아 보낸 순서대로 두고, 다른 서버의 키는 그대로 둔다', async () => {
+    const { store, client, service } = setup(twoServers);
+    const view = await service.updateSettings({ baseUrl: 'https://llm.example.com/v1', model: 'm', apiKeys: [{ value: ' new ' }, { id: idOf('e2') }, { id: 'unknown' }] });
+    expect(store.write).toHaveBeenLastCalledWith(
+      expect.objectContaining({ apiKeys: ['new', 'e2'], apiKeysByOrigin: { 'http://127.0.0.1:8888': ['k'], 'https://llm.example.com': ['new', 'e2'] } }),
+    );
+    expect(view.hasApiKey).toBe(true);
+    expect(view.apiKeysByOrigin['https://llm.example.com']).toEqual([
+      { id: idOf('new'), hint: '…new', state: null, usedAt: null },
+      { id: idOf('e2'), hint: '…e2', state: null, usedAt: null },
+    ]);
+    expect(JSON.stringify(view)).not.toMatch(/"e2"|"new"|"k"/);
+    expect(client.forgetServerInfo).toHaveBeenCalledTimes(1);
+  });
+
+  it('키를 보내지 않으면 그 주소의 키를 그대로, 빈 배열이면 그 주소의 키만 지운다', async () => {
+    const { store, service } = setup(twoServers);
+    await service.updateSettings({ baseUrl: 'https://llm.example.com/v1', model: 'm' });
+    expect(store.write).toHaveBeenLastCalledWith(expect.objectContaining({ apiKeys: ['e1', 'e2'] }));
+    await service.updateSettings({ baseUrl: 'https://llm.example.com/v1', model: 'm', apiKeys: [] });
+    expect(store.write).toHaveBeenLastCalledWith(expect.objectContaining({ apiKeys: [], apiKeysByOrigin: { 'http://127.0.0.1:8888': ['k'] } }));
+  });
+
+  it('화면에 키마다 마지막으로 쓴 결과를 보인다', async () => {
+    const { client, service } = setup();
+    client.keyUsageOf.mockReturnValueOnce({ state: 'limited', at: new Date('2026-10-23T01:00:00Z') } as never);
+    const view = await service.getSettings();
+    expect(view.apiKeysByOrigin['http://127.0.0.1:8888']).toEqual([{ id: idOf('k'), hint: '…k', state: 'limited', usedAt: '2026-10-23T01:00:00.000Z' }]);
   });
 });
 
@@ -90,6 +122,12 @@ describe('LlmSettingsStore 옛 파일', () => {
   it('지원 칸이 없는 옛 llm.json은 모름(null)으로 읽는다', async () => {
     await mkdir(join(dir, 'settings'), { recursive: true });
     await writeFile(join(dir, 'settings', 'llm.json'), JSON.stringify({ baseUrl: 'http://127.0.0.1:1234/v1', model: 'm', apiKey: null }));
-    await expect(new LlmSettingsStore().read()).resolves.toEqual({ baseUrl: 'http://127.0.0.1:1234/v1', model: 'm', apiKey: null, visionSupport: null, reasoningSupport: null, contextLength: null });
+    await expect(new LlmSettingsStore().read()).resolves.toEqual({ baseUrl: 'http://127.0.0.1:1234/v1', model: 'm', apiKeys: [], apiKeysByOrigin: {}, visionSupport: null, reasoningSupport: null, contextLength: null });
+  });
+
+  it('키가 하나뿐이던 옛 llm.json은 그 주소의 키로 읽는다', async () => {
+    await mkdir(join(dir, 'settings'), { recursive: true });
+    await writeFile(join(dir, 'settings', 'llm.json'), JSON.stringify({ baseUrl: 'http://127.0.0.1:8888/v1', model: 'm', apiKey: 'old' }));
+    await expect(new LlmSettingsStore().read()).resolves.toMatchObject({ apiKeys: ['old'], apiKeysByOrigin: { 'http://127.0.0.1:8888': ['old'] } });
   });
 });
