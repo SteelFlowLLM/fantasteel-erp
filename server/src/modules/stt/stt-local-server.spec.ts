@@ -1,7 +1,7 @@
 // 같은 Mac의 음성 서버(LaunchAgent) 켜고 끄기: launchctl 출력 해석, 운영체제·등록 여부, 정해진 명령만 실행.
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { SttLocalServerService, VOICE_AGENT_LABEL, parseLaunchctlPrint, sidecarPortOf, tildePath, type RunCommand } from './stt-local-server.service';
 
 const RUNNING = `gui/501/com.fantasteel.voice = {\n\tactive count = 1\n\tstate = running\n\tpid = 4242\n}`;
@@ -79,7 +79,7 @@ describe('SttLocalServerService', () => {
     const status = await new TestService(run, 'darwin', plist).status();
     expect(status).toMatchObject({ installed: true, running: true, healthy: true, pid: 4242, message: null });
     expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:8123/health');
-    expect(status.logPath?.startsWith('~/')).toBe(true);
+    expect(status.logPath?.startsWith(`~${sep}`)).toBe(true);
   });
 
   it('켜기·끄기를 동시에 눌러도 차례로 하나씩 실행한다', async () => {
