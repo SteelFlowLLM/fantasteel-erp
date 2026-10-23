@@ -20,8 +20,8 @@ npm run dev          # 로컬 DB(54322) · shared · 서버(8787) · 화면(5173
 - `npm run dev`는 서버를 띄우기 전에 `server/scripts/prepare-db.mjs`로 마이그레이션 적용 → 빈 DB면 시드 → TypedSQL 생성을 한다. 마이그레이션·시드는 로컬 DB(54322)일 때만 하고, 공용 DB(Supabase)면 건너뛴다(8장).
 - 로컬 DB는 `embedded-postgres`로 프로젝트 폴더(`.local-db/`) 안에서 뜬다. Docker가 필요 없다. DB만 띄우려면 `npm run db`.
 - 서버만: `npm run dev:server` (DB가 떠 있어야 한다).
-- 테스트 계정: 시드 사원 15명, 비밀번호 모두 `fantasteel`. 사원번호는 [backend/seed.md](backend/seed.md).
-- 로그인: `POST /api/v1/auth/login {"employeeNo":"2103003","password":"fantasteel"}` → `access_token` httpOnly 쿠키. 이후 요청은 쿠키를 함께 보낸다(curl은 `-c`/`-b`).
+- 테스트 계정: 시드 사원 15명, 비밀번호는 모두 같고 팀에서 따로 받아 `server/.env`의 `SEED_PASSWORD`에 넣는다. 사원번호는 [backend/seed.md](backend/seed.md).
+- 로그인: `POST /api/v1/auth/login {"employeeNo":"2103003","password":"<SEED_PASSWORD>"}` → `access_token` httpOnly 쿠키. 이후 요청은 쿠키를 함께 보낸다(curl은 `-c`/`-b`).
 - 다른 PC에서 쓰기: 화면이 같은 주소의 `/api/v1`로 부르고 화면 서버(Next)가 이 서버로 넘기므로(이슈 #440) 다른 PC는 `http://<이 PC IP>:5173`만 열면 된다. http로 들어오면 브라우저가 Secure 쿠키를 저장하지 않으니 `server/.env`에 `COOKIE_SECURE=false`를 넣는다(운영 https에서는 넣지 않는다).
 
 | 명령 | 하는 일 |

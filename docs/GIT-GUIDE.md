@@ -101,4 +101,4 @@ npm install
 - 화면(`client/`)만 고쳤다면 대부분 그대로 옮겨진다.
 - 막히면 공유한다. `--force`로 남의 기록을 덮어쓰지 않는다.
 
-적용 후 확인: `npm run typecheck`, `npm run dev` (로그인: [backend/seed.md](backend/seed.md)의 사원번호, 비밀번호 `fantasteel`).
+적용 후 확인: `npm run typecheck`, `npm run dev` (로그인: [backend/seed.md](backend/seed.md)의 사원번호, 비밀번호는 server/.env의 `SEED_PASSWORD`).

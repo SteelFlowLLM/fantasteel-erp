@@ -24,7 +24,7 @@ async function login(employeeNo: string): Promise<string> {
   const res = await fetch(`${baseUrl}/auth/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ employeeNo, password: process.env.SEED_PASSWORD ?? 'fantasteel' }),
+    body: JSON.stringify({ employeeNo, password: process.env.SEED_PASSWORD! }),
   });
   if (!res.ok) throw new Error(`로그인 실패 ${employeeNo} (HTTP ${res.status})`);
   return (res.headers.get('set-cookie') ?? '').split(';')[0];

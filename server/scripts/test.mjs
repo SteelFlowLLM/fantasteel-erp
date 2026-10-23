@@ -4,6 +4,7 @@
 //   npm test -- sales-order        ← 경로에 이 이름이 들어간 묶음만
 //   npm run test:unit              ← DB 없이 src/common·stt·llm·회의 분석 검증·외부 연결·철강맨AI 실행 카드·Notion 도구·웹 검색·브라우저·화면 조작·심층 조사 단위 테스트만 (Chrome 끝에서 끝까지는 BROWSER_E2E=1일 때만)
 import { execSync, spawnSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import pg from 'pg';
 
 const base = 'postgresql://postgres:postgres@localhost:54322';
@@ -21,6 +22,8 @@ const only = process.argv.slice(2).filter((a) => a !== '--unit');
 const shell = process.platform === 'win32';
 // NestJS 12가 ESM 패키지라 Jest(CommonJS)에서 불러오려면 이 옵션이 필요하다
 const nodeOptions = [process.env.NODE_OPTIONS, '--experimental-vm-modules'].filter(Boolean).join(' ');
+// 시험 DB의 시드 비밀번호는 실행마다 새로 만든다. 시험이 팀 공통 비밀번호(server/.env)를 몰라도 돌게 한다 (이슈 #546)
+const seedPassword = randomBytes(12).toString('base64url');
 
 if (process.argv.includes('--unit')) {
   const r = spawnSync('npx', ['jest', 'src/common', 'src/modules/stt', 'src/modules/llm', 'src/modules/auth/.*\\.unit', 'meeting-analysis.validator', 'meeting-analysis.chunks.unit', 'meeting-speaker.unit', 'meeting-transcription.unit', 'meeting-review.unit', 'meeting-candidate.context.unit', 'assistant-meeting.context.unit', 'meeting-notion.markdown.unit', 'src/modules/integration/.*\\.unit', 'ai-action-card.unit', 'voice-approval.unit', 'ai-ops-card.unit', 'assistant-answer.unit', 'agent-control.unit', 'stream-writer.unit','knowledge.read.unit', 'ai-mention.unit', 'ai-reply.unit', 'src/modules/ai-assistant/web', 'src/modules/ai-assistant/tools/.*\\.unit', 'src/modules/ai-assistant/browser', 'src/modules/ai-assistant/screen', 'src/modules/ai-assistant/chat/.*\\.unit', 'src/modules/ai-assistant/history','src/modules/ai-research/.*\\.unit', 'ai-update-card.unit', 'src/modules/message-action/action-types/.*\\.unit', 'src/modules/ai-assistant/notion/.*\\.unit', 'src/modules/ai-assistant/drive/.*\\.unit'], { env: { ...process.env, NODE_OPTIONS: nodeOptions }, stdio: 'inherit', shell });
@@ -33,7 +36,7 @@ let failed = false;
 for (const [db, paths] of groups) {
   if (only.length && !paths.some((p) => only.some((o) => p.includes(o)))) continue;
   const url = `${base}/${db}`;
-  const env = { ...process.env, DATABASE_URL: url, DIRECT_URL: url, NODE_OPTIONS: nodeOptions };
+  const env = { ...process.env, DATABASE_URL: url, DIRECT_URL: url, NODE_OPTIONS: nodeOptions, SEED_PASSWORD: seedPassword };
   // 테스트 전용 DB는 매번 새로 만든다 (이전 실행의 데이터·옛 마이그레이션 기록이 남지 않게)
   await admin.query('select pg_terminate_backend(pid) from pg_stat_activity where datname = $1 and pid <> pg_backend_pid()', [db]);
   await admin.query(`DROP DATABASE IF EXISTS ${db}`);

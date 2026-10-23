@@ -27,7 +27,7 @@ let productionCookie: string;
 /** 물류부장 신현우 — 기준정보 조회만. 권한이 없는 경우는 테스트 동안 역할 권한을 빼서 본다 */
 let logisticsCookie: string;
 
-async function login(employeeNo: string, password = process.env.SEED_PASSWORD ?? 'fantasteel'): Promise<string> {
+async function login(employeeNo: string, password = process.env.SEED_PASSWORD!): Promise<string> {
   const res = await fetch(`${baseUrl}/auth/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

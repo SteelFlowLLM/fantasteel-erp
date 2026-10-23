@@ -82,7 +82,7 @@ create(@Body() dto: CreateSalesOrderDto, @CurrentUser() user: AuthUser) {
 - [05] 11장 필수 대상은 아니다. 로그인 API를 바꾸면 성공·실패·퇴사 계정 3가지를 DB 테스트(`npm test -w @fantasteel/server -- auth`)로 확인한다.
 - 단위: `login-attempt.limiter.unit.spec.ts`(한도·창·성공 삭제·IP·키 수 상한·동시에 잡은 자리·cancel)·`auth.service.unit.spec.ts`(동시에 보낸 12개·IP 30개가 한도만큼만 비밀번호를 확인, 서버 오류는 세지 않음). 둘 다 DB 없이 `npm run test:unit`에 포함.
 - DB 테스트: `server/src/modules/auth/login.spec.ts`(HTTP로 부른다). 실패 횟수 제한(5번 뒤 맞는 비밀번호도 `AUTH-003`, 다른 사원은 영향 없음, 성공하면 지워짐, 동시에 보낸 12개 중 5개만 `AUTH-001`이고 나머지는 `AUTH-003`)·없는 사원번호도 bcrypt를 해 응답 시간이 비슷함. 성공(httpOnly 쿠키·`/auth/me`), 틀린 비밀번호·없는 사원번호는 같은 AUTH-001, 퇴사 계정 로그인 AUTH-001과 퇴사 전 쿠키 AUTH-002, 입력 형식 COM-004, 쿠키 없음 AUTH-002, 로그아웃 쿠키 삭제.
-- 시드 계정: 15명, 비밀번호 `fantasteel`(`SEED_PASSWORD`로 변경 가능). 예: 관리자 1503001, 영업 2103003, 영업부장 1608002, 구매 2207005, 구매부장 1702004.
+- 시드 계정: 15명, 비밀번호는 모두 같고 `server/.env`의 `SEED_PASSWORD`(팀에서 따로 받는다, 기본값 없음). 예: 관리자 1503001, 영업 2103003, 영업부장 1608002, 구매 2207005, 구매부장 1702004.
 
 ## 8. 확인 필요 🟡
 

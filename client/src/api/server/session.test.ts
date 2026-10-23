@@ -51,8 +51,8 @@ afterEach(() => stopFakeServer());
 describe('서버 모드 세션 (api/server/session.ts)', () => {
   it('로그인하면 서버 사원 id·사원번호를 돌려주고, 새 탭은 쿠키의 사원으로 이어서 들어간다', async () => {
     const calls = useFakeServer(SEED_EMPLOYEE_NO.purchaseHead, (c) => (c.path === '/auth/login' || c.path === '/auth/me' ? ok(authUser) : undefined));
-    await expect(sessionApi.login(SEED_EMPLOYEE_NO.purchaseHead, 'fantasteel')).resolves.toEqual({ employeeId: 904, employeeNo: SEED_EMPLOYEE_NO.purchaseHead });
-    expect(calls[0].body).toEqual({ employeeNo: SEED_EMPLOYEE_NO.purchaseHead, password: 'fantasteel' });
+    await expect(sessionApi.login(SEED_EMPLOYEE_NO.purchaseHead, 'test-password')).resolves.toEqual({ employeeId: 904, employeeNo: SEED_EMPLOYEE_NO.purchaseHead });
+    expect(calls[0].body).toEqual({ employeeNo: SEED_EMPLOYEE_NO.purchaseHead, password: 'test-password' });
     await expect(sessionApi.current()).resolves.toEqual({ employeeId: 904, employeeNo: SEED_EMPLOYEE_NO.purchaseHead });
     resetServerSessionForTest(null);
     await expect(sessionApi.current()).resolves.toBeNull();

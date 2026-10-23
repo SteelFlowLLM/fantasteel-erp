@@ -16,7 +16,7 @@ let app: INestApplication;
 let baseUrl: string;
 
 async function login(employeeNo: string): Promise<string> {
-  const res = await fetch(`${baseUrl}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ employeeNo, password: process.env.SEED_PASSWORD ?? 'fantasteel' }) });
+  const res = await fetch(`${baseUrl}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ employeeNo, password: process.env.SEED_PASSWORD! }) });
   return (res.headers.get('set-cookie') ?? '').split(';')[0];
 }
 

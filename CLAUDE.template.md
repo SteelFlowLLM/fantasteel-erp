@@ -31,7 +31,7 @@ npm run test -w @fantasteel/client           # 화면 테스트 (Vitest)
 npm run db:reset                             # 개발 DB 초기화 (데이터 모두 삭제)
 ```
 
-테스트 계정: 비밀번호 `fantasteel`, 사원번호는 `docs/backend/seed.md`.
+테스트 계정: 비밀번호는 `server/.env`의 `SEED_PASSWORD`(팀에서 따로 받는다), 사원번호는 `docs/backend/seed.md`.
 
 ## 서버 (`server/`)
 

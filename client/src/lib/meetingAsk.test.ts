@@ -58,7 +58,7 @@ describe('aiAssistantApi.ask + meetingMinutesId', () => {
       return new Response(JSON.stringify({ success: true, data: { answer: '네', sources: [], model: 'm', latencyMs: 1 } }), { status: 200, headers: { 'content-type': 'application/json' } });
     });
     actAs(SEED_EMPLOYEE_NO.sales);
-    await serverLogin(SEED_EMPLOYEE_NO.sales, 'fantasteel');
+    await serverLogin(SEED_EMPLOYEE_NO.sales, 'test-password');
     await aiAssistantApi.ask({ question: '요약해 줘', meetingMinutesId: 5 });
     expect(bodies.at(-1)).toEqual({ question: '요약해 줘', meetingMinutesId: 5 });
   });

@@ -24,7 +24,7 @@ beforeAll(async () => {
   const login = await fetch(`${baseUrl}/auth/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ employeeNo: '2205013', password: process.env.SEED_PASSWORD ?? 'fantasteel' }),
+    body: JSON.stringify({ employeeNo: '2205013', password: process.env.SEED_PASSWORD! }),
   });
   if (!login.ok) throw new Error(`로그인 실패 (HTTP ${login.status})`);
   cookie = (login.headers.get('set-cookie') ?? '').split(';')[0];
