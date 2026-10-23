@@ -1,4 +1,5 @@
-// 철강맨AI 아침 브리핑 (이슈 #506): 빈 대화 첫 화면의 [오늘 브리핑] 단추와 /브리핑 명령이 같은 질문을 보낸다.
+// 철강맨AI 아침 브리핑 (이슈 #506): 빈 대화 첫 화면의 [오늘 브리핑] 단추는 브리핑 질문을 보내고,
+// /브리핑 명령은 로그인 때 뜨는 철강맨 아침 브리핑 창을 다시 연다.
 import { AI_BRIEFING_QUESTION } from '@fantasteel/shared';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -37,12 +38,12 @@ describe('철강맨AI 패널의 브리핑 연결', () => {
     expect(panel).toMatch(/function Welcome[\s\S]*<AiBriefingButton disabled=\{disabled\} onAsk=\{onAsk\} \/>/);
   });
 
-  it('/브리핑 명령은 단추와 같은 질문을 입력칸 첨부 없이 보낸다', () => {
+  it('/브리핑 명령은 철강맨 아침 브리핑 창을 처음부터 다시 연다', () => {
     expect(AI_SLASH_COMMANDS.find((command) => command.key === 'briefing')?.name).toBe('브리핑');
-    expect(panel).toMatch(/case 'briefing':\s*send\(AI_BRIEFING_QUESTION, false\);/);
+    expect(panel).toMatch(/case 'briefing':\s*useBriefingStore\.getState\(\)\.openBriefing\(\);/);
   });
 
-  it('답을 받는 중에는 /브리핑을 쓸 수 없다고 입력칸 아래에 알린다', () => {
-    expect(panel).toMatch(/case 'briefing':\s*return pending \? SLASH_BRIEFING_PENDING : null;/);
+  it('브리핑 창은 대화와 따로 떠서 답을 받는 중에도 /브리핑을 쓸 수 있다', () => {
+    expect(panel).toMatch(/case 'briefing':\s*return null;/);
   });
 });

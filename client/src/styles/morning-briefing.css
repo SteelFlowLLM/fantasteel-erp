@@ -1,0 +1,149 @@
+/* 철강맨 아침 브리핑 (features/briefing)의 움직임. 표정이 바뀔 때 통통 튀기, 카드 들어오기, 말풍선 커서,
+   자료 읽는 중 동그라미, 빈 카드 반짝임, 다시 열 때 오른쪽 아래에서 커지기. 움직임 줄이기 설정이면 모두 멈춘다. */
+@keyframes briefing-pop {
+  0% {
+    transform: scale(0.86, 1.08);
+  }
+  55% {
+    transform: scale(1.06, 0.95);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes briefing-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes briefing-caret {
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes briefing-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes briefing-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+@keyframes briefing-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes briefing-dock-in {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes briefing-drawer-in {
+  from {
+    transform: translateX(102%);
+  }
+  to {
+    transform: none;
+  }
+}
+
+.briefing-pop {
+  animation: briefing-pop 0.32s cubic-bezier(0.3, 1.6, 0.5, 1);
+}
+
+.briefing-card-in {
+  animation: briefing-card-in 0.42s cubic-bezier(0.2, 0.9, 0.3, 1.2) backwards;
+}
+
+.briefing-caret {
+  display: inline-block;
+  width: 7px;
+  height: 14px;
+  margin-left: 1px;
+  vertical-align: -2px;
+  background: var(--color-nav-dark);
+  animation: briefing-caret 0.9s steps(1) infinite;
+}
+
+.briefing-spin {
+  border-top-color: transparent !important;
+  border-radius: 9999px;
+  animation: briefing-spin 0.7s linear infinite;
+}
+
+.briefing-skeleton {
+  background: linear-gradient(90deg, var(--color-surface-3) 0, var(--color-surface) 40%, var(--color-surface-3) 80%);
+  background-size: 300% 100%;
+  animation: briefing-shimmer 1.4s linear infinite;
+}
+
+.briefing-in {
+  animation: briefing-in 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.briefing-dock-in {
+  animation: briefing-dock-in 0.3s cubic-bezier(0.3, 1.5, 0.5, 1);
+}
+
+.briefing-drawer-in {
+  animation: briefing-drawer-in 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* 닫을 때 철강맨이 작아지며 오른쪽 아래 단추 자리로 날아간다 */
+.briefing-flyer {
+  transition:
+    left 0.55s cubic-bezier(0.5, 0, 0.2, 1),
+    top 0.55s cubic-bezier(0.5, 0, 0.2, 1),
+    width 0.55s cubic-bezier(0.5, 0, 0.2, 1),
+    height 0.55s cubic-bezier(0.5, 0, 0.2, 1);
+}
+
+/* 말풍선 위쪽은 흐리게 사라진다 (지난 말이 위로 밀려 올라간다) */
+.briefing-log {
+  mask-image: linear-gradient(to bottom, transparent 0, #000 16px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .briefing-pop,
+  .briefing-card-in,
+  .briefing-caret,
+  .briefing-spin,
+  .briefing-skeleton,
+  .briefing-in,
+  .briefing-dock-in,
+  .briefing-drawer-in {
+    animation: none;
+  }
+
+  .briefing-flyer {
+    transition: none;
+  }
+}

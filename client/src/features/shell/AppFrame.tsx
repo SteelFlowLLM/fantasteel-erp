@@ -3,6 +3,7 @@
 // B안 셸 틀: 어두운 아이콘 레일 + 상단 바 + 본문(+ 넓은 AI 패널)
 import dynamic from 'next/dynamic';
 import { useCallback, useState, type ReactNode } from 'react';
+import { MorningBriefing } from '@/features/briefing/MorningBriefing';
 import { AiPanelLoading } from '@/features/shell/AiPanelLoading';
 import { loadAiPanel } from '@/features/shell/aiPanelLoader';
 import { AiScreenControl } from '@/features/shell/AiScreenControl';
@@ -40,6 +41,7 @@ export function AppFrame({ children }: { children: ReactNode }) {
         </div>
       </div>
       <PetMount />
+      <MorningBriefing />
     </div>
   );
 }

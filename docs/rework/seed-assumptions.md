@@ -470,3 +470,15 @@
 | **번호 없는 대상의 화면 이름** — 예약 = 수주 번호 + 품목 번호 + 매수(after_data, 예 `SO-2610-001 품목 1 · 6매`), Action Draft = `초안 #id`, 그 밖 = `#id`. 유형과 대상 이름이 같으면(예약 · 예약) 대상 이름은 한 번만 | 문서에 없음 — 예약·초안은 업무 번호가 없다(9.1). 이벤트가 가진 값만 쓴다 | `client/src/mock/services/timelines.ts`(`eventTargetTextOf`), `client/src/api/businessEvents.ts` |
 | **작업 로그 한 번에 불러오는 수** — 50건, '더 보기'로 50건씩 | 문서에 없음 — 옛 화면과 같음 | `client/src/api/businessEvents.ts` |
 | **LOT 목록 수** — 최근 40개, 검색 20개 | 문서에 없음 — 옛 화면과 같음 | `client/src/features/lotTrace/components/TraceSearchPane.tsx`, `client/src/api/lotTrace.ts` |
+
+### 6-16. 철강맨 아침 브리핑(briefing)
+
+| 값·규칙 | 근거 | 파일 |
+|---|---|---|
+| **브리핑 자체** — 로그인할 때마다 대시보드 위에 철강맨이 역할별 카드 최대 4장을 말풍선으로 읽어 준다. 닫으면 오른쪽 아래 단추로 남고, 철강맨AI의 `/브리핑`이 다시 연다. AI를 부르지 않는 규칙 기반이다 | 문서에 없음 — 시안 "철강맨 아침 브리핑"을 옮겼다. 가장 가까운 근거는 REQ-AGT-004(납기 위험)·REQ-AST-008(역할별 추천)·REQ-DSH-002(위젯 후보) | `client/src/features/briefing/` |
+| **역할별 규칙** — 영업: 납기 위험·배정 대기 출하요청·7일 안 출하 예정·어제 출고 / 구매: 원료 부족(MRP)·발주 기다리는 구매요청·입고 남은 발주 / 생산: 판정 대기·납기 위험·여재·어제 생산량 / 품질: 처리 안 한 불합격 LOT·판정 대기·불합격률 / 물류: 출고 확정 대기·7일 안 출하 예정·여재·어제 출고 / 관리자: Agent 후보·업무·납기 위험·여재. 모든 역할에 내 업무(마감 지남·오늘 마감), 영업·구매·생산·품질에 Agent 후보, 부서장에게 결재 대기 | 문서에 없음 — 각 자료는 그 화면과 같은 조회 권한이 있을 때만 읽는다 | `client/src/features/briefing/lib/briefingRules.ts` |
+| **카드 고르기** — 위험 → 확인 필요 → 참고 → 좋은 소식 순, 좋은 소식이 있으면 마지막 한 장은 좋은 소식 | 시안과 같음 | `client/src/features/briefing/lib/briefingRules.ts` |
+| **판정 대기 위험 기준** — 생산 후 1일 이상 판정 대기면 '위험' | 문서에 없음 (BP-AGT-01 판정 대기 시간 TBD) | `client/src/features/briefing/lib/briefingRules.ts` (`BRIEFING_PENDING_ALERT_DAYS`) |
+| **여재 오래 보유 기준** — 30일 | Factory Agent 여재 장기 보유 기준(`AGED_SURPLUS_DAYS`)과 같은 값 | `client/src/features/briefing/lib/briefingRules.ts` (`BRIEFING_AGED_SURPLUS_DAYS`) |
+| **곧 출하 기간** — 오늘부터 7일 | 문서에 없음 | `client/src/features/briefing/lib/briefingRules.ts` (`BRIEFING_UPCOMING_DAYS`) |
+| **자료 기다리는 시간** — 자료 하나를 8초 기다려도 안 오면 없는 것으로 보고 넘어간다 | 문서에 없음 | `client/src/features/briefing/BriefingDialog.tsx` |

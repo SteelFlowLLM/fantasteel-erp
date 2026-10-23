@@ -5,7 +5,7 @@
 // 답을 받은 질문은 서버가 대화로 저장하고(이슈 #399), [대화 목록]에서 지난 대화를 열어 이어 묻거나 지운다.
 // 입력칸 맨 앞의 /로 명령(심층 조사·이번 질문만 웹 검색·브라우저, 새 대화, 대화 목록, 오늘 브리핑)을 부른다(이슈 #410·#506, lib/aiSlashCommand.ts).
 // 화면 도우미 펫 철강맨과 한 캐릭터로 느끼도록 펫 말풍선·대화창(public/pet/pet-engine.js의 .fp-bubble·.fp-chat)과 같은 모양으로 그린다.
-import { AI_BRIEFING_QUESTION, AI_IMAGE_MAX_COUNT, AI_REASONING_DEFAULT, AI_RESEARCH_LIMITS, type DriveFileView, AI_REASONING_LABEL, AI_REASONING_LEVELS, type AiAssistantImageInput, type AiAssistantScreenContext, type AiReasoningLevel, type AiResearchSeed } from '@fantasteel/shared';
+import { AI_IMAGE_MAX_COUNT, AI_REASONING_DEFAULT, AI_RESEARCH_LIMITS, type DriveFileView, AI_REASONING_LABEL, AI_REASONING_LEVELS, type AiAssistantImageInput, type AiAssistantScreenContext, type AiReasoningLevel, type AiResearchSeed } from '@fantasteel/shared';
 import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from 'react';
 import { aiResearchApi } from '@/api/aiResearch';
@@ -47,6 +47,7 @@ import { AI_NOTION_TITLE, notionDisabledReason, readAiNotionPreference, writeAiN
 import { AI_SCREEN_CONTROL_TITLE, readAiScreenControlPreference, writeAiScreenControlPreference } from '@/lib/aiScreenControl';
 import { AI_WEB_SEARCH_TITLE, AI_WEB_SEARCH_UNAVAILABLE_HINT, readAiWebSearchPreference, webSearchEngineHint, writeAiWebSearchPreference } from '@/lib/aiWebSearch';
 import { AI_CHAT_STOPPED_REASON, useAiChatStore, type AiChatEntry, type AiChatLive } from '@/stores/useAiChatStore';
+import { useBriefingStore } from '@/stores/useBriefingStore';
 import { useShellStore } from '@/stores/useShellStore';
 import { useSteelmanWakeStore } from '@/stores/useSteelmanWakeStore';
 
@@ -70,7 +71,6 @@ const SLASH_RESEARCH_OFF = '심층 조사를 쓸 수 없어요 (AI 연결에 모
 const SLASH_WEB_OFF = '웹 검색을 쓸 수 없어요';
 const SLASH_NEW_CHAT_PENDING = '답을 받는 중에는 새 대화를 시작할 수 없어요';
 const SLASH_NEW_CHAT_EMPTY = '이미 새 대화예요';
-const SLASH_BRIEFING_PENDING = '답을 받는 중에는 브리핑을 받을 수 없어요';
 const SLASH_RESEARCH_SHORT = `조사할 질문을 ${AI_RESEARCH_LIMITS.questionMin}자 이상 적어 주세요`;
 const ATTACH_ACCEPT = 'image/png,image/jpeg,image/webp';
 
@@ -272,8 +272,9 @@ export function AiPanel() {
         return pending ? SLASH_NEW_CHAT_PENDING : entries.length ? null : SLASH_NEW_CHAT_EMPTY;
       case 'threads':
         return null;
+      // 브리핑 창은 대화와 따로 떠서 답을 받는 중에도 열 수 있다
       case 'briefing':
-        return pending ? SLASH_BRIEFING_PENDING : null;
+        return null;
     }
   };
   const slashPicked = slashCommands.findIndex((command) => command.key === slashActive);
@@ -405,9 +406,10 @@ export function AiPanel() {
         setShowThreads(true);
         setDraft(question);
         return;
-      // 오늘 브리핑 (이슈 #506): 첫 화면의 [오늘 브리핑]과 같은 질문. 명령 뒤에 적은 글은 버리지 않고 입력칸에 남긴다
+      // 철강맨 아침 브리핑 창을 처음부터 다시 연다 (로그인 때 뜨는 그 창). AI 답으로 듣는 브리핑은 첫 화면의 [오늘 브리핑] 단추.
+      // 명령 뒤에 적은 글은 버리지 않고 입력칸에 남긴다
       case 'briefing':
-        send(AI_BRIEFING_QUESTION, false);
+        useBriefingStore.getState().openBriefing();
         setDraft(question);
         return;
     }
