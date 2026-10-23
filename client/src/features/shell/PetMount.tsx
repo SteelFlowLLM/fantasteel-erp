@@ -9,6 +9,7 @@ import { sourceText } from '@/features/shell/aiSourceDisplay';
 import { routeTitleOf } from '@/features/shell/routeTitles';
 import { canOpenScreen, SCREEN, screenOfPath, SCREEN_KEY_BY_HREF, type AccessUser } from '@/features/shell/screens';
 import { useMe } from '@/hooks/useMe';
+import { useBriefingStore } from '@/stores/useBriefingStore';
 import { useShellStore } from '@/stores/useShellStore';
 import { errorMessageOf } from '@/stores/useToastStore';
 
@@ -101,6 +102,13 @@ export function PetMount() {
           if (useShellStore.getState().aiPanelOpen) useShellStore.getState().closeAiPanel();
         },
         askAi,
+        // /브리핑: 로그인 때 뜨는 철강맨 아침 브리핑을 처음부터 다시 연다
+        commands: {
+          브리핑: () => {
+            useBriefingStore.getState().openBriefing();
+            return '오늘 아침 브리핑을 다시 열었어요!';
+          },
+        },
       });
     });
     return () => {

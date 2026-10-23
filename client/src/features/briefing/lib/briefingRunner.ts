@@ -97,8 +97,8 @@ export function createBriefingRunner(): BriefingRunner {
   };
 }
 
-/** 말풍선 글자 사이 쉼(ms): 문장 끝은 길게, 쉼표는 조금 */
+/** 말풍선 글자 사이 쉼(ms): 문장 끝은 조금 길게, 쉼표는 살짝. 느리면 읽기 답답해서 짧게 둔다 */
 export function typingPause(ch: string): number {
-  if ('.!?…'.includes(ch)) return 170;
-  return ch === ',' ? 110 : 24;
+  if ('.!?…'.includes(ch)) return 60;
+  return ch === ',' ? 35 : 8;
 }

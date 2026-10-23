@@ -1,10 +1,8 @@
-// 철강맨 아침 브리핑 창 상태. 로그인할 때마다 한 번 뜨고, 닫으면 오른쪽 아래 철강맨 단추로 남는다.
-// 철강맨AI 채팅의 /브리핑 명령도 이 창을 다시 연다.
-// "방금 로그인했다"와 "단추를 보일지"는 새로고침해도 이어지도록 이 탭의 sessionStorage에 둔다 (업무 데이터가 아니라 화면 상태).
+// 철강맨 아침 브리핑 창 상태. 로그인할 때마다 한 번 뜨고, 철강맨AI 채팅·철강맨 펫 대화창의 /브리핑이 다시 연다.
+// "방금 로그인했다"는 새로고침해도 이어지도록 이 탭의 sessionStorage에 둔다 (업무 데이터가 아니라 화면 상태).
 import { create } from 'zustand';
 
 const AFTER_LOGIN_KEY = 'fantasteel.briefing.after-login';
-const DOCKED_KEY = 'fantasteel.briefing.docked';
 
 function readFlag(key: string): boolean {
   try {
@@ -38,39 +36,22 @@ export function takeBriefingAfterLogin(): boolean {
 
 interface BriefingState {
   open: boolean;
-  /** 닫은 뒤 오른쪽 아래 철강맨 단추를 보인다 */
-  docked: boolean;
   /** 브리핑을 처음부터 다시 들려줄 때마다 늘린다 (로그인·/브리핑·다시 듣기) */
   playId: number;
-  /** 마지막 브리핑의 카드 수와 위험 카드가 있는지 (오른쪽 아래 단추의 숫자) */
-  summary: { count: number; alert: boolean } | null;
-  setSummary: (summary: { count: number; alert: boolean }) => void;
   /** 처음부터 다시 들려주며 연다 */
   openBriefing: () => void;
-  /** 오른쪽 아래 단추로 다시 연다. 이미 끝난 브리핑이면 카드를 그대로 둔다 */
-  reopenBriefing: () => void;
   closeBriefing: () => void;
-  hydrateDocked: () => void;
   /** 로그아웃·사원 전환 때 비운다 */
   reset: () => void;
 }
 
 export const useBriefingStore = create<BriefingState>((set) => ({
   open: false,
-  docked: false,
   playId: 0,
-  summary: null,
-  setSummary: (summary) => set({ summary }),
   openBriefing: () => set((state) => ({ open: true, playId: state.playId + 1 })),
-  reopenBriefing: () => set({ open: true }),
-  closeBriefing: () => {
-    writeFlag(DOCKED_KEY, true);
-    set({ open: false, docked: true });
-  },
-  hydrateDocked: () => set({ docked: readFlag(DOCKED_KEY) }),
+  closeBriefing: () => set({ open: false }),
   reset: () => {
     writeFlag(AFTER_LOGIN_KEY, false);
-    writeFlag(DOCKED_KEY, false);
-    set({ open: false, docked: false, playId: 0, summary: null });
+    set({ open: false, playId: 0 });
   },
 }));

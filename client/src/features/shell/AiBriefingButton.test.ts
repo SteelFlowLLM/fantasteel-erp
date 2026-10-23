@@ -47,3 +47,15 @@ describe('철강맨AI 패널의 브리핑 연결', () => {
     expect(panel).toMatch(/case 'briefing':\s*return null;/);
   });
 });
+
+describe('철강맨 펫 대화창의 /브리핑', () => {
+  const pet = readFileSync(join(SRC, 'features/shell/PetMount.tsx'), 'utf8');
+  const engine = readFileSync(join(SRC, '../public/pet/pet-engine.js'), 'utf8');
+
+  it('펫 대화창 /브리핑은 AI 연결과 상관없이 브리핑 창을 처음부터 다시 연다', () => {
+    expect(pet).toMatch(/commands: \{\s*브리핑: \(\) => \{\s*useBriefingStore\.getState\(\)\.openBriefing\(\);/);
+    // 명령은 AI로 보내기 전에 가로챈다
+    expect(engine.indexOf('o.commands[word]')).toBeLessThan(engine.indexOf("const ans = answerFor(text);"));
+    expect(engine).toContain('Object.prototype.hasOwnProperty.call(o.commands, word)');
+  });
+});

@@ -2,7 +2,6 @@
 
 // 철강맨 아침 브리핑 창 (시안 "철강맨 아침 브리핑"). 철강맨이 인사 → 생각 → 조회 → 읽기 → 정리 → 설명 → 끝 순서로 움직이고,
 // 왼쪽 "읽은 자료"는 실제 조회가 끝나는 대로 체크된다. 카드는 하나씩 열리며 철강맨이 말풍선으로 읽어 준다.
-// 닫아도 창 상태는 남겨 두어, 오른쪽 아래 단추로 다시 열면 끝난 브리핑은 인사만 하고 카드를 그대로 보인다.
 import { AI_BRIEFING_QUESTION } from '@fantasteel/shared';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -56,14 +55,13 @@ interface Line {
   severity: BriefingSeverity | null;
 }
 
-export function BriefingDialog({ open, onClose }: { open: boolean; onClose: (stage: DOMRect | null) => void }) {
+export function BriefingDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const me = useMe();
   const router = useRouter();
   const head = isDepartmentHead(me);
   const seed = String(me.employeeId);
   const playId = useBriefingStore((s) => s.playId);
   const replay = useBriefingStore((s) => s.openBriefing);
-  const setSummary = useBriefingStore((s) => s.setSummary);
   const [today] = useState(todayStr);
   const read = useBriefingSources(today, open);
   const readRef = useRef(read);
@@ -85,12 +83,10 @@ export function BriefingDialog({ open, onClose }: { open: boolean; onClose: (sta
   const [drawer, setDrawer] = useState<number | null>(null);
   const [sourceKeys, setSourceKeys] = useState<BriefingSourceKey[]>(() => read.keys);
   const completedRef = useRef(false);
-  const playedIdRef = useRef(-1);
   const drawerRef = useRef<number | null>(null);
   drawerRef.current = drawer;
   const lineSeq = useRef(0);
   const logRef = useRef<HTMLDivElement>(null);
-  const stageRef = useRef<HTMLImageElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   const setFace = useCallback((key: BriefingFace, force = false) => {
@@ -159,22 +155,22 @@ export function BriefingDialog({ open, onClose }: { open: boolean; onClose: (sta
       setFace('greet', true);
       setPhase(0);
       setStatus('인사하는 중');
-      await runner.wait(id, 250);
+      await runner.wait(id, 120);
       await typeLine(id, `**${me.employeeName} ${me.jobGradeName}님**, ${briefingGreeting(seoulDateParts(new Date()).hour)} 철강맨이에요.`);
-      await runner.wait(id, 600);
+      await runner.wait(id, 250);
 
       faceIf('thinking');
       setPhase(1);
       setStatus('오늘 볼 것을 고르는 중…');
       await typeLine(id, `오늘 ${ROLE_LABEL[me.roleCode]} 브리핑을 준비할게요. 잠깐만요…`);
-      await runner.wait(id, 500);
+      await runner.wait(id, 200);
 
       faceIf('searching');
       setPhase(2);
       for (const key of keys) {
         setRows((prev) => ({ ...prev, [key]: 'active' }));
         setStatus(`${BRIEFING_SOURCE_LABEL[key]} 조회 중…`);
-        await runner.wait(id, 380);
+        await runner.wait(id, 140);
         const deadline = Date.now() + SOURCE_TIMEOUT_MS;
         while (readRef.current.state[key] === 'loading' && Date.now() < deadline) await runner.pause(id, 120);
         setRows((prev) => ({ ...prev, [key]: 'done' }));
@@ -184,17 +180,16 @@ export function BriefingDialog({ open, onClose }: { open: boolean; onClose: (sta
       setPhase(3);
       setRuleRow('active');
       setStatus(`규칙 ${briefingRuleCount(me.roleCode, head)}개에 맞춰 읽는 중…`);
-      await runner.wait(id, 900);
+      await runner.wait(id, 350);
       const built = buildBriefingCards(me.roleCode, readRef.current.sources, head);
       setCards(built);
-      setSummary({ count: built.length, alert: built.some((c) => c.severity === 'danger') });
       setRuleRow('done');
 
       faceIf('found');
       setPhase(4);
       setStatus(`${built.length}건 찾음!`);
       await typeLine(id, built[0]?.key === 'quiet' ? '다 읽었어요! 오늘은 급하게 볼 일이 없어요.' : `다 찾았어요! 오늘 꼭 볼 것 **${built.length}가지**예요.`);
-      await runner.wait(id, 700);
+      await runner.wait(id, 250);
 
       setPhase(5);
       for (let i = 0; i < built.length; i += 1) {
@@ -205,7 +200,7 @@ export function BriefingDialog({ open, onClose }: { open: boolean; onClose: (sta
         if (drawerRef.current === null) setSpark(card.severity);
         setStatus(`${i + 1} / ${built.length} · ${card.title}`);
         await typeLine(id, card.say, card.severity);
-        await runner.wait(id, 800);
+        await runner.wait(id, 350);
       }
       setSpeaking(-1);
       if (drawerRef.current === null) setSpark(null);
@@ -222,37 +217,21 @@ export function BriefingDialog({ open, onClose }: { open: boolean; onClose: (sta
     } catch (error) {
       if (!(error instanceof BriefingCancelled)) throw error;
     }
-  }, [runner, faceIf, setFace, typeLine, me, head, setSummary, idle]);
-
-  /** 끝난 브리핑을 다시 열면 인사만 하고 카드는 그대로 */
-  const greetAgain = useCallback(async () => {
-    const id = runner.start();
-    try {
-      setFace('greet', true);
-      setStatus('다시 왔어요!');
-      await runner.wait(id, 1300);
-      idle();
-    } catch (error) {
-      if (!(error instanceof BriefingCancelled)) throw error;
-    }
-  }, [runner, setFace, idle]);
+  }, [runner, faceIf, setFace, typeLine, me, head, idle]);
 
   useEffect(() => {
     if (!open) return;
     panelRef.current?.focus({ preventScroll: true });
-    const fresh = playId !== playedIdRef.current || !completedRef.current;
-    playedIdRef.current = playId;
-    if (fresh) void play();
-    else void greetAgain();
+    void play();
     return () => {
       runner.cancel();
       setPlaying(false);
       setDrawer(null);
     };
-    // 열릴 때와 다시 듣기(playId)에만 다시 돈다
+    // 열릴 때와 다시 듣기(playId)에만 처음부터 다시 돈다
   }, [open, playId]);
 
-  const close = useCallback(() => onClose(stageRef.current?.getBoundingClientRect() ?? null), [onClose]);
+  const close = onClose;
 
   const openDrawer = (index: number) => {
     const card = cards?.[index];
@@ -293,9 +272,11 @@ export function BriefingDialog({ open, onClose }: { open: boolean; onClose: (sta
 
   useEffect(() => {
     if (!open) return;
+    // 창이 맨 위에 있으니 키를 먼저 받는다(capture). 펫 대화창 입력칸에 초점이 남아 있어도 Esc로 닫힌다
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
+        event.stopPropagation();
         if (drawerRef.current !== null) closeDrawer();
         else close();
       } else if (event.key === ' ' && playing && (document.activeElement === panelRef.current || document.activeElement === document.body)) {
@@ -303,8 +284,8 @@ export function BriefingDialog({ open, onClose }: { open: boolean; onClose: (sta
         runner.skip();
       }
     };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [open, playing, runner, close, closeDrawer]);
 
   const ruleCount = briefingRuleCount(me.roleCode, head);
@@ -375,7 +356,6 @@ export function BriefingDialog({ open, onClose }: { open: boolean; onClose: (sta
             <div className="relative size-48 flex-none overflow-hidden rounded-xl bg-nav-dark shadow-[inset_0_-18px_0_rgba(255,255,255,0.03)] max-md:size-24 max-md:rounded-lg">
               <BriefingFaceImage
                 key={face.nonce}
-                ref={stageRef}
                 face={face.key}
                 seed={seed}
                 size={192}
@@ -417,6 +397,16 @@ export function BriefingDialog({ open, onClose }: { open: boolean; onClose: (sta
           <div className="flex min-w-0 flex-col gap-3.5 px-4.5 pt-4.5 pb-4 pl-5.5 max-md:px-4">
             <div className="relative">
               <span className="absolute -top-2.5 left-3 z-[3] border-2 border-nav-dark bg-steelman px-[7px] text-cap leading-4 text-white">철강맨</span>
+              {playing ? (
+                <button
+                  type="button"
+                  title="남은 말을 한 번에 보여 줘요 (Space)"
+                  className="absolute -top-3 right-3 z-[3] inline-flex items-center gap-1 border-2 border-nav-dark bg-surface px-2 text-cap font-bold leading-4 text-ink shadow-[2px_2px_0_rgba(27,37,49,0.15)] hover:bg-steelman-soft"
+                  onClick={() => runner.skip()}
+                >
+                  건너뛰기 ▶▶
+                </button>
+              ) : null}
               <svg aria-hidden="true" className="absolute top-[30px] -left-3.5 z-[2] size-4 max-md:hidden" viewBox="0 0 8 8" shapeRendering="crispEdges">
                 <path fill="#16202b" d="M7 0h1v1h-1z M5 1h2v1h-2z M3 2h2v1h-2z M1 3h2v1h-2z M0 4h1v1h-1z M1 5h2v1h-2z M3 6h2v1h-2z M5 7h3v1h-3z" />
                 <path fill="#fff" d="M7 1h1v1h-1z M5 2h3v1h-3z M3 3h5v1h-5z M1 4h7v1h-7z M3 5h5v1h-5z M5 6h3v1h-3z" />
@@ -471,8 +461,8 @@ export function BriefingDialog({ open, onClose }: { open: boolean; onClose: (sta
           </span>
           <span className="flex-1" />
           {playing ? (
-            <Button variant="ghost" onClick={() => runner.skip()}>
-              건너뛰기
+            <Button onClick={() => runner.skip()}>
+              건너뛰기 ▶▶
             </Button>
           ) : null}
           <Button icon="refresh" onClick={replay}>
