@@ -27,5 +27,5 @@ export function MorningBriefing() {
   }, [open]);
 
   if (!ready || !mounted) return null;
-  return createPortal(<BriefingDialog open={open} onClose={closeBriefing} />, document.body);
+  return createPortal(<BriefingDialog key={me.employeeId} open={open} onClose={closeBriefing} />, document.body);
 }

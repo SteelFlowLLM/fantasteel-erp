@@ -102,3 +102,33 @@ export function typingPause(ch: string): number {
   if ('.!?…'.includes(ch)) return 60;
   return ch === ',' ? 35 : 8;
 }
+
+/** 자료를 기다리는 전체 마감(ms). 자료마다 따로 재지 않고 조회 단계 전체에 하나만 둔다 (가정값) */
+export const SOURCES_DEADLINE_MS = 10_000;
+
+export type SourceReadState = 'skipped' | 'loading' | 'done' | 'error';
+
+/**
+ * 조회 단계: 자료를 차례로 보며 끝날 때까지 기다리되, 마감(전체 하나)이 지나면 남은 자료는 기다리지 않는다.
+ * 실패했거나 마감 안에 못 읽은 자료의 키를 돌려준다.
+ */
+export async function waitForSources<K extends string>(
+  runner: BriefingRunner,
+  id: number,
+  keys: readonly K[],
+  stateOf: (key: K) => SourceReadState,
+  hooks: { onStart: (key: K) => Promise<void> | void; onSettle: (key: K, failed: boolean) => void },
+  deadlineMs: number = SOURCES_DEADLINE_MS,
+  pollMs = 120,
+): Promise<K[]> {
+  const deadline = Date.now() + deadlineMs;
+  const failed: K[] = [];
+  for (const key of keys) {
+    await hooks.onStart(key);
+    while (stateOf(key) === 'loading' && Date.now() < deadline) await runner.pause(id, pollMs);
+    const bad = stateOf(key) === 'error' || stateOf(key) === 'loading';
+    if (bad) failed.push(key);
+    hooks.onSettle(key, bad);
+  }
+  return failed;
+}

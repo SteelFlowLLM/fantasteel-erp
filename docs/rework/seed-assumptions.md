@@ -481,4 +481,5 @@
 | **판정 대기 위험 기준** — 생산 후 1일 이상 판정 대기면 '위험' | 문서에 없음 (BP-AGT-01 판정 대기 시간 TBD) | `client/src/features/briefing/lib/briefingRules.ts` (`BRIEFING_PENDING_ALERT_DAYS`) |
 | **여재 오래 보유 기준** — 30일 | Factory Agent 여재 장기 보유 기준(`AGED_SURPLUS_DAYS`)과 같은 값 | `client/src/features/briefing/lib/briefingRules.ts` (`BRIEFING_AGED_SURPLUS_DAYS`) |
 | **곧 출하 기간** — 오늘부터 7일 | 문서에 없음 | `client/src/features/briefing/lib/briefingRules.ts` (`BRIEFING_UPCOMING_DAYS`) |
-| **자료 기다리는 시간** — 자료 하나를 8초 기다려도 안 오면 없는 것으로 보고 넘어간다 | 문서에 없음 | `client/src/features/briefing/BriefingDialog.tsx` |
+| **자료 기다리는 시간** — 조회 단계 전체에 마감 하나, 10초(`SOURCES_DEADLINE_MS`). 조회가 실패했거나 마감 안에 못 읽은 자료는 "일부 자료를 못 읽었어요(무엇)" 확인 필요 카드로 알리고(그때는 "오늘은 조용해요"를 쓰지 않는다), 왼쪽 '읽은 자료'에도 '읽지 못함'으로 보인다 | 문서에 없음 (가정값) | `client/src/features/briefing/lib/briefingRunner.ts`, `briefingRules.ts` (`failedSourcesCard`) |
+| **다시 열 때** — 재생을 시작할 때마다 '오늘'(Asia/Seoul)을 새로 구하고 읽는 자료를 다시 조회한다. 창이 열려 있는 동안 Tab은 창 안에서만 돌고(근거 창이 뜨면 그 안), 닫으면 열기 전 자리로 초점이 돌아간다 | 문서에 없음 | `client/src/features/briefing/BriefingDialog.tsx`, `client/src/hooks/useFocusTrap.ts` |

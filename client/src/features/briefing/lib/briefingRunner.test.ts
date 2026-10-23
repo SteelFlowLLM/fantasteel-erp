@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BriefingCancelled, createBriefingRunner, typingPause } from '@/features/briefing/lib/briefingRunner';
+import { BriefingCancelled, createBriefingRunner, typingPause, waitForSources } from '@/features/briefing/lib/briefingRunner';
 
 describe('브리핑 재생 실행기', () => {
   beforeEach(() => vi.useFakeTimers());
@@ -49,5 +49,50 @@ describe('브리핑 재생 실행기', () => {
   it('글자 쉼: 문장 끝 > 쉼표 > 보통', () => {
     expect(typingPause('.')).toBeGreaterThan(typingPause(','));
     expect(typingPause(',')).toBeGreaterThan(typingPause('가'));
+  });
+});
+
+describe('자료 기다리기', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const hooks = () => ({ onStart: vi.fn(), onSettle: vi.fn() });
+
+  it('모두 읽으면 실패 목록이 비어 있다', async () => {
+    const runner = createBriefingRunner();
+    const id = runner.start();
+    const failed = await waitForSources(runner, id, ['a', 'b'], () => 'done', hooks());
+    expect(failed).toEqual([]);
+  });
+
+  it('조회가 실패한 자료는 실패로 모은다', async () => {
+    const runner = createBriefingRunner();
+    const id = runner.start();
+    const h = hooks();
+    const failed = await waitForSources(runner, id, ['a', 'b'], (key) => (key === 'b' ? 'error' : 'done'), h);
+    expect(failed).toEqual(['b']);
+    expect(h.onSettle).toHaveBeenCalledWith('b', true);
+    expect(h.onSettle).toHaveBeenCalledWith('a', false);
+  });
+
+  it('마감은 자료마다가 아니라 전체 하나다', async () => {
+    const runner = createBriefingRunner();
+    const id = runner.start();
+    const done = vi.fn();
+    void waitForSources(runner, id, ['a', 'b', 'c'], () => 'loading', hooks(), 1000).then(done);
+    await vi.advanceTimersByTimeAsync(1300);
+    expect(done).toHaveBeenCalledWith(['a', 'b', 'c']);
+  });
+
+  it('마감 안에 도착하면 실패가 아니다', async () => {
+    const runner = createBriefingRunner();
+    const id = runner.start();
+    let state: 'loading' | 'done' = 'loading';
+    const done = vi.fn();
+    void waitForSources(runner, id, ['a'], () => state, hooks(), 1000).then(done);
+    await vi.advanceTimersByTimeAsync(300);
+    state = 'done';
+    await vi.advanceTimersByTimeAsync(200);
+    expect(done).toHaveBeenCalledWith([]);
   });
 });

@@ -266,6 +266,21 @@ describe('역할별 브리핑', () => {
     expect(cards[0].key).toBe('quiet');
     expect(briefingSourceCount(sources({}), 'agentRisk')).toBe('-');
   });
+
+  it('읽지 못한 자료가 있으면 조용한 하루 대신 못 읽었어요 카드를 쓴다', () => {
+    const cards = buildBriefingCards('ADMIN', sources({}), false, ['agentRisk', 'taskSummary']);
+    expect(cards.map((c) => c.key)).toEqual(['sources-failed']);
+    expect(cards[0].severity).toBe('wait');
+    expect(cards[0].say).toContain('Agent 후보, 내 업무');
+    expect(cards[0].detail.rows).toHaveLength(2);
+  });
+
+  it('못 읽었어요 카드는 위험 카드가 가득해도 한 자리를 지킨다', () => {
+    const many = sources({ deliveryRisk: delivery([riskRow({ salesOrderItemId: 1 }), riskRow({ salesOrderItemId: 2, salesOrderId: 2, salesOrderNo: 'SO-2610-002' })]), inspectionQueue: [] });
+    const cards = buildBriefingCards('PRODUCTION', many, false, ['surplusAge']);
+    expect(cards.length).toBeLessThanOrEqual(BRIEFING_CARD_LIMIT);
+    expect(cards.map((c) => c.key)).toContain('sources-failed');
+  });
 });
 
 describe('강조 표시', () => {
