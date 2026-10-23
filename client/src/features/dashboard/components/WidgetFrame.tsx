@@ -2,7 +2,7 @@
 // 본문은 카드 안에서 스크롤한다(SPEC 4장 3번). 편집 중에는 본문 링크가 눌리지 않는다.
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { ApiError } from '@/api/client';
+import { ApiError } from '@/api/errors';
 import type { DashboardWidgetKey } from '@/api/dashboard';
 import type { Permission } from '@/codes';
 import { Button } from '@/components/Button';
@@ -29,21 +29,32 @@ export interface WidgetFrameProps extends WidgetProps {
   widgetKey: DashboardWidgetKey;
   /** 제목 옆 짧은 보조 문구 */
   meta?: string | null;
+  /** 머리 오른쪽, 바로가기 앞에 둘 조작 (예: 보는 기준 전환). 편집 중에는 숨긴다 */
+  actions?: ReactNode;
+  /** 본문 없이 children을 머리 한 줄(meta 자리)에 넣는다: 한 칸 높이 카드 */
+  inline?: boolean;
   children: ReactNode;
 }
 
-export function WidgetFrame({ widgetKey, editing, onRemove, meta, children }: WidgetFrameProps) {
+export function WidgetFrame({ widgetKey, editing, onRemove, meta, actions, inline = false, children }: WidgetFrameProps) {
   const def = widgetDef(widgetKey);
   const me = useMe();
   const link = def.link && !editing && !def.soon && canOpenScreen(me, def.link.screen.access) ? def.link : null;
   return (
     <section
       aria-label={def.label}
-      className={cn('flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-md border bg-surface', def.soon ? 'border-ai-line' : 'border-line shadow-1')}
+      data-pet-target={`widget:${widgetKey}`}
+      data-pet-perch=""
+      className={cn('flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-md border bg-surface', def.soon ? 'border-dashed border-ai-line' : 'border-line shadow-1')}
     >
       <header
         title={editing ? '끌어서 옮기기' : undefined}
-        className={cn(DRAG_HANDLE_CLASS, 'flex h-11 min-w-0 flex-none items-center gap-2 border-b border-line pr-2 pl-4', editing && 'cursor-grab select-none active:cursor-grabbing')}
+        className={cn(
+          DRAG_HANDLE_CLASS,
+          'flex min-w-0 items-center gap-2 pr-2 pl-4',
+          inline ? 'min-h-11 flex-1' : 'h-11 flex-none border-b border-line',
+          editing && 'cursor-grab select-none active:cursor-grabbing',
+        )}
       >
         {editing ? <Icon name="grip" size="sm" className="flex-none text-ink-3" /> : null}
         {def.soon ? <AiMark size="sm" /> : null}
@@ -51,10 +62,15 @@ export function WidgetFrame({ widgetKey, editing, onRemove, meta, children }: Wi
           {def.label}
         </h2>
         {def.soon ? <ComingSoon grade="P2" /> : null}
-        <span className="min-w-0 flex-1 truncate text-xs text-ink-3" title={meta ?? undefined}>
-          {meta}
-        </span>
+        {inline ? (
+          <div className="ml-1 min-w-0 flex-1">{children}</div>
+        ) : (
+          <span className="min-w-0 flex-1 truncate text-xs text-ink-3" title={meta ?? undefined}>
+            {meta}
+          </span>
+        )}
         <div className="flex flex-none items-center gap-1">
+          {actions && !editing ? <div className={NO_DRAG_CLASS}>{actions}</div> : null}
           {link ? (
             <Link href={link.screen.href} className="px-1 text-xs whitespace-nowrap text-run hover:underline">
               {link.label}
@@ -63,7 +79,7 @@ export function WidgetFrame({ widgetKey, editing, onRemove, meta, children }: Wi
           {editing ? <IconButton icon="x" size="sm" label={`${def.label} 위젯 제외`} title="위젯 제외" className={NO_DRAG_CLASS} onClick={() => onRemove(widgetKey)} /> : null}
         </div>
       </header>
-      <div className={cn('flex min-h-0 flex-1 flex-col overflow-auto', editing && '[&_a]:pointer-events-none')}>{children}</div>
+      {inline ? null : <div className={cn('flex min-h-0 flex-1 flex-col overflow-auto', editing && '[&_a]:pointer-events-none')}>{children}</div>}
     </section>
   );
 }
@@ -119,7 +135,7 @@ export function WidgetEmpty({ children }: { children: ReactNode }) {
 /** 범례 한 칸 */
 export function LegendItem({ colorClass, label }: { colorClass: string; label: string }) {
   return (
-    <span className="inline-flex items-center gap-1.5 text-cap text-ink-2">
+    <span className="inline-flex items-center gap-1.5 text-cap text-ink-2" data-pet-term={label}>
       <i className={cn('inline-block size-2 rounded-xs', colorClass)} aria-hidden="true" />
       {label}
     </span>
@@ -130,7 +146,9 @@ export function LegendItem({ colorClass, label }: { colorClass: string; label: s
 export function Figure({ label, value, unit, tone }: { label: string; value: ReactNode; unit?: string; tone?: 'danger' | 'muted' }) {
   return (
     <div className="flex min-w-14 flex-col gap-0.5">
-      <span className="truncate text-cap text-ink-3">{label}</span>
+      <span className="truncate text-cap text-ink-3" data-pet-term={label}>
+        {label}
+      </span>
       <b className={cn('text-xl font-semibold tabular-nums', tone === 'danger' && 'text-danger', tone === 'muted' && 'text-ink-3')}>
         {value}
         {unit ? <small className="ml-0.5 text-xs font-medium text-ink-3">{unit}</small> : null}

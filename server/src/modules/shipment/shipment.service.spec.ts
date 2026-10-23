@@ -1,0 +1,289 @@
+import { Test } from '@nestjs/testing';
+import { ALLOCATION_PURPOSE, ALLOCATION_STATUS, BUSINESS_EVENT_TYPE, ITEM_TYPE, LOT_TYPE, PROCESS_TYPE, SALES_ORDER_ITEM_STATUS, SHIPMENT_REQUEST_STATUS, type AuthUser } from '@fantasteel/shared';
+import { AuthUserService } from '../../common/auth/auth-user.service';
+import { CommonModule } from '../../common/common.module';
+import { PrismaModule } from '../../prisma/prisma.module';
+import { PrismaService } from '../../prisma/prisma.service';
+import { ShipmentModule } from './shipment.module';
+import { ShipmentService } from './shipment.service';
+
+// 실제 DB(fs_sales)에 수주·예약을 직접 넣고 서비스를 부른다. 시드에는 거래 데이터가 없다 (seed.md)
+/** 관리자가 생산의 출하요청·출고 확정 조회 권한을 뺀 경우 */
+const withoutPermission = (user: AuthUser): AuthUser => ({ ...user, permissions: { PRODUCTION_PLAN_CONFIRM: 'USE' } });
+
+describe('ShipmentService 출하요청 (REQ-SHP-001)', () => {
+  let prisma: PrismaService;
+  let service: ShipmentService;
+  let sales: AuthUser;
+  let logistics: AuthUser;
+  let production: AuthUser;
+  let customerA: number;
+  let customerB: number;
+  let slabItemId: number;
+  let seq = 0;
+
+  const loadUser = async (authUsers: AuthUserService, employeeNo: string) => {
+    const e = await prisma.employee.findUniqueOrThrow({ where: { employeeNo } });
+    const user = await authUsers.load(e.id);
+    if (!user) throw new Error(`사원 ${employeeNo} 없음`);
+    return user;
+  };
+
+  /** 수주 1건 + 품목 1개 + ACTIVE 예약 */
+  const salesOrderItem = async (customerId: number, reservedQty: number, status: string = SALES_ORDER_ITEM_STATUS.OPEN) => {
+    seq += 1;
+    const salesOrder = await prisma.salesOrder.create({
+      data: {
+        salesOrderNo: `SO-TEST-${String(seq).padStart(3, '0')}`,
+        customerId,
+        ownerEmployeeId: sales.employeeId,
+        salesOrderItems: { create: { itemId: slabItemId, orderedQty: 20, dueDate: new Date('2026-12-31T00:00:00.000Z'), salesOrderItemStatus: status } },
+      },
+      select: { id: true, salesOrderItems: { select: { id: true } } },
+    });
+    const salesOrderItemId = salesOrder.salesOrderItems[0].id;
+    if (reservedQty > 0) await prisma.reservation.create({ data: { salesOrderItemId, itemId: slabItemId, reservedQty } });
+    return { salesOrderId: salesOrder.id, salesOrderItemId };
+  };
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({ imports: [PrismaModule, CommonModule, ShipmentModule] }).compile();
+    prisma = moduleRef.get(PrismaService);
+    service = moduleRef.get(ShipmentService);
+    const authUsers = moduleRef.get(AuthUserService);
+    sales = await loadUser(authUsers, '2103003');
+    logistics = await loadUser(authUsers, '2304015');
+    production = await loadUser(authUsers, '2402011');
+    customerA = (await prisma.customer.findUniqueOrThrow({ where: { customerCode: 'CUS-01' } })).id;
+    customerB = (await prisma.customer.findUniqueOrThrow({ where: { customerCode: 'CUS-02' } })).id;
+    slabItemId = (await prisma.item.findFirstOrThrow({ where: { itemType: ITEM_TYPE.SLAB }, orderBy: { id: 'asc' } })).id;
+  });
+
+  afterAll(async () => {
+    await prisma.$disconnect();
+  });
+
+  it('여러 수주 품목을 묶어 등록하면 배정 대기(REQUESTED)로 만들고 수주마다 작업 로그를 남긴다', async () => {
+    const a = await salesOrderItem(customerA, 10);
+    const b = await salesOrderItem(customerA, 5);
+
+    const created = await service.create(sales, {
+      customerId: customerA,
+      shipDate: '2026-10-20',
+      items: [
+        { salesOrderItemId: a.salesOrderItemId, requestQty: 4 },
+        { salesOrderItemId: b.salesOrderItemId, requestQty: 5 },
+      ],
+    });
+
+    expect(created.shipmentRequestNo).toMatch(/^DR-\d{4}-\d{4}$/);
+    expect(created.shipmentRequestStatus).toBe(SHIPMENT_REQUEST_STATUS.REQUESTED);
+    expect(created.shipDate).toBe('2026-10-20');
+    expect(created.totalRequestQty).toBe(9);
+    expect(created.items.map((i) => [i.salesOrderItemId, i.requestQty, i.unallocatedQty])).toEqual([
+      [a.salesOrderItemId, 4, 4],
+      [b.salesOrderItemId, 5, 5],
+    ]);
+
+    const events = await prisma.businessEvent.findMany({
+      where: { businessEventType: BUSINESS_EVENT_TYPE.SHIPMENT_REQUEST_CREATED, targetId: created.id },
+      orderBy: { salesOrderId: 'asc' },
+    });
+    expect(events.map((e) => e.salesOrderId)).toEqual([a.salesOrderId, b.salesOrderId]);
+    expect(events.every((e) => e.actorEmployeeId === sales.employeeId)).toBe(true);
+  });
+
+  it('출하 가능 매수(ACTIVE 예약 − 진행 중 출하요청)를 넘으면 SHP-002, 취소된 요청 매수는 다시 쓸 수 있다', async () => {
+    const a = await salesOrderItem(customerA, 10);
+    const first = await service.create(sales, { customerId: customerA, items: [{ salesOrderItemId: a.salesOrderItemId, requestQty: 8 }] });
+
+    await expect(
+      service.create(sales, { customerId: customerA, items: [{ salesOrderItemId: a.salesOrderItemId, requestQty: 3 }] }),
+    ).rejects.toMatchObject({ code: 'SHP-002' });
+    await expect(
+      service.create(sales, { customerId: customerA, items: [{ salesOrderItemId: a.salesOrderItemId, requestQty: 2 }] }),
+    ).resolves.toMatchObject({ totalRequestQty: 2 });
+
+    await prisma.shipmentRequest.update({ where: { id: first.id }, data: { shipmentRequestStatus: SHIPMENT_REQUEST_STATUS.CANCELLED } });
+    await expect(
+      service.create(sales, { customerId: customerA, items: [{ salesOrderItemId: a.salesOrderItemId, requestQty: 8 }] }),
+    ).resolves.toMatchObject({ totalRequestQty: 8 });
+  });
+
+  it('예약이 없는 품목은 출하 가능 매수가 0이라 SHP-002', async () => {
+    const a = await salesOrderItem(customerA, 0);
+    await expect(
+      service.create(sales, { customerId: customerA, items: [{ salesOrderItemId: a.salesOrderItemId, requestQty: 1 }] }),
+    ).rejects.toMatchObject({ code: 'SHP-002' });
+  });
+
+  it('다른 고객사 수주 품목을 묶으면 거부한다', async () => {
+    const a = await salesOrderItem(customerA, 5);
+    const b = await salesOrderItem(customerB, 5);
+    await expect(
+      service.create(sales, {
+        customerId: customerA,
+        items: [
+          { salesOrderItemId: a.salesOrderItemId, requestQty: 1 },
+          { salesOrderItemId: b.salesOrderItemId, requestQty: 1 },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: 'COM-004' });
+  });
+
+  it('취소된 수주 품목·없는 품목·같은 품목 두 줄은 거부한다', async () => {
+    const cancelled = await salesOrderItem(customerA, 5, SALES_ORDER_ITEM_STATUS.CANCELLED);
+    const ok = await salesOrderItem(customerA, 5);
+    await expect(
+      service.create(sales, { customerId: customerA, items: [{ salesOrderItemId: cancelled.salesOrderItemId, requestQty: 1 }] }),
+    ).rejects.toMatchObject({ code: 'SHP-002' });
+    await expect(
+      service.create(sales, { customerId: customerA, items: [{ salesOrderItemId: 999999, requestQty: 1 }] }),
+    ).rejects.toMatchObject({ code: 'COM-003' });
+    await expect(
+      service.create(sales, {
+        customerId: customerA,
+        items: [
+          { salesOrderItemId: ok.salesOrderItemId, requestQty: 1 },
+          { salesOrderItemId: ok.salesOrderItemId, requestQty: 1 },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: 'COM-004' });
+  });
+
+  it('같은 품목을 동시에 요청해도 출하 가능 매수를 넘겨 받아 주지 않는다', async () => {
+    const a = await salesOrderItem(customerA, 10);
+    const results = await Promise.allSettled([
+      service.create(sales, { customerId: customerA, items: [{ salesOrderItemId: a.salesOrderItemId, requestQty: 6 }] }),
+      service.create(sales, { customerId: customerA, items: [{ salesOrderItemId: a.salesOrderItemId, requestQty: 6 }] }),
+    ]);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    const rejected = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+    expect(rejected?.reason).toMatchObject({ code: 'SHP-002' });
+  });
+
+  it('목록·상세는 출하요청·출고 확정 조회 권한으로 보고(업무 조회는 모든 역할), 권한이 없으면 COM-002', async () => {
+    const a = await salesOrderItem(customerB, 3);
+    const created = await service.create(sales, { customerId: customerB, items: [{ salesOrderItemId: a.salesOrderItemId, requestQty: 3 }] });
+
+    const page = await service.list(logistics, { customerId: customerB, page: 1, size: 20 });
+    expect(page.items.map((r) => r.id)).toContain(created.id);
+    expect(page.items.every((r) => r.customerId === customerB)).toBe(true);
+    // 번호 일부(대소문자 무시)로 찾는다 (상단 통합 검색)
+    const byNo = await service.list(logistics, { shipmentRequestNo: created.shipmentRequestNo.slice(3).toLowerCase(), page: 1, size: 20 });
+    expect(byNo.items.map((r) => r.id)).toEqual([created.id]);
+    await expect(service.findOne(logistics, created.id)).resolves.toMatchObject({ customerName: '나래조선' });
+    // withItems면 줄마다 상세(품목·배정)를 함께 준다: 상세와 같은 값이라 화면이 건마다 상세를 따로 부르지 않는다 (이슈 #476)
+    const withItems = await service.list(logistics, { customerId: customerB, withItems: true, page: 1, size: 20 });
+    expect(withItems.total).toBe(page.total);
+    const detail = await service.findOne(logistics, created.id);
+    expect(withItems.items.find((r) => r.id === created.id)).toEqual(detail);
+    expect('items' in (page.items[0] ?? {})).toBe(false);
+    await expect(service.list(withoutPermission(production), { withItems: true, page: 1, size: 20 })).rejects.toMatchObject({ code: 'COM-002' });
+
+    await expect(service.findOne(production, created.id)).resolves.toMatchObject({ customerName: '나래조선' });
+    // 관리자가 생산의 출하요청·출고 확정 조회 권한을 뺀 경우
+    const withoutShipmentView = withoutPermission(production);
+    await expect(service.list(withoutShipmentView, { page: 1, size: 20 })).rejects.toMatchObject({ code: 'COM-002' });
+    await expect(service.findOne(withoutShipmentView, created.id)).rejects.toMatchObject({ code: 'COM-002' });
+    await expect(service.findOne(logistics, 999999)).rejects.toMatchObject({ code: 'COM-003' });
+  });
+
+  it('refreshAllocationStatus: 모든 품목 미배정 0이면 ALLOCATED, 배정이 풀리면 REQUESTED', async () => {
+    const a = await salesOrderItem(customerA, 2);
+    const created = await service.create(sales, { customerId: customerA, items: [{ salesOrderItemId: a.salesOrderItemId, requestQty: 2 }] });
+    const shipmentRequestItemId = created.items[0].id;
+    // 슬래브 LOT은 연주 실적과 생산완료일이 있어야 한다 (lot_type_columns_check)
+    const castingResult = await prisma.productionResult.create({
+      data: { processType: PROCESS_TYPE.CONTINUOUS_CASTING, startedAt: new Date(), completedAt: new Date() },
+    });
+    const allocationIds: number[] = [];
+    for (const n of [1, 2]) {
+      const lot = await prisma.lot.create({
+        data: {
+          lotNo: `SL-TEST-${created.id}-${n}`,
+          lotType: LOT_TYPE.SLAB,
+          itemId: slabItemId,
+          productionResultId: castingResult.id,
+          producedDate: new Date('2026-10-01T00:00:00.000Z'),
+        },
+      });
+      const allocation = await prisma.allocation.create({
+        data: { lotId: lot.id, allocationPurpose: ALLOCATION_PURPOSE.SHIPMENT, shipmentRequestItemId, allocationStatus: ALLOCATION_STATUS.CONFIRMED },
+      });
+      allocationIds.push(allocation.id);
+    }
+
+    await expect(prisma.$transaction((tx) => service.refreshAllocationStatus(tx, created.id))).resolves.toBe(SHIPMENT_REQUEST_STATUS.ALLOCATED);
+    await expect(service.findOne(logistics, created.id)).resolves.toMatchObject({
+      shipmentRequestStatus: SHIPMENT_REQUEST_STATUS.ALLOCATED,
+      items: [expect.objectContaining({ unallocatedQty: 0 })],
+    });
+
+    await prisma.allocation.update({ where: { id: allocationIds[0] }, data: { allocationStatus: ALLOCATION_STATUS.RELEASED } });
+    await expect(prisma.$transaction((tx) => service.refreshAllocationStatus(tx, created.id))).resolves.toBe(SHIPMENT_REQUEST_STATUS.REQUESTED);
+
+    await prisma.shipmentRequest.update({ where: { id: created.id }, data: { shipmentRequestStatus: SHIPMENT_REQUEST_STATUS.CANCELLED } });
+    await expect(prisma.$transaction((tx) => service.refreshAllocationStatus(tx, created.id))).resolves.toBe(SHIPMENT_REQUEST_STATUS.CANCELLED);
+  });
+
+  describe('밀시트 조회 (REQ-SHP-004)', () => {
+    // 밀시트는 출고 확정 때 만들어지는데 아직 구현 전이라 행을 직접 넣는다
+    const millSheet = async (shipmentRequestId: number, shipmentRequestNo: string, salesOrderId: number, n: number, snapshot: object) =>
+      prisma.millSheet.create({
+        data: { millSheetNo: `MS-${shipmentRequestNo.slice(3)}-${n}`, shipmentRequestId, salesOrderId, snapshot, issuedAt: new Date() },
+      });
+
+    it('출하요청·수주로 거르고, 상세는 저장된 스냅샷을 그대로 돌려준다 (이후 원본이 바뀌어도 유지)', async () => {
+      const a = await salesOrderItem(customerB, 5);
+      const b = await salesOrderItem(customerB, 5);
+      const request = await service.create(sales, {
+        customerId: customerB,
+        items: [
+          { salesOrderItemId: a.salesOrderItemId, requestQty: 2 },
+          { salesOrderItemId: b.salesOrderItemId, requestQty: 2 },
+        ],
+      });
+      // 목록이 스냅샷에서 뽑는 값(고객사·매수·히트·규격)만 담은 스냅샷
+      const snapshotOf = (customerName: string, items: { itemCode: string; itemType: string }[], heatNos: string[]) => ({
+        customer: { customerId: customerB, customerCode: 'C-TEST', customerName },
+        items,
+        heats: heatNos.map((heatNo) => ({ heatNo })),
+        totalQty: items.length,
+        totalWeightTon: `${(items.length * 23.55).toFixed(3)}`,
+      });
+      const snapshotA = snapshotOf('나래조선', [{ itemCode: 'SL-TEST-A', itemType: 'SLAB' }], ['HT-TEST-A']);
+      const sheetA = await millSheet(request.id, request.shipmentRequestNo, a.salesOrderId, 1, snapshotA);
+      const sheetB = await millSheet(request.id, request.shipmentRequestNo, b.salesOrderId, 2, snapshotOf('나래조선', [{ itemCode: 'CL-TEST-B', itemType: 'COIL' }, { itemCode: 'CL-TEST-B', itemType: 'COIL' }], ['HT-TEST-A', 'HT-TEST-B']));
+
+      // 모양이 다른 옛 스냅샷 한 건이 있어도 목록 전체가 실패하지 않고 그 줄만 빈 칸이다 (이슈 #498)
+      const c = await salesOrderItem(customerB, 5);
+      const legacy = await millSheet(request.id, request.shipmentRequestNo, c.salesOrderId, 3, { customerName: '나래조선', lots: [] });
+
+      const byRequest = await service.listMillSheets({ shipmentRequestId: request.id, page: 1, size: 20 });
+      expect(byRequest.total).toBe(3);
+      expect(byRequest.items.map((s) => s.id)).toEqual([legacy.id, sheetB.id, sheetA.id]);
+      const [legacyRow, rowB, rowA] = byRequest.items;
+      expect(legacyRow).toMatchObject({ customerName: '', totalQty: 0, totalWeightTon: '0.000', heatNos: [], itemTypes: [], itemCodes: [] });
+      expect(rowB).toMatchObject({ shipmentRequestNo: request.shipmentRequestNo, pdfPath: null });
+      // 화면이 밀시트마다 상세를 따로 부르지 않도록 목록이 스냅샷에서 뽑은 값을 함께 준다 (이슈 #498)
+      expect(rowB).toMatchObject({ customerName: '나래조선', totalQty: 2, totalWeightTon: '47.100', heatNos: ['HT-TEST-A', 'HT-TEST-B'], itemTypes: ['COIL'], itemCodes: ['CL-TEST-B'] });
+      expect(rowA).toMatchObject({ totalQty: 1, totalWeightTon: '23.550', heatNos: ['HT-TEST-A'], itemTypes: ['SLAB'], itemCodes: ['SL-TEST-A'] });
+      expect('snapshot' in rowB).toBe(false);
+
+      const bySalesOrder = await service.listMillSheets({ salesOrderId: a.salesOrderId, page: 1, size: 20 });
+      expect(bySalesOrder.items.map((s) => s.millSheetNo)).toEqual([sheetA.millSheetNo]);
+
+      await prisma.customer.update({ where: { id: customerB }, data: { customerName: '나래조선(변경)' } });
+      try {
+        await expect(service.findMillSheet(sheetA.id)).resolves.toMatchObject({ millSheetNo: sheetA.millSheetNo, snapshot: snapshotA });
+      } finally {
+        await prisma.customer.update({ where: { id: customerB }, data: { customerName: '나래조선' } });
+      }
+    });
+
+    it('없는 밀시트는 COM-003', async () => {
+      await expect(service.findMillSheet(999999)).rejects.toMatchObject({ code: 'COM-003' });
+    });
+  });
+});

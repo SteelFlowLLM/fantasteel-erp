@@ -11,6 +11,7 @@ import {
   getStandardValueSource,
   formatThicknessBand,
   doThicknessBandsOverlap,
+  findSharedColumns,
   type ComparableItem,
 } from '@/features/inspectionStandards/lib/standardItems';
 
@@ -29,7 +30,7 @@ describe('적용 두께 구간 (초과 ~ 이하, REQ-QC-002)', () => {
     expect(formatThicknessBand(buildBand(null, null))).toBe('전체');
     expect(formatThicknessBand(buildBand('6.00', null))).toBe('6 초과');
     expect(formatThicknessBand(buildBand(null, '16.00'))).toBe('16 이하');
-    expect(formatThicknessBand(buildBand('16.00', '40.00'))).toBe('16 초과 40 이하');
+    expect(formatThicknessBand(buildBand('16.00', '40.00'))).toBe('16 초과 ~ 40 이하');
   });
 
   it('경계값: 하한과 같으면 밖, 상한과 같으면 안', () => {
@@ -95,10 +96,34 @@ describe('지금 버전 찾기', () => {
     ];
     expect(findCurrentStandard(standards, 'STEELMAKING', 7)?.id).toBe(2);
     expect(findCurrentStandard(standards, 'STEELMAKING', 8)).toBeUndefined();
-    // 자동 판정(core)이 쓰는 함수도 같은 결과
+    // lib/inspectionJudgment의 pickCurrentStandard도 같은 결과
     expect(pickCurrentStandard(standards, 'STEELMAKING', 8)).toBeUndefined();
     expect(canHaveCommonStandard('STEELMAKING')).toBe(false);
     expect(canHaveCommonStandard('CONTINUOUS_CASTING')).toBe(true);
     expect(canHaveCommonStandard('HOT_ROLLING')).toBe(true);
+  });
+});
+
+describe('항목표에서 모든 줄이 같은 칸', () => {
+  const item = (over: Partial<{ minValue: string | null; maxValue: string | null; isRequired: boolean; minThicknessMm: string | null; maxThicknessMm: string | null }> = {}) => ({
+    minValue: null,
+    maxValue: '0.2000',
+    isRequired: true,
+    minThicknessMm: null,
+    maxThicknessMm: null,
+    ...over,
+  });
+
+  it('제강처럼 최소 없음·전체 두께·필수가 모두 같으면 그 칸과 근거 칸을 접는다', () => {
+    expect(findSharedColumns([item(), item({ maxValue: '0.5500' })], false)).toEqual({ min: true, max: false, band: true, required: true, source: true });
+  });
+
+  it('한 줄이라도 다르면 그 칸은 그대로, 바뀐 항목이 있으면 근거 칸도 그대로', () => {
+    const shared = findSharedColumns([item(), item({ minValue: '355', minThicknessMm: '16', isRequired: false })], true);
+    expect(shared).toEqual({ min: false, max: false, band: false, required: false, source: false });
+  });
+
+  it('줄이 하나뿐이면 접지 않는다', () => {
+    expect(findSharedColumns([item()], false)).toEqual({ min: false, max: false, band: false, required: false, source: false });
   });
 });

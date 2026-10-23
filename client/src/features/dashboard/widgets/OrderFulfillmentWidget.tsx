@@ -36,8 +36,8 @@ function FulfillmentBody({ data }: { data: OrderFulfillmentData }) {
         <Table compact className="min-w-[700px] [&_td]:px-1.5 [&_th]:sticky [&_th]:top-0 [&_th]:z-[1] [&_th]:px-1.5">
           <thead>
             <tr>
-              <Th>수주 번호</Th>
-              <Th>고객사</Th>
+              <Th align="center">수주 번호</Th>
+              <Th align="center">고객사</Th>
               <Th>품목</Th>
               <Th align="right">수주</Th>
               <Th align="right" title="진행중·완료 생산계획의 잔여 목표 (분모: 수주 매수)">
@@ -59,35 +59,35 @@ function FulfillmentBody({ data }: { data: OrderFulfillmentData }) {
           <tbody>
             {data.salesOrders.map((so) =>
               so.items.map((item, index) => (
-                <tr key={item.salesOrderItemId} data-risk={item.isDueRisk || undefined}>
+                <tr key={item.salesOrderItemId} data-risk={item.isDueRisk || undefined} data-pet-item="salesOrder" data-pet-item-title={so.salesOrderNo}>
                   {index === 0 ? (
                     <>
-                      <Td rowSpan={so.items.length} className="align-top font-mono text-xs font-medium">
+                      <Td rowSpan={so.items.length} align="center" className="align-middle font-mono text-xs font-medium" data-pet-field="수주 번호">
                         <Link href={`/sales-orders/${so.salesOrderId}`} className="text-run hover:underline">
                           {so.salesOrderNo}
                         </Link>
                       </Td>
-                      <Td rowSpan={so.items.length} className="max-w-24 truncate align-top" title={so.customerName}>
+                      <Td rowSpan={so.items.length} align="center" className="max-w-24 truncate align-middle" title={so.customerName} data-pet-field="고객사">
                         {so.customerName}
                       </Td>
                     </>
                   ) : null}
-                  <Td className={cn('max-w-44 truncate font-mono text-xs', index > 0 && 'border-l border-line')} title={item.itemCode}>
+                  <Td className={cn('max-w-44 truncate font-mono text-xs', index > 0 && 'border-l border-line')} title={item.itemCode} data-pet-field="품목">
                     {item.itemCode}
                   </Td>
-                  <Td align="right" title={fmtTon(item.orderedTon)}>
+                  <Td align="right" title={fmtTon(item.orderedTon)} data-pet-field="수주">
                     {item.orderedQty}
                   </Td>
-                  <Td align="right">{item.inProductionQty}</Td>
-                  <Td align="right">{item.passedQty}</Td>
-                  <Td align="right" title={`미출하 ${item.unshippedQty}`}>
+                  <Td align="right" data-pet-field="생산중">{item.inProductionQty}</Td>
+                  <Td align="right" data-pet-field="검사합격">{item.passedQty}</Td>
+                  <Td align="right" title={`미출하 ${item.unshippedQty}`} data-pet-field="예약">
                     {item.reservedQty}
                   </Td>
-                  <Td align="right">{item.shippedQty}</Td>
-                  <Td>
+                  <Td align="right" data-pet-field="출하">{item.shippedQty}</Td>
+                  <Td data-pet-field="진행률">
                     <StageBar item={item} />
                   </Td>
-                  <Td className={cn('tabular-nums', item.isDueRisk && 'font-semibold text-danger')} title={item.isDueRisk ? `납기 ${data.deliveryRiskDays}일 이내 · 출하 남음` : undefined}>
+                  <Td className={cn('tabular-nums', item.isDueRisk && 'font-semibold text-danger')} title={item.isDueRisk ? `납기 ${data.deliveryRiskDays}일 이내 · 출하 남음` : undefined} data-pet-field="납기">
                     <span className="inline-flex items-center gap-1">
                       {item.isDueRisk ? <Icon name="alert" size="sm" /> : null}
                       {fmtMD(item.dueDate)} ({dueLabel(item.daysToDue)})

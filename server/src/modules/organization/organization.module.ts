@@ -7,5 +7,7 @@ import { OrganizationService } from './organization.service';
 @Module({
   controllers: [OrganizationController],
   providers: [OrganizationService, OrganizationRepository],
+  // notification이 부서 알림을 부서원별로 펼칠 때 findActiveMemberIds를 부른다
+  exports: [OrganizationService],
 })
 export class OrganizationModule {}

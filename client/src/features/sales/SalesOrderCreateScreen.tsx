@@ -5,7 +5,7 @@
 // 비고 없음(ERD에 칸 없음). 톤은 매수 × 1매 이론중량 계산값이고 저장하지 않는다.
 import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
-import { ApiError, InputError } from '@/api/client';
+import { ApiError, InputError } from '@/api/errors';
 import type { ProductSpecView } from '@/api/lookups';
 import { salesOrderApi, type SalesOrderPreviewLine } from '@/api/salesOrders';
 import { ITEM_TYPE_LABEL, PERMISSION, type ProductItemType } from '@/codes';
@@ -63,7 +63,11 @@ function LineRow({ index, line, specs, submitted, serverDueError, preview, canRe
   const id = `so-line-${line.key}`;
 
   return (
-    <li className="flex flex-col gap-2 rounded-md border border-line bg-surface px-3 py-3">
+    <li
+      data-pet-item="salesOrderItem"
+      data-pet-item-title={`품목 ${index + 1}${spec ? ` ${spec.itemName}` : ''}`}
+      className="flex flex-col gap-2 rounded-md border border-line bg-surface px-3 py-3"
+    >
       <div className="flex items-center gap-1.5">
         <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-xs bg-surface-3 px-1 text-cap font-semibold text-ink-2">{index + 1}</span>
         <Select
@@ -90,7 +94,7 @@ function LineRow({ index, line, specs, submitted, serverDueError, preview, canRe
         </Select>
         <IconButton icon="trash" label={`${index + 1}번째 품목 빼기`} size="sm" className="ml-auto" disabled={!canRemove} onClick={onRemove} />
       </div>
-      <Field label="규격" required error={errors.itemId} htmlFor={`${id}-spec`}>
+      <Field label={<span data-pet-term="규격">규격</span>} required error={errors.itemId} htmlFor={`${id}-spec`}>
         <Select
           id={`${id}-spec`}
           aria-label={`${index + 1}번째 규격`}
@@ -112,7 +116,7 @@ function LineRow({ index, line, specs, submitted, serverDueError, preview, canRe
       </Field>
       <div className="grid grid-cols-[minmax(0,1fr)_150px] gap-2">
         <Field
-          label="매수"
+          label={<span data-pet-term="매수">매수</span>}
           required
           htmlFor={`${id}-qty`}
           error={errors.qty}
@@ -132,7 +136,7 @@ function LineRow({ index, line, specs, submitted, serverDueError, preview, canRe
             onChange={(event) => onChange({ qtyText: event.target.value })}
           />
         </Field>
-        <Field label="납기" required htmlFor={`${id}-due`} error={errors.dueDate ?? serverDueError}>
+        <Field label={<span data-pet-term="납기">납기</span>} required htmlFor={`${id}-due`} error={errors.dueDate ?? serverDueError}>
           <DateInput id={`${id}-due`} ariaLabel={`${index + 1}번째 납기`} value={line.dueDate} invalid={Boolean(errors.dueDate ?? serverDueError)} onChange={(dueDate) => onChange({ dueDate })} />
         </Field>
       </div>
@@ -246,10 +250,12 @@ export function SalesOrderCreateScreen() {
           </ButtonLink>
         </header>
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto px-4 py-4">
-          <div className="flex flex-col gap-3">
-            <b className="text-sm font-semibold">1 기본 정보</b>
+          <div data-pet-target="card:salesOrderNew.basic" className="flex flex-col gap-3">
+            <b data-pet-term="기본 정보" className="text-sm font-semibold">
+              1 기본 정보
+            </b>
             <Field
-              label="고객사"
+              label={<span data-pet-term="고객사">고객사</span>}
               required
               htmlFor="so-customer"
               error={submitted && customerId === null ? '고객사를 선택해 주세요' : serverFieldErrors.customerId}
@@ -269,14 +275,16 @@ export function SalesOrderCreateScreen() {
                 ))}
               </Select>
             </Field>
-            <Field label="담당" hint="등록한 사원이 담당이 돼요">
+            <Field label={<span data-pet-term="담당">담당</span>} hint="등록한 사원이 담당이 돼요">
               <Input readOnly value={`${me.employeeName} · ${me.departmentName}`} />
             </Field>
           </div>
 
-          <div className="flex flex-col gap-2">
+          <div data-pet-target="card:salesOrderNew.items" className="flex flex-col gap-2">
             <div className="flex items-center gap-2">
-              <b className="text-sm font-semibold">2 품목</b>
+              <b data-pet-term="품목" className="text-sm font-semibold">
+                2 품목
+              </b>
               <Tag>{lines.length}행</Tag>
               {new Set(itemTypes).size > 1 ? <Tag tone="run">코일·슬래브 혼합</Tag> : null}
             </div>
@@ -303,7 +311,7 @@ export function SalesOrderCreateScreen() {
             <span className="text-cap text-ink-3">매수는 정수로 입력해요 (슬래브 매 · 코일 개) · 톤은 매수 × 1매 이론중량 계산값이고 저장하지 않아요</span>
           </div>
         </div>
-        <footer className="flex flex-none flex-col gap-2 border-t border-line bg-surface px-4 py-3">
+        <footer data-pet-target="card:salesOrderNew.save" className="flex flex-none flex-col gap-2 border-t border-line bg-surface px-4 py-3">
           {serverError ? (
             <span role="alert" className="text-cap text-danger">
               {serverError}
@@ -342,7 +350,7 @@ export function SalesOrderCreateScreen() {
         <Banner tone="run">
           아래는 지금 예약 가용으로 본 <b>미리보기</b>예요. 저장하는 순간의 재고로 다시 계산해요.
         </Banner>
-        <div className="grid grid-cols-3 gap-3">
+        <div data-pet-target="card:salesOrderNew.summary" className="grid grid-cols-3 gap-3">
           <Kpi
             label="수주 합계"
             value={totalQty.toLocaleString('en-US')}
@@ -358,7 +366,8 @@ export function SalesOrderCreateScreen() {
           />
         </div>
 
-        <Card>
+        {/* flex-none: 글자를 키워 칸이 모자라도 카드가 내용보다 작게 눌려 글이 카드 밖으로 넘치지 않게 한다 (화면 전체가 스크롤) */}
+        <Card className="flex-none" petKey="card:salesOrderNew.preview">
           <CardHead title="품목별 예약 미리보기" meta="매수 기준 · 저장 전" />
           {preview.error ? (
             <div className="px-4 py-3">
@@ -384,13 +393,13 @@ export function SalesOrderCreateScreen() {
                   const lineUnit = qtyUnitOf([line.itemType]);
                   const f = row?.formation ?? null;
                   return (
-                    <tr key={line.key}>
+                    <tr key={line.key} data-pet-item="salesOrderItem" data-pet-item-title={`품목 ${index + 1}${spec ? ` ${spec.itemName}` : ''}`}>
                       <Td>
                         <span className="flex flex-col">
                           <span className="font-medium">
                             {index + 1}. {spec ? spec.itemName : `${ITEM_TYPE_LABEL[line.itemType]} · 규격 미선택`}
                           </span>
-                          {spec ? <span className="font-mono text-[11px] text-ink-3">{spec.itemCode}</span> : null}
+                          {spec ? <span className="font-mono text-cap text-ink-3">{spec.itemCode}</span> : null}
                         </span>
                       </Td>
                       <Td align="right" className="tabular-nums">
@@ -430,7 +439,7 @@ export function SalesOrderCreateScreen() {
           </div>
         </Card>
 
-        <Card>
+        <Card className="flex-none" petKey="card:salesOrderNew.afterSave">
           <CardHead title="저장하면 이렇게 돼요" />
           <CardBody>
             <ol className="flex list-decimal flex-col gap-1.5 pl-5 text-sm text-ink-2">

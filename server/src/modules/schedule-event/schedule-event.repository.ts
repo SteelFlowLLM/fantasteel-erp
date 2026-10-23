@@ -1,0 +1,53 @@
+import { Injectable } from '@nestjs/common';
+import type { Prisma } from '../../generated/prisma/client';
+import type { Tx } from '../../prisma/prisma.service';
+
+const include = {
+  creator: { select: { id: true, employeeName: true } },
+  meetingMinutes: { select: { id: true, meetingMinutesTitle: true } },
+  attendees: { select: { employeeId: true, employee: { select: { employeeName: true } } }, orderBy: { id: 'asc' } },
+} satisfies Prisma.ScheduleEventInclude;
+
+export type ScheduleEventRow = Prisma.ScheduleEventGetPayload<{ include: typeof include }>;
+
+export interface ScheduleEventFields {
+  scheduleEventTitle: string;
+  scheduleEventDescription: string | null;
+  startAt: Date;
+  endAt: Date;
+  /** 보내지 않으면 등록은 DB 기본값(넣음), 수정은 그대로 둔다 */
+  notionSync?: boolean;
+}
+
+/** DB 접근은 여기서만 한다. 함수의 첫 인자는 tx (컨벤션 8장) */
+@Injectable()
+export class ScheduleEventRepository {
+  /**
+   * [from, to)와 겹치는 일정 중 내가 참석자이거나 등록자인 것. 범위 전에 시작해 걸치는 일정(일 23시~월 02시)도 다음 주에 보이게
+   * 시작이 범위 끝보다 앞이고 끝이 범위 시작보다 뒤인 것을 고른다 (#487)
+   */
+  findMine(tx: Tx, employeeId: number, from: Date, to: Date): Promise<ScheduleEventRow[]> {
+    return tx.scheduleEvent.findMany({
+      where: { startAt: { lt: to }, endAt: { gt: from }, OR: [{ creatorId: employeeId }, { attendees: { some: { employeeId } } }] },
+      include,
+      orderBy: [{ startAt: 'asc' }, { id: 'asc' }],
+    });
+  }
+
+  findById(tx: Tx, id: number): Promise<ScheduleEventRow | null> {
+    return tx.scheduleEvent.findUnique({ where: { id }, include });
+  }
+
+  /** 내 일정: 등록자 본인을 참석자로 둔다 (참석자 행이 있어야 캘린더에 보인다는 회의록 일정과 같은 규칙) */
+  createMine(tx: Tx, creatorId: number, fields: ScheduleEventFields): Promise<ScheduleEventRow> {
+    return tx.scheduleEvent.create({ data: { ...fields, creatorId, attendees: { create: [{ employeeId: creatorId }] } }, include });
+  }
+
+  updateNotionSync(tx: Tx, id: number, notionSync: boolean): Promise<ScheduleEventRow> {
+    return tx.scheduleEvent.update({ where: { id }, data: { notionSync }, include });
+  }
+
+  update(tx: Tx, id: number, fields: ScheduleEventFields): Promise<ScheduleEventRow> {
+    return tx.scheduleEvent.update({ where: { id }, data: fields, include });
+  }
+}

@@ -33,12 +33,13 @@ export const PRODUCTION_PLAN_STATUS_LABEL: Record<ProductionPlanStatus, string> 
   CANCELLED: '취소',
 };
 
-/** 임시 저장은 없다. 반려되면 요청자가 고쳐 다시 승인 대기로 보낸다. */
+/** 임시 저장은 없다. 반려되면 요청자가 고쳐 다시 승인 대기로 보낸다. 발주가 취소되면 발주 취소로 끝나고 같은 계획·원료로 새로 요청한다. */
 export const PURCHASE_REQUISITION_STATUS = {
   WAITING_APPROVAL: 'WAITING_APPROVAL',
   APPROVED: 'APPROVED',
   REJECTED: 'REJECTED',
   ORDERED: 'ORDERED',
+  ORDER_CANCELLED: 'ORDER_CANCELLED',
 } as const;
 export type PurchaseRequisitionStatus = (typeof PURCHASE_REQUISITION_STATUS)[keyof typeof PURCHASE_REQUISITION_STATUS];
 export const PURCHASE_REQUISITION_STATUS_LABEL: Record<PurchaseRequisitionStatus, string> = {
@@ -46,18 +47,24 @@ export const PURCHASE_REQUISITION_STATUS_LABEL: Record<PurchaseRequisitionStatus
   APPROVED: '승인',
   REJECTED: '반려',
   ORDERED: '발주 완료',
+  ORDER_CANCELLED: '발주 취소',
 };
 
+/** 입고 누계가 0이면 발주 취소, 일부만 들어왔으면 잔량 마감으로 닫는다. 둘 다 더는 입고하지 않는다. */
 export const PURCHASE_ORDER_STATUS = {
   CONFIRMED: 'CONFIRMED',
   PARTIALLY_RECEIVED: 'PARTIALLY_RECEIVED',
   RECEIVED: 'RECEIVED',
+  CANCELLED: 'CANCELLED',
+  CLOSED: 'CLOSED',
 } as const;
 export type PurchaseOrderStatus = (typeof PURCHASE_ORDER_STATUS)[keyof typeof PURCHASE_ORDER_STATUS];
 export const PURCHASE_ORDER_STATUS_LABEL: Record<PurchaseOrderStatus, string> = {
   CONFIRMED: '발주 확정',
   PARTIALLY_RECEIVED: '부분 입고',
   RECEIVED: '입고 완료',
+  CANCELLED: '발주 취소',
+  CLOSED: '잔량 마감',
 };
 
 /** PENDING = 판정 대기 (필수 항목·기준 누락 포함) */

@@ -21,7 +21,7 @@
 
 | 키 | 이름 | 구분 | 기본 / 최소 | 볼 권한(조회 이상, 빈칸 = 모든 사원) | 내용 (출처) |
 |---|---|---|---|---|---|
-| PROCESS_FLOW | 공정 흐름 현황 | 기본 | 12×3 / 4×2 | 단계마다 따로 | 진행 중 수주(납기 위험 n) → 생산계획(계획·진행중) → 판정 대기 LOT(히트·슬래브·코일) → 제품 가용재고(슬래브 매·코일 개) → 출하요청(배정 대기·배정 확정) → 오늘 출고 확정(LOT 수). 볼 수 없는 단계는 `권한 없음` |
+| PROCESS_FLOW | 공정 흐름 현황 | 기본 | 12×3 / 4×2 | 모든 사원 | 진행 중 수주(납기 위험 n) → 생산계획(계획·진행중) → 판정 대기 LOT(히트·슬래브·코일) → 제품 가용재고(슬래브 매·코일 개) → 출하요청(배정 대기·배정 확정) → 오늘 출고 확정(LOT 수). 모든 사원이 6단계 건수를 본다. 그 화면을 열 권한이 없는 단계는 누를 수 없고 안내만 띄운다(2026-10-07 사용자 결정. 업무 프로세스 BP-DSH-01 "권한 내 집계"와 달라 문서 반영 요청 필요) |
 | ORDER_FULFILLMENT | 수주 충족 현황 | 기본 | 6×5 / 4×3 | 수주 등록·수주 취소 | 진행 중 수주를 납기 빠른 순: 수주 번호·고객사·품목·수주·**생산중·검사합격·예약**·출하·진행률·납기(D-n, 납기 위험 빨간 행). `salesOrderDetail().items`(core `fulfillmentOf`) 그대로. 진행률 = 출하 ÷ 수주 매수, 검사합격 = 예약 + 출하, 예약 분모 = 미출하 매수를 하단·머리 툴팁에 밝힘(4.5). 막대는 출하·예약·생산중을 나란히(더해서 충족 매수로 보지 않음) |
 | AGENT_RISK | Agent 위험 감지 | 기본·P2 | 6×5 / 3×3 | — | 준비 중 예시(흐림·조작 불가): 위험 유형 5개(공통 코드 P2 이후 추가 코드), 원료 부족 예시(PP-2610-0001 실리코망가니즈 2.500/1.000/1.500t), "대응 후보는 담당 부서원이 확정(확정한 사람이 요청자), 구매요청이면 요청자 소속 부서장이 최종 승인", `대응 후보 확정` 준비 중 버튼 |
 | RECENT_EVENTS | 최근 작업 로그 | 기본 | 6×5 / 3×2 | 모든 사원(작업 로그 화면과 같음) | 최신 20건: 상대 시각 · 주체(사원 이름/`시스템`) · 이벤트 표시명 · `AI 경유`(is_ai_assisted, 지금은 늘 없음) · 대상 번호·사유 (core `timelineEventOf`) |
@@ -49,7 +49,7 @@
 ## 3. api 함수 — `client/src/api/dashboard.ts`
 
 - `dashboardApi.widget(key, { today? })` → 위젯 데이터(`DashboardWidgetDataMap[key]`). 안에서 `requireActor(tables, { view: DASHBOARD_WIDGET_VIEW[key] })` → 권한이 없으면 `COM-002`(덧붙임 `… 조회 권한이 필요해요`). P2 위젯(AGENT_RISK·AI_USAGE)은 데이터 함수가 없다.
-- `dashboardKeys.widget(key, employeeId)` 조회 키(공유 queryKeys.ts는 건드리지 않음). `DASHBOARD_WIDGET_KEYS`, `DASHBOARD_WIDGET_VIEW`, `PROCESS_FLOW_STAGE_VIEW`, `DASHBOARD_TREND_DAYS`(30), `DASHBOARD_MRP_HORIZON_DAYS`(30), `DASHBOARD_RECENT_EVENT_LIMIT`(20).
+- `dashboardKeys.widget(key, employeeId)` 조회 키(공유 queryKeys.ts는 건드리지 않음). `DASHBOARD_WIDGET_KEYS`, `DASHBOARD_WIDGET_VIEW`, `DASHBOARD_TREND_DAYS`(30), `DASHBOARD_MRP_HORIZON_DAYS`(30), `DASHBOARD_RECENT_EVENT_LIMIT`(20).
 - 계산은 core 읽기 모델 그대로: `listSalesOrders`·`salesOrderDetail`(충족 현황·납기 위험), `productInventory`, `inspectionQueue`, `computeMrp`, `listPurchaseRequisitions`·`listPurchaseOrders`, `surplusSlabs`, `timelineEventOf`, `routingYieldOf`·`hotRollingYieldOf`. 묶는 방법(비율·최근 N일·날짜 묶음·보유 일수·투입량 가중 계획 수율·D-n)은 `features/dashboard/lib/widgetMath.ts`(순수 함수).
 - 변경 api는 없다(배치 저장은 화면 설정이라 localStorage, 작업 로그 대상 아님).
 - 훅: `hooks/useDashboardWidget.ts`(`useDashboardWidgetAccess`, `useDashboardWidget`), `hooks/useDashboardLayout.ts`.
@@ -67,7 +67,7 @@ core 시드만으로는 9월 생산 5일·출고 1일뿐이라 추이 위젯이 
 | SO-2608-003 다온건설 | SL-SS275-220x1400x9500 20매 (2히트) | 09-11 (6003) | 09-12 | 09-16 12매, 09-25 8매 |
 | SO-2608-004 나래조선 | SL-SM355B-220x1400x9500 10매 (1히트) | 09-22 (6004) | 09-23 | 09-29 10매 |
 
-- 원료: PR-2608-0001(정다은, 08-27) → 최준혁 승인 → 공급업체별 발주 → **08-31 입고**. 양은 이 계획들의 히트 소요를 실적 서비스와 같은 함수(`hotMetalTonFor`·`rawMaterialTonFor`·`ferroalloyTonFor`)로 계산해 정확히 산다. 입고일이 가장 일러 FIFO로 먼저 다 쓰이고(잔량 0·CONSUMED), core 시드의 원료 LOT 잔량·입고예정·LOT 관계는 그대로다 → **14.1 MRP(실리코망가니즈 순소요 1.500t), 14.1 시작 재고 SS275 6매, 여재, 안 읽은 알림이 바뀌지 않는다**(`seeds/dashboard.test.ts`가 시드 전후를 비교).
+- 원료: PR-2608-0001~0004(정다은, 08-27, 원료마다 1건) → 최준혁 승인 → 공급업체별 발주 → **08-31 입고**. 양은 이 계획들의 히트 소요를 실적 서비스와 같은 함수(`hotMetalTonFor`·`rawMaterialTonFor`·`ferroalloyTonFor`)로 계산해 정확히 산다. 입고일이 가장 일러 FIFO로 먼저 다 쓰이고(잔량 0·CONSUMED), core 시드의 원료 LOT 잔량·입고예정·LOT 관계는 그대로다 → **14.1 MRP(실리코망가니즈 순소요 1.500t), 14.1 시작 재고 SS275 6매, 여재, 안 읽은 알림이 바뀌지 않는다**(`seeds/dashboard.test.ts`가 시드 전후를 비교).
 - 이 시드의 구매 알림 2건(승인 요청·승인 결과)은 8월에 처리한 것으로 읽음 표시한다.
 - 규격은 14.1·14.2·core 시드가 쓰지 않는 것만 썼다. 매수 = 히트에서 나오는 매수라 여재가 남지 않는다(BP-SEED-01). 모두 출하완료라 남는 재고·예약이 없다.
 - 등록 확인: 이 시드를 등록하고 전체 테스트를 돌리면 scenario141·142·quality 테스트는 통과하고, `mock/services/tests/errors.test.ts` 44·66줄의 `expect(k.tables.salesOrder).toHaveLength(5)`만 9가 되어 실패한다(시드 수주 수를 고정값으로 비교). 병합 단계에서 그 두 줄을 "시험 전 수주 수와 같음"으로 바꾸거나 5 → 9로 고쳐야 한다(core 소유 파일이라 고치지 않았다).
@@ -84,6 +84,7 @@ core 시드만으로는 9월 생산 5일·출고 1일뿐이라 추이 위젯이 
 | 공정별 수율 | 완료된 작업 실적의 Σ산출 ÷ Σ투입(톤), 계획 수율은 투입량 가중(열연은 규격 매핑 수율). 제선은 계획 수율을 쓰지 않아 표시하지 않음 | 4.4: 제선은 원단위 |
 | 여재 보유 일수 | 규격별 여재(TRM-048, core `surplusSlabs`) > 0인 규격의 여재 슬래브 중 surplus_at(없으면 생산완료일)이 가장 이른 날부터 | 예약이 매수 단위라 LOT별 여재를 정할 수 없음 |
 | 공정 흐름 단계 | 진행 중 수주 · 생산계획(계획·진행중) · 판정 대기 LOT · 제품 가용재고 · 출하요청(배정 대기·배정 확정) · 오늘 출고 확정 | 문서에 위젯 이름만 있음 |
+| 위젯 다시 읽기 (서버 모드) | 30초마다 (`DASHBOARD_REFRESH_MS`). 브라우저 탭이 가려져 있으면 멈춘다. 가짜 DB 모드는 저장 뒤 무효화·탭 동기화로 이미 맞아서 다시 읽지 않는다 | 다른 사원(다른 PC)의 변경을 알려 주는 길이 없어 정함 (2026-10-07 사용자 요청) |
 | 위젯별 볼 권한 | 표 1장 "볼 권한" 열 (데이터를 보여 주는 화면의 여는 조건과 같게) | BP-DSH-01 "권한 내 집계" |
 | 위젯 크기·기본 배치 | 표 1장 (옛 화면 값) | SPEC 4장 3번 "최소 크기" |
 | 배치 저장 | 이 브라우저 localStorage, 사원별 | ERD에 배치 테이블 없음, stage6 지시 |

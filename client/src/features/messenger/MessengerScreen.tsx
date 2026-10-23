@@ -1,7 +1,8 @@
 'use client';
 
-// 메신저 /messenger[?room=<id>] (REQ-MSG-001~006, BP-MSG-01): 채팅방 목록 | 대화 | 방 정보
-// 다른 탭에서 보낸 메시지는 가짜 DB의 탭 동기화로 바로 보인다 (REQ-MSG-002).
+// 메신저 /messenger[?room=<id>[&message=<id>]] (REQ-MSG-001~006, BP-MSG-01): 채팅방 목록 | 대화 | 방 정보
+// message가 있으면 그 메시지까지 스크롤해 잠깐 강조한다 (알림·검색 결과에서 이동). 이동한 뒤에는 주소에서 지운다.
+// 다른 사원이 보낸 메시지는 소켓(hooks/useMessengerSocket.ts)으로 바로 보인다 (REQ-MSG-002).
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { Button } from '@/components/Button';
@@ -18,6 +19,8 @@ export function MessengerScreen() {
   const params = useSearchParams();
   const roomParam = Number(params.get('room'));
   const chatRoomId = Number.isInteger(roomParam) && roomParam > 0 ? roomParam : null;
+  const messageParam = Number(params.get('message'));
+  const focusMessageId = Number.isInteger(messageParam) && messageParam > 0 ? messageParam : null;
   const rooms = useChatRoomList();
   const [creating, setCreating] = useState(false);
   const [asideOpen, setAsideOpen] = useState(true);
@@ -28,9 +31,11 @@ export function MessengerScreen() {
   useShellTitle(undefined, current ? current.displayName : rooms.data ? `채팅방 ${list.length}개 · 안 읽음 ${totalUnread}` : undefined);
 
   const openRoom = (id: number) => router.replace(`${pathname}?room=${id}`);
+  const jumpToMessage = (roomId: number, messageId: number) => router.replace(`${pathname}?room=${roomId}&message=${messageId}`);
 
+  // 글자 크기(html zoom)를 키우면 창 px 미디어 쿼리는 실제로 쓸 수 있는 폭을 모른다. 방 정보 칸은 이 칸의 폭(컨테이너 쿼리)으로 켠다
   return (
-    <div className="flex min-h-0 min-w-0 flex-1">
+    <div className="@container flex min-h-0 min-w-0 flex-1">
       {rooms.data ? (
         <RoomList rooms={list} activeId={chatRoomId} onSelect={openRoom} onNew={() => setCreating(true)} />
       ) : (
@@ -39,7 +44,16 @@ export function MessengerScreen() {
         </section>
       )}
       {chatRoomId !== null ? (
-        <Conversation key={chatRoomId} chatRoomId={chatRoomId} asideOpen={asideOpen} onToggleAside={() => setAsideOpen((open) => !open)} />
+        <Conversation
+          key={chatRoomId}
+          chatRoomId={chatRoomId}
+          asideOpen={asideOpen}
+          onToggleAside={() => setAsideOpen((open) => !open)}
+          onLeft={() => router.replace(pathname)}
+          focusMessageId={focusMessageId}
+          onJump={(messageId) => jumpToMessage(chatRoomId, messageId)}
+          onFocusDone={() => openRoom(chatRoomId)}
+        />
       ) : (
         <div className="flex min-w-0 flex-1 bg-surface">
           <StateView

@@ -1,0 +1,89 @@
+// AI 어시스턴트 (REQ-AST, API-262·263). 서버가 LM Studio를 불러 답한다 (LLM 연결 설정은 api/llm.ts).
+import type {
+  AiAgentControlCommand,
+  AiAgentControlInput,
+  AiAgentInput,
+  AiAgentNoteInput,
+  AiActionCardExecuteRequest,
+  AiActionCardExecuteResult,
+  AiAssistantCapabilitiesView,
+  AiAssistantMessageInput,
+  AiAssistantReplyView,
+  AiAssistantStreamEvent,
+  AiAssistantSuggestedQuestionsView,
+  AiBrowserWindowView,
+  AiChatThreadSummaryView,
+  AiChatThreadView,
+  AiScreenActionResultInput,
+  PageResult,
+} from '@fantasteel/shared';
+import { serverRequest, serverStream } from '@/api/http';
+
+export const aiAssistantKeys = {
+  suggestedQuestions: (employeeId: number) => ['ai-assistant', 'suggested-questions', employeeId] as const,
+  capabilities: ['ai-assistant', 'capabilities'] as const,
+  /** 저장한 대화 목록 (이슈 #399). 사원마다 따로 */
+  threads: (employeeId: number) => ['ai-assistant', 'threads', employeeId] as const,
+};
+
+/** 대화 목록 한 번에 읽는 수 */
+export const AI_CHAT_THREAD_PAGE_SIZE = 20;
+
+const STREAM_EVENT_TYPES: readonly string[] = ['thinking', 'answer', 'tool_start', 'tool_end', 'browser_frame', 'browser_live', 'agent_paused', 'agent_resumed', 'user_note', 'ui_action', 'done', 'error'];
+
+/**
+ * 스트림 한 줄을 이벤트로 읽는다. JSON이 아니면 오류, 모르는 종류의 이벤트는 null(서버가 새 종류를 더해도 화면이 멈추지 않게 건너뛴다).
+ */
+export function parseAiAssistantStreamEvent(line: string): AiAssistantStreamEvent | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(line);
+  } catch {
+    throw new Error('서버 응답을 읽을 수 없어요');
+  }
+  if (typeof value !== 'object' || value === null || !('type' in value) || typeof value.type !== 'string') {
+    throw new Error('서버 응답을 읽을 수 없어요');
+  }
+  // 종류만 확인한다: 필드 모양은 shared 타입을 서버와 화면이 함께 쓰므로 믿는다
+  return STREAM_EVENT_TYPES.includes(value.type) ? (value as AiAssistantStreamEvent) : null;
+}
+
+export const aiAssistantApi = {
+  ask: (input: AiAssistantMessageInput): Promise<AiAssistantReplyView> => serverRequest('POST', '/ai-assistant/messages', { body: input }),
+  /** 실행 카드의 [실행]. 사용자가 확인·수정한 값을 보내면 서버가 다시 검증해 업무·일정·구매요청 초안을 만든다. chat이 있으면 저장한 카드를 실행됨으로 남긴다 */
+  executeActionCard: (input: AiActionCardExecuteRequest): Promise<AiActionCardExecuteResult> => serverRequest('POST', '/ai-assistant/action-cards/execute', { body: input }),
+  /** 저장한 대화 목록 (이슈 #399). 내 대화만, 마지막으로 묻고 답한 순서 */
+  listThreads: (page: number, size = AI_CHAT_THREAD_PAGE_SIZE): Promise<PageResult<AiChatThreadSummaryView>> => serverRequest('GET', '/ai-assistant/threads', { query: { page, size } }),
+  getThread: (id: number): Promise<AiChatThreadView> => serverRequest('GET', `/ai-assistant/threads/${id}`),
+  /** 이 회의에 물은 내 대화 (회의 질문 저장). 아직 묻지 않았으면 null. 지우기는 deleteThread */
+  getMeetingThread: (meetingMinutesId: number): Promise<AiChatThreadView | null> => serverRequest('GET', `/ai-assistant/meeting-threads/${meetingMinutesId}`),
+  /** 대화와 메시지를 모두 지운다 (되살릴 수 없다) */
+  deleteThread: (id: number): Promise<AiChatThreadSummaryView> => serverRequest('DELETE', `/ai-assistant/threads/${id}`),
+  /** 답을 만드는 과정을 이벤트로 받는다. 마지막 이벤트는 done 또는 error. signal로 멈추면 AbortError가 던져진다 */
+  askStream: (input: AiAssistantMessageInput, onEvent: (event: AiAssistantStreamEvent) => void, signal?: AbortSignal): Promise<void> =>
+    serverStream('POST', '/ai-assistant/messages/stream', {
+      body: input,
+      signal,
+      onLine: (line) => {
+        const event = parseAiAssistantStreamEvent(line);
+        if (event) onEvent(event);
+      },
+    }),
+  /** 화면 조작 결과 (이슈 #382). 실시간 답이 보낸 ui_action을 이 화면에서 실행한 결과를 돌려준다 */
+  sendUiActionResult: (actionId: string, result: AiScreenActionResultInput): Promise<{ accepted: true }> =>
+    serverRequest('POST', `/ai-assistant/ui-actions/${encodeURIComponent(actionId)}`, { body: result }),
+  /** 답하는 동안 브라우저·화면 조작을 멈춤·한 단계·계속 (이슈 #425). 답이 이미 끝났으면 COM-003 */
+  controlAgent: (controlId: string, command: AiAgentControlCommand): Promise<{ accepted: true }> =>
+    serverRequest('POST', `/ai-assistant/agent-control/${encodeURIComponent(controlId)}`, { body: { command } satisfies AiAgentControlInput }),
+  /** 멈춘 동안 사람이 실시간 화면을 눌러 서버 Chrome을 직접 조작 (이슈 #433). 멈춰 기다리는 중이 아니면 COM-004, 답이 끝났으면 COM-003 */
+  sendAgentInput: (controlId: string, input: AiAgentInput): Promise<{ accepted: true }> =>
+    serverRequest('POST', `/ai-assistant/agent-control/${encodeURIComponent(controlId)}/input`, { body: input }),
+  /** 답하는 중에 말 덧붙이기 (이슈 #430). 답이 이미 끝났으면 COM-003 */
+  addAgentNote: (controlId: string, text: string): Promise<{ accepted: true }> =>
+    serverRequest('POST', `/ai-assistant/agent-control/${encodeURIComponent(controlId)}/notes`, { body: { text } satisfies AiAgentNoteInput }),
+  /** [브라우저 창 열기] (이슈 #433): 이 대화 열쇠의 빈 브라우저 탭을 미리 열어 둔다. 브라우저를 쓸 수 없거나 바쁘면 COM-004 */
+  openBrowserWindow: (browserSessionId: string): Promise<AiBrowserWindowView> => serverRequest('POST', '/ai-assistant/browser/window', { body: { browserSessionId } }),
+  /** 지금 모델이 사진을 보는지·생각 정도를 바꿀 수 있는지. LM Studio가 아니면 알 수 없어 null */
+  getCapabilities: (): Promise<AiAssistantCapabilitiesView> => serverRequest('GET', '/ai-assistant/capabilities'),
+  getSuggestedQuestions: (): Promise<AiAssistantSuggestedQuestionsView> => serverRequest('GET', '/ai-assistant/suggested-questions'),
+};

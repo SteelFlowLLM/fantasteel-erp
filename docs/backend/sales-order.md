@@ -26,21 +26,23 @@
 
 | Method | Path | 이름 | 권한 | 비고 ([CSV]) |
 | --- | --- | --- | --- | --- |
-| GET | `sales-orders` | 수주 목록 | `SALES_ORDER_CREATE` VIEW | 헤더 상태는 품목 상태에서 계산 |
+| GET | `sales-orders` | 수주 목록 | `SALES_ORDER_CREATE` VIEW | 헤더 상태는 품목 상태에서 계산. `salesOrderNo`(번호 일부, 대소문자 무시)로 거른다(상단 통합 검색) |
 | POST | `sales-orders` | 수주 등록 | `SALES_ORDER_CREATE` USE | 품목별 `itemId`·`orderedQty`만. SO-001·SO-002·INV-001. 하나의 트랜잭션 |
 | GET | `sales-orders/:id` | 수주 상세 | `SALES_ORDER_CREATE` VIEW | 톤 = 매수 × 이론중량(서버 계산) |
 | POST | `sales-orders/:id/cancel` | 수주 취소 | `SALES_ORDER_CANCEL` USE | SO-003·SO-004 |
 | GET | `sales-orders/:id/fulfillment` | 수주 충족 현황 | `SALES_ORDER_CREATE` VIEW | 단계별 중복 없는 집계(4.5) |
 | GET | `sales-orders/:id/reservations` | 수주 예약 조회 | `SALES_ORDER_CREATE` VIEW | [CSV] 도메인은 "재고·배정". 이 모듈 경로에 두고 조회는 inventory 서비스를 부른다 |
+| GET | `sales-orders/:id/cancel-purchase-impact` | 수주 취소의 구매 진행 영향 | `SALES_ORDER_CANCEL` VIEW | API 명세서에 없음. [04] BP-PRD-01 구현 제안 "수주 취소·계획 변경 시 구매 진행 영향도 표시한다"를 위해 더했다(2026-10-14). 아래 4장 |
 
 다른 초안 행: `PATCH /api/sales-orders/:id/cancel`(2행 중복). [05] 5장 "상태 변경은 `POST /:id/동작`"에 따라 POST로 만든다.
-[권한표]: 영업 USE, 생산·물류·관리자는 `SALES_ORDER_CREATE` VIEW. 취소는 영업만 USE(관리자 VIEW).
+[권한표]: 영업 USE, 나머지 역할은 `SALES_ORDER_CREATE`·`SALES_ORDER_CANCEL` VIEW(2026-10-15 업무 조회는 모든 역할). 등록·취소는 영업만 한다.
 
 ## 4. 업무 규칙·계산
 
 **등록**([04] 13.1·13.2)
 
 1. 수량: `orderedQty`가 정수가 아니거나 1 미만이거나 없으면 `SO-002`("수량은 1 이상의 정수로 입력해 주세요"). 반올림·톤 → 매수 환산 금지(4.1).
+   - 품목 한 줄 최대 **9,999매**(🟡 가정값 `MAX_ORDERED_QTY`, `shared/src/sales-order.ts`, 2026-10-22 이슈 #496). 넘으면 `SO-002`에 "수량은 품목 한 줄에 9,999까지 입력할 수 있어요". 문서에 상한이 없는데, 21억을 넘으면 DB 정수 범위 밖 오류(COM-999)가 나고 100만 매 같은 오타는 거대한 생산계획을 만들어서 막는다. 화면 수주 폼(`salesOrderForm.ts`), 철강맨AI 수주 실행 카드(제안 단계에서 미확정 칸으로 보이고 실행은 이 service를 지난다), Message → ERP 수주 초안(추출·수정·실행이 같은 상한, 실행은 `createInTx`에서 한 번 더 검사)이 같은 값을 쓴다. 초안 수정과 철강맨AI 카드도 상한을 넘으면 같은 코드·문구로 알린다(초안 수정은 `SO-002` + 위 문구, 카드는 "n번째 줄의 매수는 1 이상 9,999 이하의 정수여야 해요"를 서버 제안·화면 수정이 같이 쓰고 실행 버튼을 막는다, #509).
    - 전역 ValidationPipe 실패는 `COM-004`가 된다. 14.3이 `SO-002`를 요구하므로 수량은 DTO에서 `@Allow()` 정도만 두고 service에서 검사해 `AppException('SO-002')`를 던진다.
 2. `itemId`가 없거나 SLAB·COIL이 아니면 `SO-001`. `customerId` 없으면 `COM-003`. 담당 영업 = 로그인 사원.
 3. `NumberingService.nextDocumentNumber(tx, 'SALES_ORDER')`로 번호를 받고 수주·품목 저장(톤 저장 안 함).
@@ -61,21 +63,23 @@
 ```
 
 - 생산중·검사합격·예약은 같은 제품의 다른 단계일 수 있으므로 더해서 주문보다 큰 "충족 매수"로 보이지 않는다. 지표의 포함 관계와 진행률 분모를 응답에 명시한다(4.5 구현 제안).
-- 품목 상태: OPEN → PARTIALLY_SHIPPED → SHIPPED(출고 확정 때 갱신), 취소 시 CANCELLED([04] 10장). 헤더 상태는 품목 상태에서 계산(전부 CANCELLED면 취소, 전부 SHIPPED면 출하완료, 하나라도 출고가 있으면 부분출하 등).
+- 수주 진행률(출하 ÷ 주문)은 진행 중이면 취소 품목을 빼고, 헤더가 취소인 수주는 모든 품목으로 센다. 부분 출고 뒤 잔량 취소 수주는 출고 ÷ 전체 주문(예: 6 ÷ 12)이 되고, 남은 출하완료 품목만으로 100%가 되지 않는다(2026-10-14).
+- 품목 상태: OPEN → PARTIALLY_SHIPPED → SHIPPED(출고 확정 때 갱신), 취소 시 CANCELLED([04] 10장). 헤더 상태는 품목 상태에서 계산(진행중·부분출하 품목이 없고 CANCELLED가 있으면 취소, 남은 품목이 전부 SHIPPED면 출하완료, 하나라도 출고가 있으면 부분출하).
 
 **취소**(BP-SO-02, 9.3)
 
-1. 출고된 매수가 있으면(CONVERTED 예약 존재) `SO-003`. 진행 중 출하요청(REQUESTED·ALLOCATED)에 이 수주 품목이 있으면 `SO-004`.
+1. 취소할 품목(진행중·부분출하)이 없으면: 하나라도 취소된 품목이 있으면 이미 취소한 수주(`COM-001`, 부분 출고 뒤 잔량 취소 포함), 모두 출하완료면 `SO-003`. 진행 중 출하요청(REQUESTED·ALLOCATED)에 이 수주 품목이 있으면 `SO-004`.
 2. 한 트랜잭션에서: 품목 CANCELLED → ACTIVE 예약 RELEASED와 `reserved_qty − ACTIVE 합계`(inventory) → PLANNED 생산계획 CANCELLED(production) → IN_PROGRESS 계획은 `sales_order_item_id = null`로 해제해 산출물을 여재로(production, [ERD] 설계 결정) → 그 계획들의 CONFIRMED 열연 배정 해제(inventory).
-3. 출고 완료분은 삭제하거나 재고를 되돌리지 않는다(BP-SO-02 예외).
+3. 출고 완료분은 삭제하거나 재고를 되돌리지 않는다(BP-SO-02 예외). 2026-10-14 결정: 부분 출고 뒤에도 취소할 수 있고 잔량만 취소한다. 2번은 진행중·부분출하 품목만 하고(`cancellableItemsOf`), 부분출하 품목은 CANCELLED가 되어도 출고 매수(CONVERTED 예약)는 충족 현황에 남는다. 전량 출고된 품목은 그대로 둔다. 헤더 상태는 진행할 품목이 남지 않았으므로 취소다(전량 출고 품목이 섞여도, 2026-10-14 사용자 결정).
+4. 구매 진행 영향(취소 창): 지금 취소하면 취소(PLANNED)·연결 해제(IN_PROGRESS)될 계획에 `purchase_requisition.production_plan_id`로 연결된 구매요청(상태 무관)과 그 발주를 구매요청 번호 순으로 보여 준다. 계획 상태로 취소·해제를 가르는 규칙은 2번과 같은 함수(production의 `salesOrderCancelEffectOf`)를 쓴다. 수주 취소는 구매요청·발주를 바꾸지 않는다.
 
 ## 5. 오류 코드·작업 로그
 
 | 코드 | 언제 |
 | --- | --- |
 | SO-001 | 등록되지 않은 규격(없음·제품 아님) |
-| SO-002 | 수량이 1 이상 정수가 아님(소수·0·음수·누락) |
-| SO-003 (409) | 출고된 매수가 있는 수주 취소 |
+| SO-002 | 수량이 1 이상 정수가 아님(소수·0·음수·누락), 또는 한 줄 9,999매 초과(#496) |
+| SO-003 (409) | 전량 출고된 수주 취소 |
 | SO-004 (409) | 진행 중인 출하요청이 있는 수주 취소 |
 | INV-001 | 예약 조건부 UPDATE 경합(아래 8장) |
 | MST-001 | 생산계획 생성 시 수율·매핑 누락(production이 던짐) |
@@ -104,6 +108,7 @@
 | 호출됨 | shipment | 출고 확정 후 `recalcItemStatus(tx, salesOrderItemId)` |
 | 호출됨 | inventory(자동 예약)·production(재생산) | `getUnsecuredQty(tx, salesOrderItemId)`(현재 미확보 매수) |
 | 읽힘 | messenger | 업무방 상단 수주 요약(REQ-MSG-001) |
+| 읽힘 | ai-assistant | 아침 브리핑(이슈 #506)이 `listDueRisk()`로 진행 중 수주 중 납기 위험 수주를 납기 빠른 순으로 읽는다(`openSalesOrderFulfillments`의 `isDueRisk`, 대시보드와 같은 기준) |
 
 트랜잭션은 이 모듈 service가 `this.prisma.$transaction(async (tx) => …)`로 열고 다른 모듈 service 함수에 `tx`를 넘긴다(중첩 트랜잭션 금지). 각 모듈은 service를 `exports`에 넣고, 이 모듈이 `imports`한다. 순환 의존이 생기면(예: inventory ↔ sales-order) 계산 함수를 한쪽에 두거나 `forwardRef`를 쓴다.
 
@@ -115,12 +120,15 @@
 | --- | --- |
 | 23.550t 규격 10매 입력 | 허용, 235.500t 계산 표시, 톤은 저장 안 됨 (REQ-SO-002) |
 | 10.5매·0매·음수·누락 | 거부, SO-002 |
+| 10,000매·100만 매·30억 매 (#496) | 거부, SO-002 (상한 문구). 9,999매는 허용 |
 | 합격 가용 6매에 10매 수주 | ACTIVE 6매 예약, 부족 4매 생산계획 (14.1-1) |
 | 동일 규격 동시 주문 | ACTIVE 예약 합계 ≤ 가용 재고 (REQ-INV-009) |
 | 부분 출고 | 품목 PARTIALLY_SHIPPED, 헤더 부분출하 (REQ-SO-005, shipment와 함께) |
 | 생산 시작 전 취소 | 계획 CANCELLED, 예약 RELEASED (14.2) |
 | 연주 진행 중 취소 | 계획의 수주 연결 해제, 완료 후 여재 (14.2) |
-| 출고 후 취소 / 출하요청 진행 중 취소 | SO-003 / SO-004 |
+| 전량 출고 후 취소 / 출하요청 진행 중 취소 | SO-003 / SO-004 |
+| 부분 출고 뒤 취소 | 출고분 유지·잔량만 취소(남은 예약 RELEASED, 계획 취소), 전량 출고 품목 그대로, 다시 취소하면 COM-001 (BP-SO-02 예외) |
+| 취소 창의 구매 진행 영향 | 시작 전·진행중 계획의 구매요청·발주만, 취소 뒤에는 빈 목록 (BP-PRD-01) |
 
 실행: `npm test -w @fantasteel/server -- sales-order`(묶음 DB `fs_sales`, inventory·shipment와 같은 DB).
 
@@ -132,8 +140,13 @@
 | 진행률 계산식 | 화면마다 다르다(출하 ÷ 주문 vs (예약+검사합격+출하) ÷ 주문). 하나로 정해야 한다 | [CSV] 수주 충족 현황 비고 |
 | 등록 시 INV-001 | 부분 예약을 허용하므로 가용 부족은 오류가 아니다. 조건부 UPDATE가 경합으로 0행이면 가용을 다시 읽어 재시도할지, INV-001로 실패시킬지 정해야 한다 | [CSV] 수주 등록 비고, [ERD] Project Note |
 | 진행 계획 잔여 목표 매수 | 4.5 식에 쓰지만 계산 방법(계획 부족 매수 − 이미 자동 예약된 매수 등)이 정의돼 있지 않다 | [04] 4.5 |
-| 부분 출고 후 잔량 취소 | TBD. 지금 규칙(SO-003)은 출고가 하나라도 있으면 전체 취소를 막는다 | [04] 16장, 9.3 |
+| ~~부분 출고 후 잔량 취소~~ | 결정(2026-10-14): 잔량만 취소, 품목 CANCELLED, SO-003은 전량 출고만 (4장 취소 3번) | [04] 16장, 9.3 |
 | 열연 시작 후 수주 취소 | TBD(미열연은 슬래브 여재, 열연 후 코일은 별도 결정) | [04] 16장 |
 | 이미 취소된 수주 재취소 | 상태 전이 위반용 오류 코드가 9.3에 없다 | [04] 9.3 |
 | 취소 사유 | `sales_order`에 사유 컬럼이 없다. 작업 로그 `reason`에만 남긴다 | [ERD] |
 | 동시성 구현 | 예약 조건부 UPDATE는 컬럼 간 비교라 Prisma Client로 표현이 어렵다 → TypedSQL(`prisma/sql/*.sql`, `npm run generate:sql -w @fantasteel/server`, DB 필요)로 만든다 | [05] 8장 |
+
+## 9. 동시성 (2026-10-21, #478)
+
+- 수주 취소는 수주 품목을 잠근 뒤 그 품목의 생산계획을 id 순으로 잠그고(`production.lockPlansOfSalesOrderItems`), 바꿀 재고 행(수주 규격 + 계획의 확정 열연 배정 슬래브 규격)을 첫 작업 로그 전에 잠근다. 열연 완료(계획 잠금 → 재고 → 작업 로그)와 같은 순서라, 겹치면 한쪽이 끝난 뒤 최신 계획 상태로 취소·연결 해제를 정한다. 계획 상태는 읽은 값 그대로일 때만 바꾸고, 그사이 바뀌었으면 COM-001로 다시 하게 한다. 전에는 진행 중인 계획을 취소로 덮고, 방금 소비된 열연 배정의 매수를 한 번 더 뺄 수 있었다.
+- 수주 등록은 재고 행을 채번·작업 로그보다 먼저 잠근다(교착 방지, inventory.md 10장).

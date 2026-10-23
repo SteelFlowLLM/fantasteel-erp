@@ -1,7 +1,8 @@
 // 위젯 배치 (SPEC 4장 3번, REQ-DSH-002): 12칸 격자의 위치·크기, 기본 배치, 추가·제외, 사원별 저장(브라우저 localStorage).
-// 배치는 화면 설정이라 가짜 DB가 아니라 이 브라우저에 사원마다 저장한다 (ERD에 배치 테이블이 없다).
+// 배치는 화면 설정이라 서버가 아니라 이 브라우저에 사원마다 저장한다 (ERD에 배치 테이블이 없다).
 import { verticalCompactor, type LayoutItem } from 'react-grid-layout';
 import type { DashboardWidgetKey } from '@/api/dashboard';
+import type { RoleCode } from '@/codes';
 import { isWidgetKey, widgetDef, WIDGETS } from '@/features/dashboard/widgetCatalog';
 
 export const GRID_COLS = 12;
@@ -16,8 +17,27 @@ export interface WidgetPlacement {
   h: number;
 }
 
-/** 기본 배치: 기본 위젯을 기본 크기로 왼쪽 → 오른쪽, 넘치면 다음 줄 */
-export function buildDefaultPlacements(): WidgetPlacement[] {
+/**
+ * 역할별 기본 배치 (없으면 공통 기본 배치).
+ * 품질: 수주 충족 현황 대신 품질 업무에 맞는 강종별 불합격률을 두고, 그 옆에 공정별 수율을 둬 빈 칸을 없앤다.
+ * Agent 위험 감지는 품질에서 한 줄 요약(확정 대기 건수)으로 맨 아래에 전체 폭, 한 칸 높이(카드 머리 한 줄)로 둔다: 공정 흐름 바로 아래면 품질 숫자보다 Agent 안내가 먼저 보인다.
+ * 불합격률은 맨 위 기간 요약 숫자가 들어가 한 칸 높이고(판정된 강종이 3개여도 아래 설명이 잘리지 않게), 옆 공정별 수율도 같은 높이로 맞춘다.
+ */
+const ROLE_DEFAULT_PLACEMENTS: Partial<Record<RoleCode, readonly WidgetPlacement[]>> = {
+  QUALITY: [
+    { key: 'PROCESS_FLOW', x: 0, y: 0, w: 12, h: 3 },
+    { key: 'AGENT_RISK', x: 0, y: 3, w: 12, h: 1 },
+    { key: 'REJECT_RATE', x: 0, y: 4, w: 6, h: 5 },
+    { key: 'PROCESS_YIELD', x: 6, y: 4, w: 6, h: 5 },
+    { key: 'RECENT_EVENTS', x: 0, y: 9, w: 6, h: 5 },
+    { key: 'PRODUCT_STOCK', x: 6, y: 9, w: 6, h: 5 },
+  ],
+};
+
+/** 기본 배치: 역할 배치가 있으면 그것, 없으면 기본 위젯을 기본 크기로 왼쪽 → 오른쪽, 넘치면 다음 줄 */
+export function buildDefaultPlacements(roleCode?: RoleCode): WidgetPlacement[] {
+  const rolePlacements = roleCode ? ROLE_DEFAULT_PLACEMENTS[roleCode] : undefined;
+  if (rolePlacements) return rolePlacements.map((p) => ({ ...p }));
   const out: WidgetPlacement[] = [];
   let x = 0;
   let rowTop = 0;
@@ -70,7 +90,8 @@ export function samePlacements(a: readonly WidgetPlacement[], b: readonly Widget
   });
 }
 
-export const isDefaultLayout = (placements: readonly WidgetPlacement[]): boolean => samePlacements(compactPlacements(placements), compactPlacements(buildDefaultPlacements()));
+export const isDefaultLayout = (placements: readonly WidgetPlacement[], roleCode?: RoleCode): boolean =>
+  samePlacements(compactPlacements(placements), compactPlacements(buildDefaultPlacements(roleCode)));
 
 const isGridInt = (value: unknown, min: number, max: number): value is number => typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max;
 
@@ -106,10 +127,15 @@ export function readStoredLayout(employeeId: number, storage: Storage | null = b
 }
 
 /** 저장. 기본 배치와 같으면 저장값을 지운다(나중에 기본 배치가 바뀌면 따라가도록). 저장하지 못하면 false */
-export function writeStoredLayout(employeeId: number, placements: readonly WidgetPlacement[], storage: Storage | null = browserStorage()): boolean {
+export function writeStoredLayout(
+  employeeId: number,
+  placements: readonly WidgetPlacement[],
+  storage: Storage | null = browserStorage(),
+  roleCode?: RoleCode,
+): boolean {
   if (!storage) return false;
   try {
-    if (isDefaultLayout(placements)) storage.removeItem(layoutStorageKey(employeeId));
+    if (isDefaultLayout(placements, roleCode)) storage.removeItem(layoutStorageKey(employeeId));
     else storage.setItem(layoutStorageKey(employeeId), JSON.stringify(compactPlacements(placements)));
     return true;
   } catch {

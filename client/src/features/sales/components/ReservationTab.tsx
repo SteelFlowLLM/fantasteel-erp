@@ -10,8 +10,9 @@ import { qtyUnitOf } from '@/features/sales/lib/salesOrderForm';
 
 export function ReservationTab({ detail }: { detail: SalesOrderDetail }) {
   const itemOf = (soItemId: number) => detail.items.find((i) => i.salesOrderItemId === soItemId);
+  // flex-none: 예약이 많아도 카드가 화면 높이로 눌려 표가 카드 밖으로 넘치지 않게 한다 (화면 전체가 스크롤)
   return (
-    <Card>
+    <Card className="flex-none" petKey="card:salesOrders.reservation">
       {detail.reservations.length === 0 ? (
         <EmptyNote className="py-8">예약이 없어요</EmptyNote>
       ) : (
@@ -35,7 +36,7 @@ export function ReservationTab({ detail }: { detail: SalesOrderDetail }) {
                 const item = itemOf(r.salesOrderItemId);
                 const unit = item ? qtyUnitOf([item.itemType]) : '매';
                 return (
-                  <tr key={r.id} data-muted={r.reservationStatus === 'RELEASED'}>
+                  <tr key={r.id} data-pet-item="reservation" data-pet-item-title={`품목 ${r.lineNo} ${r.itemCode}`} data-muted={r.reservationStatus === 'RELEASED'}>
                     <Td>품목 {r.lineNo}</Td>
                     <Td className="font-mono text-xs">{r.itemCode}</Td>
                     <Td>
@@ -57,7 +58,7 @@ export function ReservationTab({ detail }: { detail: SalesOrderDetail }) {
           </Table>
         </div>
       )}
-      <div className="border-t border-line px-4 py-2.5 text-cap leading-[18px] text-ink-3">
+      <div className="border-t border-line px-4 py-2.5 text-cap leading-relaxed text-ink-3">
         수주 등록 때 합격 재고를 먼저 예약하고, 부족분은 생산·검사 합격 뒤 자동 예약해요. 출고가 확정되면 &lsquo;출고 전환&rsquo;, 수주를 취소하면
         &lsquo;해제&rsquo;가 돼요. 부분 출고는 예약을 둘로 나눠요. 누가 예약했는지는 이력 탭에서 볼 수 있어요.
       </div>

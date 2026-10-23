@@ -8,8 +8,9 @@ import { EventTimeline } from '@/features/businessEvents/components/EventTimelin
 import { businessEventsHref } from '@/features/sales/components/SalesOrderParts';
 
 export function HistoryTab({ salesOrderId }: { salesOrderId: number }) {
+  // flex-none: 기록이 많아도 카드가 화면 높이로 눌려 목록이 카드 밖으로 넘치지 않게 한다 (화면 전체가 스크롤)
   return (
-    <Card>
+    <Card className="flex-none" petKey="card:salesOrders.history">
       <CardHead
         title="이력"
         meta="시간순 · 이 수주에 남은 작업 로그"

@@ -2,7 +2,7 @@
 
 // 사원 /admin/employees (REQ-AUTH-002·003): 왼쪽 사원 목록(검색·역할·부서·사용 여부) | 오른쪽 상세, 등록·수정은 창.
 // 사원 관리(EMPLOYEE_MANAGE) 사용 권한이 없으면 조회만 하고 변경 버튼을 막는다.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { PERMISSION, ROLE, ROLE_LABEL, type RoleCode } from '@/codes';
 import type { EmployeeListQuery } from '@/api/queryKeys';
 import { Avatar } from '@/components/Avatar';
@@ -17,7 +17,7 @@ import { EmployeeDetail } from '@/features/admin/components/EmployeeDetail';
 import { EmployeeFormModal } from '@/features/admin/components/EmployeeFormModal';
 import { ActiveBadge, HeadTag } from '@/features/admin/components/OrgBadges';
 import { departmentOptionLabel } from '@/features/admin/lib/orgRules';
-import { useDepartmentList, useEmployeeList, useJobGradeList, useRoleList } from '@/hooks/useDirectory';
+import { useDepartmentList, useJobGradeList, useManagedEmployeeList, useRoleList } from '@/hooks/useDirectory';
 import { useMe } from '@/hooks/useMe';
 import { useCanUse } from '@/hooks/usePermission';
 import { cn } from '@/lib/cn';
@@ -25,10 +25,10 @@ import { fmtMDHM } from '@/lib/format';
 import { permissionNeedText } from '@/lib/permissions';
 
 type ActiveFilter = 'all' | 'active' | 'inactive';
-const ACTIVE_FILTERS: readonly { key: ActiveFilter; label: string }[] = [
-  { key: 'all', label: '전체' },
-  { key: 'active', label: '사용' },
-  { key: 'inactive', label: '사용 안 함' },
+const ACTIVE_FILTERS: readonly { key: ActiveFilter; label: ReactNode }[] = [
+  { key: 'all', label: <span data-pet-term="전체">전체</span> },
+  { key: 'active', label: <span data-pet-term="사용">사용</span> },
+  { key: 'inactive', label: <span data-pet-term="사용 안 함">사용 안 함</span> },
 ];
 const ROLE_CODES = Object.values(ROLE);
 
@@ -58,8 +58,8 @@ export function EmployeeScreen() {
     [departmentId, roleCode, active, keywordQuery],
   );
   const filtered = Object.keys(query).length > 0;
-  const all = useEmployeeList();
-  const list = useEmployeeList(query);
+  const all = useManagedEmployeeList();
+  const list = useManagedEmployeeList(query);
   const departments = useDepartmentList();
   const jobGrades = useJobGradeList();
   const roles = useRoleList();
@@ -74,6 +74,7 @@ export function EmployeeScreen() {
   return (
     <>
       <MasterPane
+        petKey="card:employees.list"
         head={
           <>
             <div className="flex items-center gap-2">
@@ -85,7 +86,7 @@ export function EmployeeScreen() {
             </div>
             <Input type="search" leadingIcon="search" placeholder="이름·사원번호" aria-label="사원 검색" value={keyword} onChange={(e) => setKeyword(e.target.value)} />
             <div className="flex gap-2">
-              <Select aria-label="역할" value={roleCode} onChange={(e) => setRoleCode(e.target.value as RoleCode | '')}>
+              <Select aria-label="역할" data-pet-term="역할" value={roleCode} onChange={(e) => setRoleCode(e.target.value as RoleCode | '')}>
                 <option value="">역할: 전체</option>
                 {ROLE_CODES.map((code) => (
                   <option key={code} value={code}>
@@ -93,7 +94,7 @@ export function EmployeeScreen() {
                   </option>
                 ))}
               </Select>
-              <Select aria-label="부서" value={departmentId} onChange={(e) => setDepartmentId(e.target.value ? Number(e.target.value) : '')}>
+              <Select aria-label="부서" data-pet-term="부서" value={departmentId} onChange={(e) => setDepartmentId(e.target.value ? Number(e.target.value) : '')}>
                 <option value="">부서: 전체</option>
                 {(departments.data ?? []).map((d) => (
                   <option key={d.id} value={d.id}>
@@ -120,23 +121,27 @@ export function EmployeeScreen() {
                 <button
                   type="button"
                   aria-current={isSelected || undefined}
+                  data-pet-item="employee"
+                  data-pet-item-title={employee.employeeName}
                   onClick={() => setSelectedId(employee.id)}
-                  className={cn('flex w-full flex-col gap-0.5 px-4 py-2 text-left', isSelected ? 'bg-brand-tint' : 'hover:bg-surface-2')}
+                  className={cn('flex w-full flex-col gap-0.5 px-4 py-2 text-left', isSelected ? 'bg-brand-tint hover:bg-brand-tint-hover' : 'hover:bg-surface-2')}
                 >
                   <span className="flex w-full items-center gap-2">
                     <Avatar name={employee.employeeName} size="sm" tone={employee.isActive ? 'brand' : 'neutral'} />
                     <b className={cn('text-sm font-semibold', !employee.isActive && 'text-ink-3')}>{employee.employeeName}</b>
-                    <Tag tone="brand" size="sm">
-                      {ROLE_LABEL[employee.roleCode]}
-                    </Tag>
+                    <span data-pet-field="역할">
+                      <Tag tone="brand" size="sm">
+                        {ROLE_LABEL[employee.roleCode]}
+                      </Tag>
+                    </span>
                     {employee.headDepartmentIds.length > 0 ? (
                       <HeadTag size="sm" departmentNames={employee.headDepartmentIds.map((id) => departmentNames.get(id) ?? '')} />
                     ) : null}
-                    <span className="ml-auto">
+                    <span className="ml-auto" data-pet-field="사용 여부">
                       <ActiveBadge isActive={employee.isActive} />
                     </span>
                   </span>
-                  <span className="pl-[30px] text-cap text-ink-3">
+                  <span className="pl-[30px] text-cap text-ink-3" data-pet-field="부서 · 직급 · 사원번호">
                     {employee.departmentName} · {employee.jobGradeName} · {employee.employeeNo}
                     {employee.lastLoginAt ? ` · 최근 ${fmtMDHM(employee.lastLoginAt)}` : ''}
                   </span>

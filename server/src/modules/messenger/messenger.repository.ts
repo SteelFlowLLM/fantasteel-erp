@@ -1,9 +1,319 @@
 import { Injectable } from '@nestjs/common';
+import { CHAT_ROOM_TYPE, MESSAGE_TYPE } from '@fantasteel/shared';
+import { getChatRoomListStats, lockChatRoomCreation } from '../../generated/prisma/sql';
+import type { Tx } from '../../prisma/prisma.service';
+
+/** 채팅방별 안 읽은 수와 마지막 메시지. 메시지가 없는 방은 last* 가 null이다 */
+export interface ChatRoomStatsRow {
+  chatRoomId: number;
+  unreadCount: number;
+  muted: boolean;
+  pinnedAt: Date | null;
+  lastMessage: { id: number; senderId: number | null; content: string | null; emoticonKey: string | null; firstAttachmentName: string | null; attachmentCount: number; createdAt: Date; deletedAt: Date | null } | null;
+}
+
+const employeeInclude = { department: true, jobGrade: true } as const;
+/** 첨부는 올린 순서대로 (스키마 3차) */
+// orderBy 배열은 Prisma가 readonly를 받지 않아 as const를 쓰지 않는다
+const attachmentInclude = { orderBy: [{ sortOrder: 'asc' as const }, { id: 'asc' as const }] };
+const attachmentNameInclude = { select: { fileName: true }, ...attachmentInclude } as const;
+/** 메시지와 보낸 사람, 첨부, 답글이면 원본 메시지(보낸 사람 이름·첨부 이름) */
+const messageInclude = {
+  sender: { include: employeeInclude },
+  messageAttachments: attachmentInclude,
+  parentMessage: { include: { sender: { select: { employeeName: true } }, messageAttachments: attachmentNameInclude } },
+  messageReactions: { include: { employee: { select: { employeeName: true } } }, orderBy: { id: 'asc' } },
+} as const;
 
 /**
  * DB 접근은 여기서만 한다. 함수의 첫 인자는 tx (컨벤션 8장).
- *   findById(tx: Tx, id: number) { return tx.salesOrder.findUnique({ where: { id } }); }
- * 집계·3개 이상 JOIN·잠금(FOR UPDATE)은 prisma/sql/*.sql(TypedSQL)로 만들고 tx.$queryRawTyped(...)로 부른다.
  */
 @Injectable()
-export class MessengerRepository {}
+export class MessengerRepository {
+  findRoomIdsOfMember(tx: Tx, employeeId: number) {
+    return tx.chatRoomMember.findMany({ where: { employeeId }, select: { chatRoomId: true } });
+  }
+
+  findRoomsWithMembers(tx: Tx, chatRoomIds: readonly number[]) {
+    return tx.chatRoom.findMany({
+      where: { id: { in: [...chatRoomIds] } },
+      include: { chatRoomMembers: { include: { employee: { include: employeeInclude } } } },
+    });
+  }
+
+  findRoomWithMembers(tx: Tx, id: number) {
+    return tx.chatRoom.findUnique({
+      where: { id },
+      include: {
+        chatRoomMembers: { include: { employee: { include: employeeInclude } } },
+        pinnedMessage: { include: { sender: { select: { employeeName: true } }, messageAttachments: attachmentNameInclude } },
+      },
+    });
+  }
+
+  /** 공지 고정·해제 (null이면 해제) */
+  updatePinnedMessage(tx: Tx, chatRoomId: number, messageId: number | null) {
+    return tx.chatRoom.update({ where: { id: chatRoomId }, data: { pinnedMessageId: messageId } });
+  }
+
+  findRoom(tx: Tx, id: number) {
+    return tx.chatRoom.findUnique({ where: { id } });
+  }
+
+  findMembership(tx: Tx, chatRoomId: number, employeeId: number) {
+    return tx.chatRoomMember.findUnique({ where: { chatRoomId_employeeId: { chatRoomId, employeeId } } });
+  }
+
+  /** TypedSQL은 LEFT JOIN LATERAL 컬럼을 not null로 추론해서, 메시지 없는 방의 null을 여기서 바로잡는다 */
+  async findRoomStats(tx: Tx, employeeId: number): Promise<ChatRoomStatsRow[]> {
+    const rows = await tx.$queryRawTyped(getChatRoomListStats(employeeId));
+    return rows.map((row) => {
+      const lastMessageId: number | null = row.last_message_id;
+      return {
+        chatRoomId: row.chat_room_id,
+        unreadCount: row.unread_count ?? 0,
+        muted: row.muted,
+        pinnedAt: row.pinned_at,
+        lastMessage:
+          lastMessageId === null
+            ? null
+            : {
+                id: lastMessageId,
+                senderId: row.last_sender_id,
+                content: row.last_content,
+                emoticonKey: row.last_emoticon_key,
+                firstAttachmentName: row.last_first_attachment_name,
+                attachmentCount: row.last_attachment_count ?? 0,
+                createdAt: row.last_created_at,
+                deletedAt: row.last_deleted_at,
+              },
+      };
+    });
+  }
+
+  countUnread(tx: Tx, chatRoomId: number, employeeId: number, lastReadMessageId: number | null) {
+    return tx.message.count({ where: { chatRoomId, id: { gt: lastReadMessageId ?? 0 }, senderId: { not: employeeId }, deletedAt: null } });
+  }
+
+  /** 두 사람만 멤버인 1:1 방 (같은 상대와의 방을 다시 만들지 않으려고) */
+  findDirectRoomOf(tx: Tx, employeeIds: readonly [number, number]) {
+    return tx.chatRoom.findFirst({
+      where: {
+        chatRoomType: CHAT_ROOM_TYPE.DIRECT,
+        AND: employeeIds.map((employeeId) => ({ chatRoomMembers: { some: { employeeId } } })),
+        chatRoomMembers: { every: { employeeId: { in: [...employeeIds] } } },
+      },
+      orderBy: { id: 'asc' },
+    });
+  }
+
+  findWorkRoomOf(tx: Tx, salesOrderId: number) {
+    return tx.chatRoom.findFirst({ where: { chatRoomType: CHAT_ROOM_TYPE.WORK, salesOrderId }, orderBy: { id: 'asc' } });
+  }
+
+  findMemberIds(tx: Tx, chatRoomId: number) {
+    return tx.chatRoomMember.findMany({ where: { chatRoomId }, select: { employeeId: true } });
+  }
+
+  /** 방 나가기: 멤버 행을 지운다 (읽음 위치·방 설정도 함께 사라진다) */
+  deleteMember(tx: Tx, chatRoomId: number, employeeId: number) {
+    return tx.chatRoomMember.delete({ where: { chatRoomId_employeeId: { chatRoomId, employeeId } } });
+  }
+
+  /** 알림을 끈 멤버 (업무방 새 메시지 알림에서 뺀다) */
+  findMutedMemberIds(tx: Tx, chatRoomId: number) {
+    return tx.chatRoomMember.findMany({ where: { chatRoomId, muted: true }, select: { employeeId: true } });
+  }
+
+  /** 내 방 설정: 알림 끄기·목록 위 고정 */
+  updateMemberSettings(tx: Tx, chatRoomId: number, employeeId: number, data: { muted?: boolean; pinnedAt?: Date | null }) {
+    return tx.chatRoomMember.update({ where: { chatRoomId_employeeId: { chatRoomId, employeeId } }, data });
+  }
+
+  createRoom(tx: Tx, data: { chatRoomType: string; chatRoomName: string | null; salesOrderId: number | null }) {
+    return tx.chatRoom.create({ data });
+  }
+
+  createMembers(tx: Tx, chatRoomId: number, employeeIds: readonly number[], lastReadMessageId: number | null) {
+    return tx.chatRoomMember.createMany({ data: employeeIds.map((employeeId) => ({ chatRoomId, employeeId, lastReadMessageId })), skipDuplicates: true });
+  }
+
+  updateRoomName(tx: Tx, id: number, chatRoomName: string | null) {
+    return tx.chatRoom.update({ where: { id }, data: { chatRoomName } });
+  }
+
+  findLastMessageId(tx: Tx, chatRoomId: number) {
+    return tx.message.findFirst({ where: { chatRoomId }, orderBy: { id: 'desc' }, select: { id: true } });
+  }
+
+  findEmployees(tx: Tx, ids: readonly number[]) {
+    return tx.employee.findMany({ where: { id: { in: [...ids] } }, select: { id: true, employeeName: true, isActive: true } });
+  }
+
+  findHeadEmployeeIds(tx: Tx, employeeIds: readonly number[]) {
+    return tx.department.findMany({ where: { headEmployeeId: { in: [...employeeIds] } }, select: { headEmployeeId: true } });
+  }
+
+  /** 업무방 상단 요약용 수주 (고객사·담당자·품목) */
+  findSalesOrderSummary(tx: Tx, id: number) {
+    return tx.salesOrder.findUnique({
+      where: { id },
+      include: {
+        customer: { select: { customerName: true } },
+        ownerEmployee: { select: { employeeName: true } },
+        salesOrderItems: { include: { item: { include: { steelGrade: { select: { steelGradeCode: true } } } } }, orderBy: { id: 'asc' } },
+      },
+    });
+  }
+
+  findSalesOrderBriefs(tx: Tx, ids: readonly number[]) {
+    return tx.salesOrder.findMany({
+      where: { id: { in: [...ids] } },
+      select: { id: true, salesOrderNo: true, customer: { select: { customerName: true } }, salesOrderItems: { select: { dueDate: true, salesOrderItemStatus: true } } },
+    });
+  }
+
+  findSalesOrderNos(tx: Tx, ids: readonly number[]) {
+    return tx.salesOrder.findMany({ where: { id: { in: [...ids] } }, select: { id: true, salesOrderNo: true, customer: { select: { customerName: true } } } });
+  }
+
+  /** before보다 오래된 메시지를 최신순으로 take개 */
+  /** @AI 지난 대화 찾기(이슈 #412): 이 방의 지우지 않은 메시지 중 낱말을 모두 담은 것 (새것부터). 같이 안 나오면 하나라도 담은 것 */
+  async searchRoomMessages(tx: Tx, chatRoomId: number, words: readonly string[], take: number) {
+    const query = (mode: 'AND' | 'OR') =>
+      tx.message.findMany({
+        where: { chatRoomId, deletedAt: null, [mode]: words.map((word) => ({ content: { contains: word, mode: 'insensitive' as const } })) },
+        orderBy: { id: 'desc' },
+        take,
+        select: { content: true, createdAt: true, sender: { select: { employeeName: true } } },
+      });
+    const all = await query('AND');
+    return all.length || words.length === 1 ? all : query('OR');
+  }
+
+  findMessagesBefore(tx: Tx, chatRoomId: number, before: number | undefined, take: number) {
+    return tx.message.findMany({
+      where: { chatRoomId, id: before === undefined ? undefined : { lt: before } },
+      orderBy: { id: 'desc' },
+      take,
+      include: messageInclude,
+    });
+  }
+
+  /** 첨부가 있는 메시지만, before보다 오래된 것을 최신순으로 take개 (파일 모아보기) */
+  findAttachmentMessagesBefore(tx: Tx, chatRoomId: number, before: number | undefined, take: number) {
+    return tx.message.findMany({
+      where: { chatRoomId, messageAttachments: { some: {} }, deletedAt: null, id: before === undefined ? undefined : { lt: before } },
+      orderBy: { id: 'desc' },
+      take,
+      include: messageInclude,
+    });
+  }
+
+  /** 본문에 검색어가 든 메시지를 최신순으로 (대소문자 무시) */
+  searchMessages(tx: Tx, chatRoomId: number, keyword: string, before: number | undefined, take: number) {
+    return tx.message.findMany({
+      where: { chatRoomId, content: { contains: keyword, mode: 'insensitive' }, deletedAt: null, id: before === undefined ? undefined : { lt: before } },
+      orderBy: { id: 'desc' },
+      take,
+      include: messageInclude,
+    });
+  }
+
+  /** 본문에 나온 업무 번호 중 실제로 있는 것 (ERP 링크) */
+  async findErpDocuments(tx: Tx, numbers: { salesOrderNos: string[]; purchaseRequisitionNos: string[]; shipmentRequestNos: string[] }) {
+    const [salesOrders, purchaseRequisitions, shipmentRequests] = await Promise.all([
+      numbers.salesOrderNos.length ? tx.salesOrder.findMany({ where: { salesOrderNo: { in: numbers.salesOrderNos } }, select: { id: true, salesOrderNo: true } }) : [],
+      numbers.purchaseRequisitionNos.length
+        ? tx.purchaseRequisition.findMany({ where: { purchaseRequisitionNo: { in: numbers.purchaseRequisitionNos } }, select: { id: true, purchaseRequisitionNo: true } })
+        : [],
+      numbers.shipmentRequestNos.length ? tx.shipmentRequest.findMany({ where: { shipmentRequestNo: { in: numbers.shipmentRequestNos } }, select: { id: true, shipmentRequestNo: true } }) : [],
+    ]);
+    return {
+      salesOrders: salesOrders.map((r) => ({ id: r.id, no: r.salesOrderNo })),
+      purchaseRequisitions: purchaseRequisitions.map((r) => ({ id: r.id, no: r.purchaseRequisitionNo })),
+      shipmentRequests: shipmentRequests.map((r) => ({ id: r.id, no: r.shipmentRequestNo })),
+    };
+  }
+
+  /** 안 읽은 사람 수를 셀 멤버의 읽음 위치. 퇴사자(사용 안 함 사원)는 읽을 수 없어 뺀다 (#496) */
+  findMemberReads(tx: Tx, chatRoomId: number) {
+    return tx.chatRoomMember.findMany({ where: { chatRoomId, employee: { isActive: true } }, select: { employeeId: true, lastReadMessageId: true } });
+  }
+
+  countActiveMembers(tx: Tx, chatRoomId: number) {
+    return tx.chatRoomMember.count({ where: { chatRoomId, employee: { isActive: true } } });
+  }
+
+  /** 시스템 메시지(보낸 사원 없음): 입장·초대·이름 변경 안내, 수주 업무 진행 알림 */
+  createSystemMessage(tx: Tx, chatRoomId: number, content: string) {
+    return tx.message.create({ data: { chatRoomId, messageType: MESSAGE_TYPE.SYSTEM, senderId: null, content }, include: messageInclude });
+  }
+
+  /** 재전송 중복 확인: 같은 사람이 같은 보내기 id로 이미 저장한 메시지 */
+  findMessageByClientId(tx: Tx, senderId: number, clientMessageId: string) {
+    return tx.message.findFirst({ where: { senderId, clientMessageId }, include: messageInclude });
+  }
+
+  findMessageWithSender(tx: Tx, id: number) {
+    return tx.message.findUnique({ where: { id }, include: messageInclude });
+  }
+
+  findReaction(tx: Tx, messageId: number, employeeId: number, emoji: string) {
+    return tx.messageReaction.findUnique({ where: { messageId_employeeId_emoji: { messageId, employeeId, emoji } } });
+  }
+
+  /** 더블클릭으로 같은 반응이 거의 동시에 두 번 와도 unique 오류(500) 없이 하나만 남긴다 (이슈 #488) */
+  createReaction(tx: Tx, messageId: number, employeeId: number, emoji: string) {
+    return tx.messageReaction.createMany({ data: [{ messageId, employeeId, emoji }], skipDuplicates: true });
+  }
+
+  /** 반응 취소는 행을 지운다 (업무 거래가 아니라 표시용). 이미 지워졌어도 오류 없이 넘어간다 */
+  deleteReaction(tx: Tx, id: number) {
+    return tx.messageReaction.deleteMany({ where: { id } });
+  }
+
+  /** 같은 1:1 방·업무방 만들기를 tx가 끝날 때까지 한 줄로 세운다 (이슈 #488) */
+  async lockRoomCreation(tx: Tx, key: string): Promise<void> {
+    await tx.$queryRawTyped(lockChatRoomCreation(key));
+  }
+
+  /** 본문 고치기: 고친 시각을 남긴다 */
+  updateMessageContent(tx: Tx, id: number, content: string | null) {
+    return tx.message.update({ where: { id }, data: { content, editedAt: new Date() }, include: messageInclude });
+  }
+
+  /** 삭제는 표시만 한다 (행·첨부 파일은 남김, #151) */
+  markMessageDeleted(tx: Tx, id: number) {
+    return tx.message.update({ where: { id }, data: { deletedAt: new Date() }, include: messageInclude });
+  }
+
+  /** 메시지와 첨부를 함께 만든다. 첨부는 받은 순서가 sort_order */
+  createMessage(
+    tx: Tx,
+    data: { chatRoomId: number; senderId: number; content: string | null; emoticonKey?: string | null; clientMessageId?: string | null; parentMessageId?: number | null },
+    attachments: readonly { filePath: string; fileName: string; fileSize: number }[] = [],
+  ) {
+    return tx.message.create({
+      data: { ...data, messageAttachments: { create: attachments.map((a, index) => ({ ...a, sortOrder: index })) } },
+      include: messageInclude,
+    });
+  }
+
+  findMessage(tx: Tx, id: number) {
+    return tx.message.findUnique({ where: { id }, select: { id: true, chatRoomId: true, senderId: true, messageType: true, emoticonKey: true, deletedAt: true, _count: { select: { messageAttachments: true } } } });
+  }
+
+  /** 첨부 내려받기: 첨부와 그 메시지의 방·삭제 여부 */
+  findAttachment(tx: Tx, id: number) {
+    return tx.messageAttachment.findUnique({ where: { id }, include: { message: { select: { chatRoomId: true, deletedAt: true } } } });
+  }
+
+  /** 읽음 위치는 앞으로만 옮긴다 */
+  moveLastRead(tx: Tx, chatRoomId: number, employeeId: number, messageId: number) {
+    return tx.chatRoomMember.updateMany({
+      where: { chatRoomId, employeeId, OR: [{ lastReadMessageId: null }, { lastReadMessageId: { lt: messageId } }] },
+      data: { lastReadMessageId: messageId },
+    });
+  }
+}

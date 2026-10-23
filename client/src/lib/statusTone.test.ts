@@ -56,8 +56,8 @@ describe('공통 상태 그룹의 배지 색', () => {
     expect(SHIPMENT_REQUEST_STATUS_TONE).toEqual({ REQUESTED: 'wait', ALLOCATED: 'run', ISSUED: 'ok', CANCELLED: 'neutral' });
     expect(ALLOCATION_STATUS_TONE).toEqual({ CONFIRMED: 'run', CONSUMED: 'ok', RELEASED: 'neutral' });
     expect(INSPECTION_RESULT_TONE).toEqual({ PENDING: 'wait', PASS: 'ok', FAIL: 'danger' });
-    expect(LOT_STATUS_TONE).toEqual({ AVAILABLE: 'run', CONSUMED: 'neutral', SHIPPED: 'neutral' });
-    expect(PURCHASE_REQUISITION_STATUS_TONE).toEqual({ WAITING_APPROVAL: 'wait', APPROVED: 'run', REJECTED: 'danger', ORDERED: 'ok' });
+    expect(LOT_STATUS_TONE).toEqual({ AVAILABLE: 'run', CONSUMED: 'neutral', SHIPPED: 'neutral', RECEIPT_CANCELLED: 'neutral' });
+    expect(PURCHASE_REQUISITION_STATUS_TONE).toEqual({ WAITING_APPROVAL: 'wait', APPROVED: 'run', REJECTED: 'danger', ORDERED: 'ok', ORDER_CANCELLED: 'neutral' });
   });
 
   it('공통 코드가 늘어도 색이 빠지지 않는다 (맵 키 = 공통 코드 값)', () => {
@@ -128,8 +128,8 @@ describe('같은 상태는 화면이 달라도 같은 색으로 그려진다', (
     }
   });
 
-  it('불합격 처리 상태: 품질 화면의 배지 색(보류 = 노랑, 격하 = 테두리, 폐기 = 빨강)을 재고 화면도 같이 쓴다', () => {
-    const tones: Record<DispositionStatus, BadgeTone> = { HOLD: 'wait', DOWNGRADED: 'outline', SCRAPPED: 'danger' };
+  it('불합격 처리 상태: 품질 화면의 배지 색(보류 = 노랑, 격하 = 파랑, 폐기 = 빨강)을 재고 화면도 같이 쓴다', () => {
+    const tones: Record<DispositionStatus, BadgeTone> = { HOLD: 'wait', DOWNGRADED: 'run', SCRAPPED: 'danger' };
     for (const status of keysOf<DispositionStatus>(DISPOSITION_STATUS_LABEL)) {
       expect(classOf(createElement(DispositionBadge, { status }))).toBe(toneClass(tones[status]));
     }

@@ -144,8 +144,9 @@ describe('이름 없는 입력칸·단추를 찾는 점검 자체', () => {
 
 describe('화면 코드의 접근성 이름', () => {
   const SRC = fileURLToPath(new URL('../', import.meta.url));
+  // Windows는 하위 경로를 \로 구분해 돌려줘서 PRIMITIVE_FILES(/ 구분)와 맞지 않는다. / 로 맞춘다
   const files = readdirSync(SRC, { recursive: true })
-    .map(String)
+    .map((name) => String(name).replaceAll('\\', '/'))
     .filter((name) => name.endsWith('.tsx') && !name.includes('.test.') && !PRIMITIVE_FILES.has(name));
 
   it('모든 입력칸·단추·링크에 이름이 있다', () => {

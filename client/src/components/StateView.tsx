@@ -56,8 +56,8 @@ export function StateView({ kind, title, text, code, icon, actions, className }:
         <Icon name={icon ?? DEFAULT_ICON[kind]} />
       </span>
       <b className="text-lg font-semibold text-ink">{title ?? DEFAULT_TITLE[kind]}</b>
-      {text ? <p className="max-w-[420px] text-sm leading-5 text-ink-2">{text}</p> : null}
-      {code ? <span className="font-mono text-[11.5px] text-ink-3">{code}</span> : null}
+      {text ? <p className="max-w-[420px] text-sm leading-normal text-ink-2">{text}</p> : null}
+      {code ? <span className="font-mono text-xs text-ink-3">{code}</span> : null}
       {actions ? <div className="flex justify-center gap-2">{actions}</div> : null}
     </div>
   );
@@ -71,7 +71,7 @@ export function EmptyNote({ className, children }: { className?: string; childre
 /** 셸 없이 화면 전체를 쓰는 상태 (처음 불러올 때, 로그인 확인 중) */
 export function FullScreenState(props: StateViewProps) {
   return (
-    <div className="flex h-screen w-screen items-center justify-center bg-bg">
+    <div className="flex h-viewport w-viewport items-center justify-center bg-bg">
       <StateView {...props} />
     </div>
   );

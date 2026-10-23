@@ -9,7 +9,7 @@
 | --- | --- |
 | REQ | REQ-QC-001~004. 판정 결과로 REQ-INV-003·004·007(적격·자동 예약·불합격 제외)을 일으킨다. REQ-SHP-003 이후 측정값 수정 차단 |
 | BP | BP-QC-01 검사·판정·불합격 처리·재생산([04] 6장). 재생산 계획 생성은 production 모듈 |
-| 등급 | P1 (과거 사례 등록 REQ-CASE-002는 EX, 만들지 않음) |
+| 등급 | P1 (과거 사례 등록 REQ-CASE-002는 EX라 이 모듈이 아니라 `past-case.md`, 2026-10-16) |
 
 ## 2. 테이블
 
@@ -31,12 +31,13 @@
 | GET | `inspection-standards` | 검사 기준 목록 | `INSPECTION_STANDARD_MANAGE` VIEW | |
 | POST | `inspection-standards` | 검사 기준 등록(새 버전) | `INSPECTION_STANDARD_MANAGE` USE | 수정하지 않고 새 버전으로 추가 |
 | GET | `quality-inspections` | 검사 목록 | `INSPECTION_REGISTER` VIEW | 판정 필터로 불합격 관리 목록에도 사용 |
-| POST | `quality-inspections` | 검사 등록·자동 판정 | `INSPECTION_REGISTER` USE | LOT당 1건, 기준 버전 참조, 필수값 누락은 PENDING |
+| POST | `quality-inspections` | 검사 등록·자동 판정 | `INSPECTION_REGISTER` USE | LOT당 1건, 기준 버전 참조, 필수값 누락은 PENDING. 커밋 뒤 Agent 합격 매수 부족 감지를 부르지만 응답은 기다리지 않는다(감지 큐가 전체 감지로 밀려 있어도 바로 응답, 2026-10-22 이슈 #496) |
 | PATCH | `quality-inspections/:id` | 검사 측정값 수정 | `INSPECTION_REGISTER` USE | |
 | POST | `lots/:id/disposition` | 불합격 처리 상태 지정 | `DISPOSITION_SET` USE | 값은 DISPOSITION_STATUS |
 
 다른 초안 행(`/api/v1`, 긴 비고): `GET quality-inspections/:id`, `GET inspection-standards/:id`, `POST inspection-standards/:id/versions`(새 버전), `GET lots/rejected`(권한 DISPOSITION_SET 또는 INSPECTION_REGISTER VIEW, 대안 경로 `quality-inspections/rejected-lots`). "또는" 권한은 service에서 `hasPermission`으로 확인한다.
-[권한표]: 품질 USE(3종), 생산은 INSPECTION_REGISTER·INSPECTION_STANDARD_MANAGE VIEW, 관리자 VIEW.
+검사 기준 상세(`GET inspection-standards/:id`)는 강종의 KS 규격 번호(`standardNo`)를 함께 준다. 강종 목록은 기준정보 조회 권한이 있어야 읽을 수 있어서다.
+[권한표]: 품질 USE(3종), 나머지 역할은 3종 모두 VIEW(2026-10-15 업무 조회는 모든 역할).
 
 ## 4. 업무 규칙·판정
 
@@ -62,6 +63,10 @@
 **측정값 수정**(PATCH): 같은 검사 행·값 행을 수정하고 변경 전·후를 작업 로그에 남긴다. 그 LOT(히트면 하위 제품)이 출고돼 **밀시트가 발행된 뒤에는 수정 차단**([ERD] quality_inspection Note). 판정이 바뀌면 위 재고 반영을 다시 한다.
 
 **불합격 처리 상태**(REQ-QC-004): 불합격 LOT(자기 FAIL 또는 불합격 히트의 하위, TRM-078)에만 HOLD·DOWNGRADED·SCRAPPED 중 하나와 사유를 기록한다. 판정 때는 값 없이 둔다. **재고·예약·배정은 바꾸지 않는다**(후속 로직 없음, 불합격 LOT은 이미 제외돼 있음).
+
+**지정 시각**(이슈 #498): 불합격 LOT 목록·지정 응답의 `dispositionAt`은 그 LOT의 작업 로그 `DISPOSITION_SET` 가운데 가장 늦은 발생 시각이다(LOT에 지정 시각 칸이 없어 작업 로그에서 구한다). 목록 줄들은 한 번에 읽고(`groupBy`), 지정한 적 없으면 null.
+
+**검사 대기 목록**(API-125 `GET quality-inspections`, `status=pending` 기본): 검사 행이 없거나 PENDING인 LOT. 불합격 히트의 하위 슬래브·코일은 이미 불합격이라(TRM-078) 뺀다. 대시보드 공정 흐름의 판정 대기 수도 같은 조건(`quality.repository.ts`의 `pendingInspectionLotWhere`)으로 센다(dashboard.md 4장).
 
 **검사 기준 새 버전**: 기존 기준·항목을 수정·삭제하지 않고 `version_no + 1`로 새 행을 만든다([05] 7-2). 기존 검사 기록은 당시 버전을 유지한다([07] 5장). 항목은 KS 인증심사기준 참고(화학성분·인장·항복·연신율, SM 계열은 탄소당량·샤르피), 무게 검사는 제외.
 
@@ -121,5 +126,9 @@
 | SM355 Ceq 두께 | 히트 판정에 50mm 이하 값만 쓴다(제품 두께를 모름) | `seed.ts` 주석, [07] 8-1 |
 | 연주 검사 기준 | 슬래브 표면·치수 min/max는 사내 가정값 | [07] 10장, `SPEC.md` 6장 |
 | 히트 미판정 연주 | 진행은 허용, 미합격 하위 제품 사용 차단(16장 제안) | [04] 16장 |
-| `/lots/rejected` 경로 | lot 모듈의 `GET lots/:id`와 충돌 가능(lot.md 8장) | `app.module.ts` |
+| ~~`/lots/rejected` 경로~~ ✅ 해결 | 명세 경로 하나로 둔다(2026-10-06 결정). `app.module.ts`에서 QualityModule을 LotModule보다 먼저 등록해 `lots/:id`보다 먼저 잡힌다. `rejected-lot.routes.spec.ts`가 확인 | `app.module.ts`, `rejected-lot.controller.ts` |
 | 측정값 수정 이벤트 | 수정 전용 이벤트 유형이 없다. INSPECTION_REGISTERED에 before/after로 남길지 확인 | [06] BUSINESS_EVENT_TYPE |
+
+## 9. 측정값 수정과 출고 확정이 겹칠 때 (2026-10-21, #487)
+
+- 측정값 수정은 거래 전체 잠금 순서(출하요청 → 재고 행 → LOT)를 따른다: 그 LOT(히트면 하위 제품까지)의 출하 배정(확정·소진)이 걸린 출하요청(id 순) → 그 제품 규격의 재고 행(item_id 순) → LOT(id 순, `lockLotsForInspectionUpdate.sql`)을 잠근 뒤 발행된 밀시트를 확인한다. 열연 실적(재고 행 → 슬래브 LOT)과도 순서가 맞는다. 출고 확정(출하요청 → … → LOT 출고·밀시트 발행)과 같은 순서라, 출고 확정이 진행 중이면 끝나기를 기다렸다가 발행된 밀시트를 보고 COM-004로 막는다. 전에는 출고 확정이 커밋되기 전에 확인을 통과해 발행된 밀시트와 다른 측정값이 남을 수 있었다.

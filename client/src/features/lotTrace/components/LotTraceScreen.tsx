@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import { LOT_RELATION_EVIDENCE_LABEL, LOT_TYPE_LABEL, RAW_MATERIAL_TYPE_LABEL } from '@/codes';
-import { ApiError } from '@/api/client';
+import { ApiError } from '@/api/errors';
 import type { LotTraceInput, LotTraceView } from '@/api/lotTrace';
 import { Button, ButtonLink } from '@/components/Button';
 import { Card, CardFoot, CardHead } from '@/components/Card';
@@ -25,6 +25,7 @@ import { TRACE_DIRECTION_LABEL, isTraceDirection, type TraceDirection } from '@/
 import { isAlloyNode, layoutTrace, lotKey, shipKey } from '@/features/lotTrace/lib/traceLayout';
 import { useShellTitle } from '@/features/shell/useShellTitle';
 import { useLotTrace } from '@/hooks/useLotTrace';
+import { useCanOpenHref } from '@/hooks/usePermission';
 import { fmtInt } from '@/lib/format';
 
 export function LotTraceScreen() {
@@ -97,6 +98,7 @@ export function LotTraceScreen() {
 
 function TraceHead({ trace }: { trace: LotTraceView }) {
   const start = trace.start;
+  const canOpen = useCanOpenHref();
   const crumb = (
     <>
       <Link href="/dashboard" className="text-ink-3 hover:underline">
@@ -124,9 +126,11 @@ function TraceHead({ trace }: { trace: LotTraceView }) {
           </span>
         }
         actions={
-          <ButtonLink icon="truck" href={`/shipment-requests/${s.shipmentRequestId}`}>
-            출하요청 상세
-          </ButtonLink>
+          canOpen(`/shipment-requests/${s.shipmentRequestId}`) ? (
+            <ButtonLink icon="truck" href={`/shipment-requests/${s.shipmentRequestId}`}>
+              출하요청 상세
+            </ButtonLink>
+          ) : undefined
         }
       />
     );
@@ -166,7 +170,7 @@ function TraceBody({ trace, onReroot }: { trace: LotTraceView; onReroot: (lotNo:
     <>
       <TraceHead trace={trace} />
       {isEmptyShipment && trace.start.kind === 'SHIPMENT_REQUEST' ? (
-        <Card>
+        <Card petKey="card:lotTrace.shipment">
           <CardHead title="출하요청" />
           <div className="flex flex-col gap-3 px-4 py-3">
             <ShipmentSummary shipment={trace.start.shipment} />
@@ -175,7 +179,7 @@ function TraceBody({ trace, onReroot }: { trace: LotTraceView; onReroot: (lotNo:
         </Card>
       ) : (
         <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_372px] gap-3.5 max-[1180px]:grid-cols-1">
-          <Card className="min-h-[420px]">
+          <Card className="min-h-[420px]" petKey="card:lotTrace.graph">
             <CardHead
               title={`${TRACE_DIRECTION_LABEL[trace.direction]} · LOT 관계`}
               meta={`${heads.map((h) => `${h.title} ${fmtInt(h.count)}`).join(' · ')} · 연결 ${fmtInt(trace.edges.length)}`}
@@ -184,22 +188,24 @@ function TraceBody({ trace, onReroot }: { trace: LotTraceView; onReroot: (lotNo:
               <TraceGraph trace={trace} selected={selected} onSelect={(key) => setSelected(key === selected ? null : key)} />
             </div>
             <CardFoot className="flex-wrap gap-3 text-xs">
-              <span className="text-cap text-ink-3">범례</span>
-              <span className="inline-flex items-center gap-1.5">
+              <span data-pet-term="범례" className="text-cap text-ink-3">
+                범례
+              </span>
+              <span data-pet-term={LOT_RELATION_EVIDENCE_LABEL.ACTUAL_INPUT} className="inline-flex items-center gap-1.5">
                 <svg width="26" height="6" aria-hidden="true">
                   <line x1="0" y1="3" x2="26" y2="3" className="stroke-brand" strokeWidth={2} />
                 </svg>
                 {LOT_RELATION_EVIDENCE_LABEL.ACTUAL_INPUT}
                 {hasAlloy ? ` (${RAW_MATERIAL_TYPE_LABEL.FERROALLOY} 포함)` : ''}
               </span>
-              <span className="inline-flex items-center gap-1.5">
+              <span data-pet-term={LOT_RELATION_EVIDENCE_LABEL.PERIOD_BASED} className="inline-flex items-center gap-1.5">
                 <svg width="26" height="6" aria-hidden="true">
                   <line x1="0" y1="3" x2="26" y2="3" className="stroke-[#6e829a] [stroke-dasharray:5_4]" strokeWidth={1.6} />
                 </svg>
                 {LOT_RELATION_EVIDENCE_LABEL.PERIOD_BASED} (그 기간에 쓰였을 수 있는 원료 · 실제 투입량 아님)
               </span>
               {trace.shipments.length ? (
-                <span className="inline-flex items-center gap-1.5">
+                <span data-pet-term="출하요청 배정" className="inline-flex items-center gap-1.5">
                   <svg width="26" height="6" aria-hidden="true">
                     <line x1="0" y1="3" x2="26" y2="3" className="stroke-run" strokeWidth={1.6} />
                   </svg>

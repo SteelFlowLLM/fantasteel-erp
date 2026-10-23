@@ -1,0 +1,179 @@
+import type { MeetingCandidate, MeetingMinutesView } from '@fantasteel/shared';
+import { describe, expect, it } from 'vitest';
+import { analysisProgressText, transcriptionProgressText, analyzeAvailability, approvalBlocker, contextLinesOf, decisionCounts, evidenceLabel, formatDuration, formatSchedule, groupCandidates, purchaseApprovalBlocker, registerPreview, reviewSummaryText, traceChunkText, traceSummaryText } from '@/lib/meetingAnalysis';
+
+const minutes = (over: Partial<MeetingMinutesView> = {}): MeetingMinutesView => ({
+  id: 1,
+  meetingMinutesTitle: '회의',
+  meetingDate: '2026-10-15',
+  meetingMinutesStatus: 'TRANSCRIBED',
+  transcript: '글',
+  transcriptSegments: [],
+  speakers: [],
+  summary: null,
+  analysisResult: null,
+  analysisProgress: null,
+  transcriptionProgress: null,
+  failureReason: null,
+  creator: { id: 5, name: '정다은' },
+  attendees: [],
+  confirmedAt: null,
+  notionPageUrl: null,
+  notionExportedAt: null,
+  createdAt: '2026-10-15T00:00:00.000Z',
+  updatedAt: '2026-10-15T00:00:00.000Z',
+  ...over,
+});
+
+const candidate = (kind: MeetingCandidate['kind'], key: string): MeetingCandidate => ({
+  key, kind, title: key, description: null, evidence: [0], sourceText: null, assigneeId: null, assigneeName: null, dueDate: null, startAt: null, endAt: null,
+  endAssumed: false, attendeeIds: [], purchase: null, itemName: null, relatedSalesOrderNo: null, salesOrderId: null, issues: [], context: [], decision: 'PENDING',
+});
+
+describe('analyzeAvailability', () => {
+  it('작성자가 전사 완료·검토 대기·실패(전사 있음)일 때만 정리할 수 있다', () => {
+    for (const status of ['TRANSCRIBED', 'REVIEW', 'FAILED'] as const) expect(analyzeAvailability(minutes({ meetingMinutesStatus: status }), 5)).toEqual({ ok: true });
+    for (const status of ['TRANSCRIBING', 'ANALYZING', 'CONFIRMED'] as const) expect(analyzeAvailability(minutes({ meetingMinutesStatus: status }), 5).ok).toBe(false);
+  });
+
+  it('작성자가 아니거나 전사가 없으면 안내 없이 막는다', () => {
+    expect(analyzeAvailability(minutes(), 6)).toEqual({ ok: false, reason: null });
+    expect(analyzeAvailability(minutes({ meetingMinutesStatus: 'FAILED', transcript: null }), 5)).toEqual({ ok: false, reason: null });
+  });
+
+  it('4만 자를 넘어도 나눠 분석하고, 20만 자를 넘으면 사유를 알린다', () => {
+    expect(analyzeAvailability(minutes({ transcript: '가'.repeat(40_001) }), 5)).toEqual({ ok: true });
+    expect(analyzeAvailability(minutes({ transcript: '가'.repeat(200_001) }), 5)).toEqual({ ok: false, reason: expect.stringContaining('20만 자') });
+  });
+});
+
+describe('후보 표시 계산', () => {
+  it('할 일 → 일정 → 구매요청 초안 순으로 묶고 빈 묶음은 뺀다', () => {
+    const groups = groupCandidates([candidate('PURCHASE', 'c1'), candidate('TASK', 'c2'), candidate('PURCHASE', 'c3')]);
+    expect(groups.map((g) => [g.label, g.items.map((i) => i.key)])).toEqual([['할 일', ['c2']], ['구매요청 초안', ['c1', 'c3']]]);
+  });
+
+  it('일정 시각은 시간대 변환 없이 잘라 보인다', () => {
+    expect(formatSchedule('2026-10-20T14:00:00+09:00', '2026-10-20T15:00:00+09:00')).toBe('2026-10-20 14:00 ~ 15:00');
+    expect(formatSchedule('2026-10-20T23:30:00+09:00', '2026-10-21T00:30:00+09:00')).toBe('2026-10-20 23:30 ~ 2026-10-21 00:30');
+    expect(formatSchedule(null, null)).toBe('-');
+  });
+
+  it('발언 번호는 1부터', () => {
+    expect(evidenceLabel(0)).toBe('#1');
+  });
+});
+
+describe('허가·제외 계산', () => {
+  const task = (over: Partial<MeetingCandidate> = {}) => ({ ...candidate('TASK', 'c1'), assigneeId: 7, dueDate: '2026-10-22', ...over });
+
+  it('허가·제외·남음 수를 센다', () => {
+    const list = [task({ decision: 'APPROVED' }), task({ key: 'c2', decision: 'EXCLUDED' }), task({ key: 'c3' }), task({ key: 'c4' })];
+    expect(decisionCounts(list)).toEqual({ approved: 1, excluded: 1, pending: 2 });
+  });
+
+  it('허가를 막는 이유는 서버 규칙과 같다 (종류별 필수 칸)', () => {
+    expect(approvalBlocker(task())).toBeNull();
+    expect(approvalBlocker(task({ assigneeId: null }))).toBe('담당자을(를) 채워야 허가할 수 있어요');
+    expect(approvalBlocker({ ...candidate('EVENT', 'c1'), startAt: '2026-10-20T14:00:00+09:00', endAt: '2026-10-20T14:00:00+09:00', attendeeIds: [1] })).toContain('끝 시각');
+    expect(approvalBlocker({ ...candidate('EVENT', 'c1'), startAt: '2026-10-20T14:00:00+09:00', endAt: '2026-10-20T15:00:00+09:00' })).toContain('참석자');
+    expect(approvalBlocker(candidate('PURCHASE', 'c1'))).toBe('원료 품목, 수량(톤), 희망 입고일을(를) 채워야 허가할 수 있어요');
+  });
+
+  it('구매요청 후보는 구매요청 등록 사용 권한이 없거나 자기 부서의 부서장이면 허가를 막는다 (서버 COM-002·PUR-001과 같다, #519)', () => {
+    const purchase = candidate('PURCHASE', 'c1');
+    const staff = { permissions: { PURCHASE_REQUISITION_CREATE: 'USE' as const }, departmentId: 3, headDepartmentIds: [] };
+    expect(purchaseApprovalBlocker(purchase, staff)).toBeNull();
+    expect(purchaseApprovalBlocker(purchase, { ...staff, headDepartmentIds: [5] })).toBeNull();
+    expect(purchaseApprovalBlocker(purchase, { ...staff, permissions: { PURCHASE_REQUISITION_CREATE: 'VIEW' } })).toContain('요청자를 구매요청 권한이 있는 사원');
+    expect(purchaseApprovalBlocker(purchase, { ...staff, headDepartmentIds: [3] })).toContain('부서장 본인');
+    expect(purchaseApprovalBlocker(task(), { ...staff, permissions: {} })).toBeNull();
+    // 요청자를 따로 정했으면(#530) 작성자의 권한·부서장 여부로 막지 않는다
+    expect(purchaseApprovalBlocker({ ...purchase, purchaseRequesterId: 9 }, { ...staff, permissions: {} })).toBeNull();
+    expect(purchaseApprovalBlocker({ ...purchase, purchaseRequesterId: 9 }, { ...staff, headDepartmentIds: [3] })).toBeNull();
+  });
+
+  it('확정 확인창에는 허가한 후보만 종류별로 보인다', () => {
+    const list = [task({ title: '견적 정리', decision: 'APPROVED' }), task({ key: 'c2', title: '제외', decision: 'EXCLUDED' }), { ...candidate('EVENT', 'c3'), title: '방문', decision: 'APPROVED' as const }];
+    expect(registerPreview(list)).toEqual([
+      { label: '할 일 1건', titles: ['견적 정리'] },
+      { label: '일정 1건 (Notion 캘린더에도 1건)', titles: ['방문'] },
+    ]);
+    const offline = [{ ...candidate('EVENT', 'c3'), title: '방문', decision: 'APPROVED' as const, notionSync: false }];
+    expect(registerPreview(offline)).toEqual([{ label: '일정 1건', titles: ['방문'] }]);
+  });
+});
+
+describe('contextLinesOf', () => {
+  it('서버가 준 현황 줄을 그대로 읽는다', () => {
+    const lines = [{ label: '현재 재고', value: '12.500 톤', tone: 'info' as const }, { label: '일정 겹침', value: '최준혁 · 14:30~15:30 회의', tone: 'warn' as const }];
+    expect(contextLinesOf({ ...candidate('PURCHASE', 'c1'), context: lines })).toEqual(lines);
+  });
+
+  it('옛 분석 결과(칸 없음)·모양이 틀린 값은 빈 배열이나 걸러낸 줄로 읽는다', () => {
+    const old = { ...candidate('TASK', 'c1') } as Partial<MeetingCandidate>;
+    delete old.context;
+    expect(contextLinesOf(old as MeetingCandidate)).toEqual([]);
+    expect(contextLinesOf({ ...candidate('TASK', 'c1'), context: 'x' as unknown as MeetingCandidate['context'] })).toEqual([]);
+    const messy = [null, { label: 1 }, { label: '업무', value: '3건', tone: 'bogus' }] as unknown as MeetingCandidate['context'];
+    expect(contextLinesOf({ ...candidate('TASK', 'c1'), context: messy })).toEqual([{ label: '업무', value: '3건', tone: 'info' }]);
+  });
+});
+
+describe('reviewSummaryText', () => {
+  it('성공하면 빠진 후보·지적 건수, 실패하면 1차 결과만 보인다고 알린다', () => {
+    expect(reviewSummaryText({ ok: true, missedCount: 2, concernCount: 0 })).toBe('2차 검토: 빠진 후보 2건 · 지적 0건');
+    expect(reviewSummaryText({ ok: true, missedCount: 1, concernCount: 1, failedChunks: 2 })).toBe('2차 검토: 빠진 후보 1건 · 지적 1건 (조각 2개는 검토 실패)');
+    expect(reviewSummaryText({ ok: false, error: '시간 초과' })).toBe('2차 검토 실패 — 1차 결과만 보여요');
+  });
+
+  it('2차 검토를 하지 않은 옛 결과는 아무것도 보이지 않는다', () => {
+    expect(reviewSummaryText(undefined)).toBeNull();
+  });
+});
+
+describe('AI 실행 기록 표시', () => {
+  it('formatDuration: 1분 미만은 소수 한 자리 초, 넘으면 분·초', () => {
+    expect(formatDuration(8400)).toBe('8.4초');
+    expect(formatDuration(72_300)).toBe('1분 12초');
+    expect(formatDuration(-5)).toBe('0.0초');
+  });
+
+  it('traceSummaryText: 호출 수·전체 시간·버림·고침 수, 없는 것은 뺀다', () => {
+    const step = (changes: { action: 'DROPPED' | 'CHANGED' }[]) => ({
+      stage: 'ANALYSIS' as const,
+      model: 'm',
+      durationMs: 1000,
+      ok: true,
+      error: null,
+      rawAnswer: null,
+      thinking: null,
+      truncated: false,
+      changes: changes.map((c) => ({ ...c, title: null, reason: '이유' })),
+    });
+    expect(traceSummaryText({ steps: [step([{ action: 'DROPPED' }, { action: 'CHANGED' }]), step([{ action: 'DROPPED' }])], totalMs: 90_000 })).toBe('AI 호출 2번 · 1분 30초 · 버림 2 · 고침 1');
+    expect(traceSummaryText({ steps: [step([])], totalMs: 1500 })).toBe('AI 호출 1번 · 1.5초');
+  });
+});
+
+describe('긴 전사 조각 분석 표시', () => {
+  it('진행 안내는 조각이 여럿일 때만 몇 번째인지 보인다', () => {
+    expect(analysisProgressText(null)).toBeNull();
+    expect(analysisProgressText({ phase: 'ANALYSIS', current: 1, total: 1 })).toBe('1차 분석 중');
+    expect(analysisProgressText({ phase: 'ANALYSIS', current: 2, total: 5 })).toBe('1차 분석 중 (조각 2/5)');
+    expect(analysisProgressText({ phase: 'MERGE', current: 1, total: 1 })).toBe('조각 결과를 합치는 중');
+    expect(analysisProgressText({ phase: 'REVIEW', current: 5, total: 5 })).toBe('2차 검토 중 (조각 5/5)');
+  });
+
+  it('음성 전사 진행: 화자 나누는 중 → 받아쓰는 중 n/m, 진행 칸이 없으면 null (이슈 #522)', () => {
+    expect(transcriptionProgressText(null)).toBeNull();
+    expect(transcriptionProgressText({ phase: 'DIARIZE', current: 1, total: 1 })).toBe('화자를 나누는 중');
+    expect(transcriptionProgressText({ phase: 'TRANSCRIBE', current: 3, total: 7 })).toBe('받아쓰는 중 3/7');
+    expect(transcriptionProgressText({ phase: 'TRANSCRIBE', current: 1, total: 1 })).toBe('받아쓰는 중');
+  });
+
+  it('실행 기록의 조각 표시는 나눈 분석에만 붙는다', () => {
+    expect(traceChunkText(undefined)).toBeNull();
+    expect(traceChunkText({ index: 2, total: 3, firstSegment: 210, lastSegment: 432 })).toBe('조각 2/3 · 발언 #210~#432');
+  });
+});

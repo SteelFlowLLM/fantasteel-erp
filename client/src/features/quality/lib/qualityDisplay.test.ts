@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   fillTypicalValues,
+  gaugeEdgeLabels,
   gaugeGeometry,
   inspectionItemCodesOfHistory,
   inspectionResultOfSnapshot,
   limitText,
+  measuredCardsPerRow,
+  qtyUnitOfItem,
+  qtyUnitOfLot,
   measuredValueChanges,
   previewOf,
   sameMeasuredValue,
@@ -22,9 +26,17 @@ describe('기준 문구', () => {
     expect(limitText({ minValue: null, maxValue: null })).toBe('기준 없음');
   });
 
+  it('게이지 눈금 글자는 단위를 붙이고, 한쪽 기준만 있으면 이상·이하를 붙인다 (카드 아래 "기준" 줄 대신)', () => {
+    expect(gaugeEdgeLabels({ minValue: '-5.0000', maxValue: '5.0000', unit: 'mm' })).toEqual({ min: '-5 mm', max: '5 mm' });
+    expect(gaugeEdgeLabels({ minValue: null, maxValue: '0.2500', unit: '%' })).toEqual({ min: null, max: '0.25 % 이하' });
+    expect(gaugeEdgeLabels({ minValue: '355', maxValue: null, unit: 'N/mm²' })).toEqual({ min: '355 N/mm² 이상', max: null });
+    expect(gaugeEdgeLabels({ minValue: '0', maxValue: '2' })).toEqual({ min: '0', max: '2' });
+  });
+
   it('두께 구간은 초과~이하로 보인다', () => {
     expect(thicknessBandText('6', '16')).toBe('두께 6 초과 ~ 16 이하 mm');
-    expect(thicknessBandText('6', null)).toBe('두께 6 mm 초과');
+    expect(thicknessBandText('6', null)).toBe('두께 6 초과 mm');
+    expect(thicknessBandText(null, '16')).toBe('두께 16 이하 mm');
     expect(thicknessBandText(null, null)).toBeNull();
   });
 });
@@ -114,5 +126,23 @@ describe('작업 로그의 검사 항목 코드', () => {
       { businessEventType: 'DISPOSITION_SET', beforeData: values(['C']), afterData: null },
     ]);
     expect(codes.sort()).toEqual(['SURFACE_DEFECT_DEPTH', 'THICKNESS_DEV', 'WIDTH_DEV']);
+  });
+});
+
+describe('측정값 카드 한 줄 개수 (넓은 화면)', () => {
+  it('마지막 줄이 더 꽉 차는 쪽(3 또는 4)을 고른다', () => {
+    // 히트 성분 5개는 3 + 2, 슬래브 4개는 한 줄, 코일 6개는 3 + 3, 열연 16개는 4줄
+    expect([1, 2, 3, 4, 5, 6, 7, 8, 9, 16].map(measuredCardsPerRow)).toEqual([1, 2, 3, 4, 3, 3, 4, 4, 3, 4]);
+  });
+});
+
+describe('매수 단위 (슬래브 매 · 코일 개)', () => {
+  it('수주 품목·LOT 종류로 단위를 고른다. 히트는 연결 수주 품목을 따른다', () => {
+    expect(qtyUnitOfItem({ itemType: 'COIL' })).toBe('개');
+    expect(qtyUnitOfItem({ itemType: 'SLAB' })).toBe('매');
+    expect(qtyUnitOfItem(null)).toBe('매');
+    expect(qtyUnitOfLot('COIL', null)).toBe('개');
+    expect(qtyUnitOfLot('SLAB', { itemType: 'COIL' })).toBe('매');
+    expect(qtyUnitOfLot('HEAT', { itemType: 'COIL' })).toBe('개');
   });
 });

@@ -1,26 +1,6 @@
-// 수주 품목·헤더 상태 (REQ-SO-005, BP-SO-02, 업무 프로세스 10장).
-// 품목: OPEN 진행중 → PARTIALLY_SHIPPED 부분출하 → SHIPPED 출하완료, 취소는 CANCELLED.
-// 헤더 상태는 저장하지 않고 품목 상태에서 계산한다 (ERD sales_order note). 같은 코드·표시명을 쓴다.
+// 수주 날짜 계산·납기 위험 표시 (REQ-SO-005, BP-SO-02, 업무 프로세스 10장).
+// 품목·헤더 상태는 서버가 계산해 준다 (ERD sales_order note, sales-order fulfillment.calculator).
 import type { SalesOrderItemStatus } from '@/codes';
-
-export function itemStatusOf(input: { orderedQty: number; shippedQty: number; cancelled: boolean }): SalesOrderItemStatus {
-  if (input.cancelled) return 'CANCELLED';
-  if (input.shippedQty <= 0) return 'OPEN';
-  return input.shippedQty >= input.orderedQty ? 'SHIPPED' : 'PARTIALLY_SHIPPED';
-}
-
-/**
- * 헤더 상태: 모두 취소 → CANCELLED, (취소 빼고) 모두 출하완료 → SHIPPED,
- * 출하가 하나라도 있으면 → PARTIALLY_SHIPPED, 그 밖에는 OPEN.
- */
-export function headerStatusOf(itemStatuses: readonly SalesOrderItemStatus[]): SalesOrderItemStatus {
-  if (itemStatuses.length === 0) return 'OPEN';
-  const live = itemStatuses.filter((s) => s !== 'CANCELLED');
-  if (live.length === 0) return 'CANCELLED';
-  if (live.every((s) => s === 'SHIPPED')) return 'SHIPPED';
-  if (live.some((s) => s === 'SHIPPED' || s === 'PARTIALLY_SHIPPED')) return 'PARTIALLY_SHIPPED';
-  return 'OPEN';
-}
 
 /** 날짜 차이(일): b − a. 'YYYY-MM-DD' */
 export function daysBetween(a: string, b: string): number {

@@ -12,6 +12,7 @@ import {
 import type { BadgeTone } from '@/components/Badge';
 import type { LotInspectionResult } from '@/features/inventory/lib/inventoryRules';
 import { LOT_STATUS_TONE } from '@/lib/statusTone';
+import { compareDecimal } from '@/lib/weight';
 
 export interface QualityDisplay {
   label: string;
@@ -89,6 +90,21 @@ export function productTotalsOf(rows: readonly ProductTotalsInput[], itemType: P
 /** 모든 값이 0인 규격 줄은 흐리게 보인다 */
 export function isEmptyProductRow(row: { onHandQty: number; reservedQty: number; hotRollingAllocatedQty: number }): boolean {
   return row.onHandQty === 0 && row.reservedQty === 0 && row.hotRollingAllocatedQty === 0;
+}
+
+/** 1매 이론중량 정렬 방향. null이면 서버가 준 순서 그대로 */
+export type UnitWeightSort = 'desc' | 'asc' | null;
+
+/** 머리글을 누를 때마다: 처음엔 무거운 순, 그다음부터 무거운 순 ↔ 가벼운 순 */
+export function nextUnitWeightSort(sort: UnitWeightSort): Exclude<UnitWeightSort, null> {
+  return sort === 'desc' ? 'asc' : 'desc';
+}
+
+/** 1매 이론중량으로 정렬한다. 톤은 소수 문자열이라 compareDecimal로 비교하고, 무게가 같으면 원래 순서를 지킨다 */
+export function sortByUnitWeight<T extends { theoreticalWeightTon: string }>(rows: readonly T[], sort: UnitWeightSort): T[] {
+  if (!sort) return [...rows];
+  const sign = sort === 'desc' ? -1 : 1;
+  return [...rows].sort((a, b) => sign * compareDecimal(a.theoreticalWeightTon, b.theoreticalWeightTon));
 }
 
 /** LOT 번호 검색: 공백을 지우고 대소문자 구분 없이 부분 일치 */

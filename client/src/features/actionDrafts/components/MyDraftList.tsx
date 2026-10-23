@@ -32,6 +32,7 @@ export function MyDraftList({ activeId }: { activeId: number | null }) {
   return (
     <MasterPane
       className="hidden lg:flex"
+      petKey="card:purchaseRequisitions.myDrafts"
       head={
         <>
           <div className="flex items-baseline gap-2">
@@ -39,16 +40,16 @@ export function MyDraftList({ activeId }: { activeId: number | null }) {
             <span className="text-xs text-ink-3">{counts.ALL}건</span>
           </div>
           <div className="flex flex-wrap gap-1.5" role="group" aria-label="초안 상태">
-            <Chip on={filter === 'ALL'} onClick={() => setFilter('ALL')}>
+            <Chip on={filter === 'ALL'} onClick={() => setFilter('ALL')} data-pet-term="전체">
               전체 <b>{counts.ALL}</b>
             </Chip>
             {STATUS_ORDER.filter((status) => counts[status] > 0).map((status) => (
-              <Chip key={status} on={filter === status} onClick={() => setFilter(status)}>
+              <Chip key={status} on={filter === status} onClick={() => setFilter(status)} data-pet-term={DRAFT_STATUS_LABEL[status]}>
                 {DRAFT_STATUS_LABEL[status]} <b>{counts[status]}</b>
               </Chip>
             ))}
           </div>
-          <p className="text-cap text-ink-3">메시지를 보낸 내가 요청자인 초안이에요. 내가 확정해야 구매요청이 만들어져요.</p>
+          <p className="text-cap text-ink-3">내가 확정할 초안이에요. 구매요청은 메시지를 보낸 사람이, 수주·출하·배정·재생산은 초안을 만든 사람이 확정해요.</p>
         </>
       }
     >
@@ -58,7 +59,7 @@ export function MyDraftList({ activeId }: { activeId: number | null }) {
           if (shown.length === 0) {
             return (
               <EmptyNote className="m-4">
-                {list.length === 0 ? '아직 내가 요청자인 초안이 없어요. 메신저 메시지의 더 보기 메뉴에서 구매요청 초안을 만들 수 있어요.' : '이 상태의 초안이 없어요'}
+                {list.length === 0 ? '아직 내가 확정할 초안이 없어요. 메신저 메시지의 더 보기 메뉴에서 업무 초안을 만들 수 있어요.' : '이 상태의 초안이 없어요'}
               </EmptyNote>
             );
           }
@@ -69,24 +70,38 @@ export function MyDraftList({ activeId }: { activeId: number | null }) {
                   <Link
                     href={`/action-drafts/${draft.id}`}
                     aria-current={draft.id === activeId ? 'page' : undefined}
+                    data-pet-item="actionDraft"
+                    data-pet-item-title={`초안 #${draft.id}`}
                     className={cn(
                       'flex flex-col gap-1 border-b border-line px-4 py-2.5 hover:bg-surface-2',
-                      draft.id === activeId && 'bg-brand-tint shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-brand-tint',
+                      draft.id === activeId && 'bg-brand-tint shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-brand-tint-hover',
                     )}
                   >
                     <span className="flex items-center gap-2">
                       <b className="text-sm font-semibold">초안 #{draft.id}</b>
-                      <span className="truncate text-cap text-ink-3">{draft.actionTypeLabel}</span>
+                      <span data-pet-field="업무 유형" className="truncate text-cap text-ink-3">
+                        {draft.actionTypeLabel}
+                      </span>
                       <Badge tone={DRAFT_STATUS_TONE[draft.draftStatus]} className="ml-auto">
                         {DRAFT_STATUS_LABEL[draft.draftStatus]}
                       </Badge>
                     </span>
-                    <span className="truncate text-xs text-ink-2">“{draft.messageContent ?? '원본 메시지 없음'}”</span>
+                    <span data-pet-field="원본 메시지" className="truncate text-xs text-ink-2">
+                      “{draft.messageContent ?? '원본 메시지 없음'}”
+                    </span>
                     <span className="flex items-center gap-1.5 text-cap text-ink-3">
-                      <span className="truncate">{draft.chatRoomName ?? '채팅방'}</span>
+                      <span data-pet-field="채팅방" className="truncate">
+                        {draft.chatRoomName ?? '채팅방'}
+                      </span>
                       <span aria-hidden="true">·</span>
-                      <span className="flex-none">{relTime(draft.createdAt)}</span>
-                      {draft.purchaseRequisitionNo ? <span className="ml-auto flex-none font-mono text-ink-2">{draft.purchaseRequisitionNo}</span> : null}
+                      <span data-pet-field="생성" className="flex-none">
+                        {relTime(draft.createdAt)}
+                      </span>
+                      {draft.resultNo ? (
+                        <span data-pet-field="만든 업무" className="ml-auto flex-none font-mono text-ink-2">
+                          {draft.resultNo}
+                        </span>
+                      ) : null}
                     </span>
                   </Link>
                 </li>

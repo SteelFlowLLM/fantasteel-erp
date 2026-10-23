@@ -16,9 +16,19 @@
 | quality | [quality.md](quality.md) | 검사 기준·검사·자동 판정·불합격 처리 | |
 | shipment | [shipment.md](shipment.md) | 출하요청·출고 확정·밀시트 | |
 | business-event | [business-event.md](business-event.md) | 작업 로그 조회·이력 재현 | |
+| dashboard | [dashboard.md](dashboard.md) | 대시보드 위젯 조회(P3) | |
 | notification | [notification.md](notification.md) | 업무·알림 | |
 | messenger | [messenger.md](messenger.md) | 채팅방·메시지·첨부·읽음·실시간 | |
-| message-action | [message-action.md](message-action.md) | Message → ERP 구매요청 초안 | |
+| message-action | [message-action.md](message-action.md) | Message → ERP 업무 초안: 구매요청 + 확장 유형(출하요청·수주 등록·배정 확정·재생산 계획). Agent 후보 요청은 factory-agent로 넘긴다 | 정건희 |
+| factory-agent | [factory-agent.md](factory-agent.md) | AI Factory Agent (P2): 규칙 위험 감지(원료 부족·합격 매수 부족·납기 위험·여재 장기 보유·불합격률 상승) → 대응 후보·알림, 확정·상황 설명 | |
+| ai-assistant | [ai-assistant.md](ai-assistant.md) | 철강맨AI (P2): 용어·업무·매뉴얼 답변, ERP 조회 도구, 실행 카드, 웹 검색·브라우저·화면 조작·Notion·Drive, 대화 기록·회의 질문, 실시간 답 | 현명지 |
+| llm | [ai-assistant.md](ai-assistant.md) | LLM 연결 설정·호출(`modules/llm`): LM Studio·Unsloth Studio·외부 OpenAI 호환 서버의 주소·모델·API 키, 사진·생각 정도·문맥 길이 지원, 연결·응답 확인, 브라우저 시작 사이트, 실패 오류 코드 AST-002~005. 관리 > AI 연결 화면이 쓴다 (문서에 없는 기능) | |
+| stt | [stt.md](stt.md) | 음성 인식(Whisper) 연결: 회의 녹음·철강맨 부르기 말 조각 받아쓰기, 같은 Mac의 음성 서버 켜기·끄기 (Voice2ERP, 문서에 없는 기능) | |
+| meeting-minutes | [meeting-minutes.md](meeting-minutes.md) | Voice2ERP 회의록: 전사·AI 분석·후보 검토·등록(업무·일정·구매요청 초안) | |
+| schedule-event | [schedule-event.md](schedule-event.md) | 내 일정: 회의록 확정이 만든 일정과 사원이 직접 등록하는 일정 (문서에 없는 기능) | |
+| ai-research | [ai-research.md](ai-research.md) | 철강맨AI 심층 조사: 계획 → 웹 검색·읽기 반복 → 점검 → 인용 보고서 (이슈 #378, 문서에 없는 기능) | 김명재 |
+| past-case | [past-case.md](past-case.md) | 과거 사례 (EX): 검색·AI 사례 초안·등록. 예시 사례 + 등록 사례(`past_case`) | |
+| integration | [integration.md](integration.md) | 외부 서비스 연결(Notion 원격 MCP, 이후 Google Drive)·회의록 Notion 내보내기 (이슈 #358) | |
 
 시드 내용과 테스트 계정: [seed.md](seed.md). 담당 칸은 역할 분담이 정해지면 채운다 (기획안: 역할 분담 TBD).
 
@@ -27,7 +37,7 @@
 | 항목 | 정한 값 | 이유 |
 |---|---|---|
 | 기준 데이터 모델 | ERD(`docs/erd/fantasteel_erp_p1.dbml`) 그대로. 업무 프로세스 정의서 11장과 다르면 ERD | ERD가 설계 결정을 반영한 최신본 (Project Note "설계 결정") |
-| 채번 방식 | 같은 앞부분 최댓값 + 1. 동시에 같은 번호면 unique 위반 → `COM-001`(다시 시도) | ERD에 채번 카운터 테이블이 없음 (정의서 9.2의 DB 카운터는 구현 제안) |
+| 채번 방식 | 같은 앞부분 최댓값 + 1. 최댓값을 읽기 전에 그 앞부분을 트랜잭션 끝까지 잠가(advisory lock) 동시 거래는 차례로 번호를 받는다 | ERD에 채번 카운터 테이블이 없음 (정의서 9.2의 DB 카운터는 구현 제안) |
 | 요청 고유키(중복 요청 방지) | 만들지 않음 | ERD에 테이블이 없고 API 명세서 공통 규약에서 🟡 미정 |
 | 오류 코드 추가 4개 | `AUTH-001` 로그인 실패(401), `AUTH-002` 로그인 필요(401), `COM-004` 입력 형식 오류(400), `COM-999` 서버 오류(500) | 정의서 9.3에 없지만 공통 기반에 필요 (`shared/src/errors.ts`) |
 | 오류 HTTP 상태 | 정의서에 (409)로 적힌 것은 그대로. 나머지: 상태 충돌(INV·PUR·MST-002·COM-001) 409, 권한 COM-002 403, 참조 없음 COM-003 404, SHP-001 500, 그 외 400 | 정의서에 없음 |

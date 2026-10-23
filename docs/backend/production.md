@@ -38,7 +38,7 @@
 | POST | `production-plans/:id/simulate-results` | 실적 시뮬레이션 | `PRODUCTION_RESULT_CONFIRM` USE | 난수 시드·손실률 저장 |
 
 다른 초안 행(경로 `/api/…`): `POST production-plans`(생성, "수동 생성 필요한지 확인"), `PATCH :id/cancel`, `GET·POST :id/heat-plan`, `POST production-plans/reproduction`, `GET production-results/:id`, `POST production-results`(작업 시작) + `PATCH production-results/:id/complete`(완료·실적 등록), `POST :id/simulation`, 열연 후보·배정(`:id/hot-rolling/*`, inventory.md 3장).
-[권한표]: 생산 USE, 영업·구매·품질·관리자는 계획 VIEW, 품질·관리자는 실적 VIEW.
+[권한표]: 생산 USE, 나머지 역할은 계획·실적·열연 투입 배정 VIEW(2026-10-15 업무 조회는 모든 역할).
 
 ## 4. 업무 규칙·계산
 
@@ -60,7 +60,7 @@
 **생산계획**
 
 - 수주 등록 tx 안에서 sales-order가 `createPlanForShortage(tx, salesOrderItem, shortageQty, actor)`를 부른다. `item_id` = 수주 품목 규격, `heat_count`는 위 계산값(컬럼이 not null), PLANNED.
-- `heat-preview`: 계산만. `confirm`: 다시 계산해 `heat_count` 저장. 상태 "편성 확정"은 두지 않는다(SPEC.md 5장 기본값).
+- `heat-preview`: 계산만. `confirm`: 다시 계산해 `heat_count` 저장하고 HEAT_PLAN_CONFIRMED(전후 히트 수)를 남긴다. 상태 "편성 확정"은 두지 않는다(SPEC.md 5장 기본값).
 - 취소: PLANNED만 → CANCELLED, 이 계획의 CONFIRMED 열연 배정 해제(inventory). 첫 실적 등록 후(IN_PROGRESS)는 취소 불가([06] PRODUCTION_PLAN_STATUS).
 - 수주 취소 연동: PLANNED는 취소, IN_PROGRESS는 `sales_order_item_id = null`(여재 전환, SURPLUS_CONVERTED). 조업 중 물량은 연주·검사 후 적격 슬래브 여재가 된다(BP-SO-02 여재 전환 해석).
 - 재생산(REQ-PRD-006): 수주 품목의 `추가 계획 필요 매수 = max(0, 현재 미확보 − 진행 계획 잔여 목표)`([04] 4.5)가 0보다 클 때만 `is_reproduction = true` 계획 생성. 여재로도 부족하고 진행 계획도 없을 때만 만든다(14.1-6).
@@ -101,6 +101,7 @@
 | --- | --- | --- | --- | --- |
 | PRODUCTION_PLAN_CREATED | USER(수주 등록자) | `production_plan` | 연결 시 채움 | - |
 | PRODUCTION_PLAN_CANCELLED | USER | `production_plan` | 채움 | - |
+| HEAT_PLAN_CONFIRMED | USER | `production_plan` | 채움 | - |
 | REPRODUCTION_PLAN_CREATED | USER | `production_plan` | 채움 | - |
 | SURPLUS_CONVERTED | USER(수주 취소자) | `production_plan` | 채움(해제 전 수주) | - |
 | PRODUCTION_STARTED | USER | `production_result` | 계획 연결 시 | - |
@@ -138,7 +139,7 @@
 | 항목 | 내용 | 근거 |
 | --- | --- | --- |
 | 작업 시작 분리 | v1 행은 `POST production-results` 하나, 초안 행은 시작(POST)·완료(PATCH `:id/complete`)로 나눴다. ERD(`completed_at` null = 작업 중)와 PRODUCTION_STARTED 이벤트는 분리를 뒷받침한다 | [CSV], [ERD], [06] |
-| 히트 편성 확정의 의미 | `heat_count`가 생성 때 이미 not null로 저장된다. confirm이 무엇을 바꾸는지(재계산 저장만?), 이벤트가 없음 | [ERD], [06] BUSINESS_EVENT_TYPE |
+| 히트 편성 확정의 의미 | `heat_count`가 생성 때 이미 not null로 저장된다. confirm이 무엇을 바꾸는지(재계산 저장만?). 이벤트는 HEAT_PLAN_CONFIRMED로 해결(2026-10-14) | [ERD], [06] BUSINESS_EVENT_TYPE |
 | 계획 슬래브 매수 | 시뮬레이션 손실식·연주 상한에 쓰는 "계획 슬래브 매수"의 정의가 없다(부족 매수? 히트 톤 × 연주 수율 ÷ 슬래브 중량?) | [04] 8장, BP-PRD-02 예외 |
 | 히트 LOT `initial_ton` | 히트 톤(용량) vs 투입 용선 × 제강 수율 | [ERD] lot.initial_ton |
 | 계획 COMPLETED 조건 | 언제 완료로 바꾸는지 정의 없음 | [06] PRODUCTION_PLAN_STATUS |
@@ -149,3 +150,56 @@
 | 수주 등록 중 MST-001 | 라우팅이 없으면 수주 등록 전체가 실패한다. 의도인지 확인 | [04] BP-PRD-01 |
 | 계획 수동 생성 | 초안 행 "생산계획 생성(수동)"은 "확인 필요"로 남아 있다. v1 행은 재생산 전용 | [CSV] |
 | 권한 표시명 | `PERMISSION_LABEL.PRODUCTION_RESULT_CONFIRM` = "공정 실적(…)"(06 그대로), 권한표·용어 사전은 "작업 실적". 06 표시명 수정 필요 | `shared/src/codes/index.ts`, [권한표] 6장, [03] TRM-047 |
+
+## 9. 구현 메모 (2026-10-06)
+
+**API** (전역 prefix `/api/v1` 제외). 명세서에 없어 추가한 것은 ➕.
+
+| Method | Path | 권한 | 내용 |
+| --- | --- | --- | --- |
+| GET | `production-plans` | PLAN VIEW | 목록. 필터 `productionPlanStatus`·`itemType`·`salesOrderId`·`isReproduction`, 페이징 |
+| GET | `production-plans/:id` | PLAN VIEW | 상세: 히트 편성표·진행·생산 LOT과 판정·작업 실적·재생산 판단. 목록·상세는 계획 규격의 1매 이론중량(`theoreticalWeightTon`, 편성을 계산할 수 없어도 보인다), 편성표는 슬래브 규격 이름(`slabItemName`)을 함께 준다 |
+| POST | `production-plans` | PLAN USE | 재생산 계획 `{ salesOrderItemId }` |
+| POST | `production-plans/:id/heat-preview` | PLAN USE | 편성 계산(저장 안 함) |
+| POST | `production-plans/:id/confirm` | PLAN USE | PLANNED에서 히트 수를 지금 기준정보로 다시 계산해 저장. 이벤트 없음(06에 없음) |
+| POST | `production-plans/:id/cancel` | PLAN USE | PLANNED만, `{ reason? }` |
+| GET ➕ | `production-plans/:id/work-context` | RESULT VIEW | 실적 입력 기준값(수율·히트 용량·용선/원료 잔량·연주 전 히트·작업 중 실적) |
+| GET | `production-results`, `production-results/:id` | RESULT VIEW | 작업 실적(투입·산출 LOT, 작업자) |
+| POST | `production-results` | RESULT USE | `completedAt`이 없으면 작업 시작만, 있으면 시작·완료를 한 번에. `startedAt`·`completedAt`에 시간대(`Z`·`±hh:mm`)가 없으면 서울 시각으로 읽는다(일정과 같은 `seoulDateTimeOf`, 2026-10-22 이슈 #496). 전에는 서버 로컬 시간으로 읽어 서버가 UTC면 9시간 밀렸다. 읽을 수 없는 시각은 COM-004. 날짜와 시각 사이 공백은 받고, 2월 30일 같은 없는 날짜는 DTO(`strict`)가 400으로 막는다(전에는 3월 2일로 저장됨, #509) |
+| POST ➕ | `production-results/:id/complete` | RESULT USE | 작업 시작한 실적 완료(초안 행 API-101) |
+| POST | `production-plans/:id/simulate-results` | RESULT USE | 실적 시뮬레이션 `{ randomSeed? }` |
+| GET ➕ | `production-plans/hot-rolling` | HOT_ROLLING VIEW | 열연 투입 목록(이슈 #498): 코일 계획마다 상세와 같은 규칙의 요약 값(`slabItemCode`·`shortageQty`·`usableCoilQty`·`failedCoilQty`·`confirmedAllocationQty`·`neededQty`·`isRollable`). 완료·취소 계획도 포함하고, 기준정보가 모자라 슬래브 규격을 정할 수 없으면 `slabItemCode`가 null. 계획·LOT·열연 배정을 한 번에 읽고, 슬래브 규격(히트 편성 기준)도 `heatPlanBasesOf`로 규격 여러 개를 한 번에(라우팅·설정값은 한 번만, 규격은 `in`) 읽어 계획마다 상세(FIFO 후보까지)·기준 쿼리를 따로 읽던 N+1을 없앤다. 생산계획 목록도 같은 함수를 쓴다. 페이징 `page`·`size`, 최신 계획부터 |
+| GET ➕ | `production-plans/reproduction-checks` | PLAN VIEW | 계획 여러 개의 연결 수주 품목 표시값과 재생산 판단(이슈 #498). `?productionPlanIds=1,2,3`(쉼표, 100개까지). 계획 상세(`:id`)의 `reproduction`과 같은 값이라 불합격 LOT 목록이 계획 상세를 계획마다 따로 부르지 않는다. 없는 계획은 빠지고 수주 연결이 없는 계획은 `reproduction`이 null |
+| GET ➕ | `production-plans/:id/hot-rolling` | HOT_ROLLING VIEW | 열연 투입 화면(필요 매수·슬래브 재고·FIFO 후보·배정·코일) |
+| POST ➕ | `production-plans/:id/hot-rolling/recommend` | HOT_ROLLING USE | FIFO 추천(ALLOCATION_RECOMMENDED만) |
+| POST | `production-plans/:id/hot-rolling/allocations` | HOT_ROLLING USE | 배정 확정 `{ lotIds }` (초안 행 API-103을 v1 경로로) |
+| POST ➕ | `production-plans/:id/hot-rolling/allocations/:allocationId/release` | HOT_ROLLING USE | 해제 또는 변경 `{ newLotId?, reason? }` |
+
+공정별 입력: 제선 `blastFurnaceCode`·`hotMetalTon`(계획은 선택), 제강 `converterCode`·`inputHotMetalTon`, 연주 `heatLotId`·`slabQty`, 열연 `allocationIds?`(없으면 그 계획의 확정 배정 전부).
+
+**8장 🟡에 대해 정한 값** (사용자 결정 2026-10-06 포함)
+
+| 항목 | 정한 값 |
+| --- | --- |
+| 작업 시작 분리 | 나눈다. 시작 = 완료 시각 없는 실적 + PRODUCTION_STARTED, 완료 = PRODUCTION_RESULT_REGISTERED |
+| 히트 편성 확정 | PLANNED에서 히트 수 재계산·저장 (사용자 결정) |
+| 계획 슬래브 매수 | 히트당 = floor(히트 용량 × 연주 수율 ÷ 슬래브 1매 이론중량), 계획 = 히트당 × 히트 수. 연주 실적 최대 매수는 그 히트의 실제 톤으로 같은 식 |
+| 히트 톤 (`initial_ton`) | 투입 용선 × 제강 수율 |
+| COMPLETED | 생산 완료 기준(사용자 결정): 작업 중 실적이 없고 편성 히트를 모두 연주. 수주에 연결된 코일 계획은 쓸 수 있는 코일 ≥ 부족 매수이거나 더 열연할 슬래브·배정이 없을 때. 검사는 기다리지 않는다 |
+| 원료 부족 오류 | INV-001, 문구에 원료별 부족 톤 |
+| 그 밖의 상태 충돌 | COM-001 (예: 진행중 계획 취소, 작업 중 실적이 있는데 새로 시작, 편성 히트를 다 만든 뒤 제강) |
+| 시뮬레이션 | 주체 USER. 연주의 샘플 손실률은 `simulated_loss_rate`, 시드·손실 매수·실제 감소율은 작업 로그 `after_data`. 검사는 하지 않는다. 고로·전로 BF2·BOF1, 공정 시간 4·1·2·2시간(가정값) |
+| 재생산 전 여재 | 재생산 계획을 만들 때 여재(예약 가용)를 먼저 예약하고 남은 매수만 계획 |
+| 제선과 계획 | 실적은 ERD대로 `production_plan_id = null`. 어느 계획 때문에 했는지는 작업 로그(`productionPlanId`)에 남기고 그 계획은 진행중이 된다 |
+| 연주 시작 히트 | ERD에 칸이 없어 PRODUCTION_STARTED `after_data.heatLotId`에 남기고 완료 때 같은 히트인지 본다 |
+
+**다른 모듈에 넣은 것**: inventory에 열연 배정 함수(`hotRollingCandidates`, `confirmHotRollingAllocation`, `releaseHotRollingAllocation`, `consumeHotRollingAllocations`, `hotRollingAllocationsOfPlan`)와 TypedSQL `allocateRollingQty.sql`. 공통 채번(`numbering.repository`)은 LOT 유형도 함께 거르도록 고쳤다(같은 날 두 번째 히트가 슬래브 번호를 최댓값으로 잡던 문제).
+
+**수주 담당 확인 필요**: 수주 충족 계산의 `planRemainingTargetQty`는 완료 계획을 0으로 본다. 생산 완료 기준이라 완료 계획에도 검사 대기 제품이 있을 수 있어, 생산 쪽 재생산 판단(`plan-progress.calculator.ts` `planOpenRemainingQty`)은 완료 계획의 판정 대기분을 남긴다. 같은 식으로 맞추면 수주 화면의 "재생산 필요"도 검사 중에 뜨지 않는다.
+
+## 10. 동시성·날짜 (2026-10-21, #478)
+
+- 수주 취소가 계획을 잠근 뒤 최신 상태로 취소·연결 해제한다(sales-order.md 9장). 열연 실적을 시작·완료 한 번에 등록할 때는 계획 잠금 다음, 시작 작업 로그 전에 슬래브 재고 행을 잠근다(inventory.md 10장).
+- 작업 실적 등록·완료 트랜잭션 제한 시간을 30초로 늘렸다(열연 완료는 LOT마다 쿼리가 돈다).
+- 계획 상세의 히트 표 생산일은 제강 완료 시각의 서울 날짜다(전에는 UTC 날짜).
+- 같은 트랜잭션 안의 `Promise.all`(열연 상세·계획 상태 갱신)을 차례 실행으로 바꿨다(pg 다음 버전에서 오류).

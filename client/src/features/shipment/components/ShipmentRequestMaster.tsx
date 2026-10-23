@@ -35,6 +35,7 @@ export function ShipmentRequestMaster({ selectedId }: { selectedId: number }) {
 
   return (
     <MasterPane
+      petKey="card:shipmentRequests.master"
       head={
         <>
           <div className="flex items-center gap-2">
@@ -49,7 +50,7 @@ export function ShipmentRequestMaster({ selectedId }: { selectedId: number }) {
           <Input leadingIcon="search" placeholder="출하요청 번호·수주·고객사 검색" value={keyword} onChange={(e) => setKeyword(e.target.value)} aria-label="출하요청 검색" />
           <div className="flex gap-1.5">
             {FILTERS.map((f) => (
-              <Chip key={f} on={filter === f} onClick={() => setFilter(f)}>
+              <Chip key={f} data-pet-term={f === 'ALL' ? '전체' : SHIPMENT_REQUEST_STATUS_LABEL[f]} on={filter === f} onClick={() => setFilter(f)}>
                 {f === 'ALL' ? '전체' : SHIPMENT_REQUEST_STATUS_LABEL[f]}
                 <b>{f === 'ALL' ? rows.length : rows.filter((r) => r.shipmentRequestStatus === f).length}</b>
               </Chip>
@@ -92,7 +93,9 @@ function MasterItem({ row, selected }: { row: ShipmentListRow; selected: boolean
       <Link
         href={`/shipment-requests/${row.id}`}
         aria-current={selected ? 'page' : undefined}
-        className={cn('flex flex-col gap-1 border-b border-line px-4 py-2.5 hover:bg-surface-2', selected && 'bg-brand-tint shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-brand-tint')}
+        data-pet-item="shipmentRequest"
+        data-pet-item-title={row.shipmentRequestNo}
+        className={cn('flex flex-col gap-1 border-b border-line px-4 py-2.5 hover:bg-surface-2', selected && 'bg-brand-tint shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-brand-tint-hover')}
       >
         <span className="flex items-center gap-2">
           <span className="font-mono text-mono font-semibold">{row.shipmentRequestNo}</span>
@@ -101,13 +104,24 @@ function MasterItem({ row, selected }: { row: ShipmentListRow; selected: boolean
           </span>
         </span>
         <span className="flex items-center gap-1.5 text-sm">
-          <span className="truncate">{row.customerName}</span>
-          <span className="font-mono text-cap text-ink-3">{row.salesOrderNos.length > 1 ? `수주 ${row.salesOrderNos.length}건` : row.salesOrderNos[0]}</span>
+          <span data-pet-field="고객사" className="truncate">
+            {row.customerName}
+          </span>
+          <span data-pet-field="수주" className="font-mono text-cap text-ink-3">
+            {row.salesOrderNos.length > 1 ? `수주 ${row.salesOrderNos.length}건` : row.salesOrderNos[0]}
+          </span>
         </span>
         <span className="text-xs text-ink-2">
-          {row.itemCodes[0]}
-          {row.itemCodes.length > 1 ? ` 외 ${row.itemCodes.length - 1}` : ''} · {row.totalRequestQty}
-          {unit} · {fmtTon(row.totalWeightTon)}
+          <span data-pet-field="품목">
+            {row.itemCodes[0]}
+            {row.itemCodes.length > 1 ? ` 외 ${row.itemCodes.length - 1}` : ''}
+          </span>{' '}
+          ·{' '}
+          <span data-pet-field="요청 매수">
+            {row.totalRequestQty}
+            {unit}
+          </span>{' '}
+          · <span data-pet-field="이론중량">{fmtTon(row.totalWeightTon)}</span>
         </span>
         <span className="text-cap text-ink-3">
           출하 요청일 {fmtMD(row.requestedShipDate)} · {captionOf(row)}

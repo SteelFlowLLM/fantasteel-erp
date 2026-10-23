@@ -9,9 +9,9 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| REQ | REQ-INV-001~009 (REQ-INV-010 정합성 보정 배치는 P2라 제외) |
-| BP | BP-INV-01 열연 배정(배정 부분), BP-INV-02 동시성 통제(P1 부분), 4.2 예약·배정, 4.3 합격 재고·여재, 13.2 `confirmAllocation` |
-| 등급 | P1 |
+| REQ | REQ-INV-001~009, REQ-INV-010 정합성 보정(P2, 9장) |
+| BP | BP-INV-01 열연 배정(배정 부분), BP-INV-02 동시성 통제(P1)·예약 정합성 보정(P2), 4.2 예약·배정, 4.3 합격 재고·여재, 13.2 `confirmAllocation` |
+| 등급 | P1 (정합성 보정만 P2) |
 
 ## 2. 테이블
 
@@ -43,12 +43,15 @@
 | Method | Path | 이름 | 권한 | 비고 ([CSV]) |
 | --- | --- | --- | --- | --- |
 | GET | `inventories` | 재고 조회 | 로그인만(재고 메뉴는 전 역할) | `?itemId=`. 원료 재고는 원료 LOT 잔량 합계(TRM-054) |
+| GET | `inventories/reconciliation` | 정합성 점검 | 로그인만 | 🟡 경로 제안(API 목록에 없음). 바꾸지 않는다. 9장 |
+| POST | `inventories/reconciliation` | 정합성 보정 | 관리자 역할(service 확인, 아니면 `COM-002`) | 🟡 경로 제안. 9장 |
 | POST | `allocations/recommend` | 배정 추천 | 목적별 USE ↓ | 저장하지 않고 작업 로그(ALLOCATION_RECOMMENDED)만 |
 | POST | `allocations` | 배정 확정 | 목적별 USE ↓ | INV-001~004. LOT당 CONFIRMED 1건 |
 | POST | `allocations/:id/release` | 배정 해제·변경 | 목적별 USE ↓ | CONSUMED 배정은 변경 불가 |
 | GET | `allocations` | 배정 조회 | 목적별 VIEW ↓ | |
 
-- 목적별 권한: SHIPMENT = `SHIPMENT_REQUEST_MANAGE`(영업 USE, 물류·관리자 VIEW), HOT_ROLLING = `HOT_ROLLING_ALLOCATE`(생산 USE, 관리자 VIEW). 데코레이터 하나로 OR 조건을 표현할 수 없으므로 데코레이터 없이 service에서 `hasPermission(user, { permission, level })`(`common/auth/auth.guard.ts` export)로 확인하고 아니면 `COM-002`.
+- 목적별 권한: SHIPMENT = `SHIPMENT_REQUEST_MANAGE`(영업 USE, 나머지 VIEW), HOT_ROLLING = `HOT_ROLLING_ALLOCATE`(생산 USE, 나머지 VIEW). 나머지 VIEW는 2026-10-15 업무 조회는 모든 역할이다. 데코레이터 하나로 OR 조건을 표현할 수 없으므로 데코레이터 없이 service에서 `hasPermission(user, { permission, level })`(`common/auth/auth.guard.ts` export)로 확인하고 아니면 `COM-002`.
+- 배정(`AllocationView`)과 배정 후보(`AllocationCandidate`)는 LOT 야드의 이름(`yardName`)을 함께 준다. 기준정보 조회 권한이 없는 사원도 야드 이름을 보게 하기 위해서다. 후보는 TypedSQL로 읽으므로 야드 이름은 service가 야드 목록으로 붙인다.
 - 다른 초안 행: `GET /api/allocations/recommendations`, `PATCH /api/allocations/:id`(변경), `PATCH /api/allocations/:id/release`, 생산 쪽 `GET /api/production-plans/:id/hot-rolling/candidates`·`POST …/hot-rolling/allocations`. [CSV] 비고가 "같은 API를 쓸지 생산 쪽과 맞춰야 함"이라 했다. 이 문서는 12.2 명시 경로(`allocations/*`, `purpose` 구분)를 기준으로 한다 🟡.
 
 ## 4. 업무 규칙·계산
@@ -92,13 +95,20 @@ RETURNING id;
 | 정렬(FIFO) | `produced_date` 오름차순, 동률은 `lot_no`(16장 제안) | 같음 |
 | 확정 시 재고 | 변화 없음(예약 안에서 배정) | 조건부 UPDATE `rolling +1`(가용 ≥ 1) |
 
-- 추천: 저장하지 않고 ALLOCATION_RECOMMENDED만 기록(`lotIds` = 추천 LOT, 사유 FIFO_RECOMMENDATION).
+- 추천: 저장하지 않고 ALLOCATION_RECOMMENDED만 기록(`lotIds` = 추천 LOT, 사유 FIFO_RECOMMENDATION). 화면은 출하·열연 배정을 확정할 때마다 먼저 추천 API를 불러 그때의 추천을 남긴다([04] 13.2 "추천 내용도 이 시점에 로그로 남김"). 배정을 풀고 다시 확정해도 추천 로그가 빠지지 않는다. 배정 화면을 열 때 보이는 후보·추천(`GET allocations/recommendations`)은 로그를 남기지 않는다.
 - 확정 재검증: 적격 아님 `INV-002`, 이미 CONFIRMED `INV-003`(부분 unique가 최종 방어), CONSUMED·SHIPPED `INV-004`. 같은 슬래브를 판매·열연에 동시에 배정할 수 없다.
 - 출하 배정 후 출하요청의 모든 품목 미배정 = 0이면 출하요청 ALLOCATED(shipment 함수 호출).
 - 해제: CONFIRMED → RELEASED(HOT_ROLLING이면 `rolling −1`). CONSUMED면 `INV-004`. 변경 = 기존 해제 + 새 확정을 같은 tx에서 → ALLOCATION_CHANGED.
 - 소진(shipment·production이 부름): CONFIRMED → CONSUMED.
 
 **재고 조회**(REQ-INV-001·008, 4.3): 제품 규격별 on_hand·reserved·rolling·가용 매수와 톤 계산값(`calcWeightTon`). 여재 = 적격 + AVAILABLE + CONFIRMED 배정 없는 SLAB LOT(저장 안 함). 원료는 RAW_MATERIAL LOT `remaining_ton` 합계(소수 3자리). 다른 수주에 ACTIVE 예약된 매수를 자유 재고로 보이지 않는다.
+
+**재고 조회 구현 메모** (`GET inventories`, 로그인만, `?itemId=`)
+
+- 응답은 `{ products, rawMaterials, surplus }`다(shared `InventoryOverview`). `products`는 제품 규격마다 한 줄(재고 행이 없으면 0매)이고, 대시보드 위젯과 같은 `productStock` 계산에 `unallocatedPassedQty`(미배정 합격 LOT 수)를 더한다. `rawMaterials`는 원료 규격마다 잔량이 남은 원료 LOT의 `remaining_ton` 합계와 LOT 수다.
+- `unallocatedPassedQty` = 적격(자기 검사 PASS + 상위 히트 PASS) + AVAILABLE + CONFIRMED 배정 없음(`countUnallocatedPassedLotsByItem.sql`). 수주 예약 몫도 들어 있어서 "여재" 매수가 아니다.
+- `surplus`(API-195 "여재 포함")는 여재가 있는 슬래브 규격마다 한 줄이다(`SurplusSlabRow`: 1매 이론중량, 미배정 합격·예약·가용·여재 매수, 여재 슬래브의 LOT 번호·생산완료일·히트 번호·야드·생산계획). 계산은 8-1 임시 결정이고 `InventoryService.surplusSlabs`에 한 번만 두어 대시보드 여재 보유 위젯도 같은 값을 쓴다. 여재 전환 시각은 ERD에 없어 주지 않는다.
+- 불합격·판정 대기 LOT 수, LOT 목록은 `lots` 모듈 몫이라 이 응답에 넣지 않았다.
 
 **동시성**(REQ-INV-009, BP-INV-02): 예약 매수는 조건부 UPDATE 한 줄, LOT 중복 배정은 부분 unique, 여러 행을 함께 검증하는 처리는 `SELECT … FOR UPDATE`(TypedSQL)로 잠근다([05] 8장). 잠금 순서는 inventory(item_id 오름차순) → reservation → allocation → lot(id 오름차순)으로 고정한다(13.2 "고정 순서").
 
@@ -166,3 +176,47 @@ RETURNING id;
 | 배정 변경 API | v1 행은 `release`만, 초안 행은 `PATCH allocations/:id`. 변경 요청 모양(새 LOT id)을 정해야 한다 | [CSV] |
 | 오류 코드 | LOT 규격 불일치, 미배정 매수 초과 배정에 쓸 코드가 없다(SHP-002는 "출하 가능 매수") | [04] 9.3 |
 | 중복 요청 | 배정 확정 재시도 방지 키 미정(부분 unique가 LOT 중복은 막음) | 08 공통 규약 |
+
+### 8-1. 임시 결정 (2026-10-07, 대시보드 여재 보유 위젯 · 2026-10-08 재고 조회 여재도 같은 기준)
+
+| 항목 | 임시 결정 |
+| --- | --- |
+| 여재 매수 | 슬래브 규격별 미배정 합격 LOT 수(적격 + AVAILABLE + CONFIRMED 배정 없음, `findAllocatableLots.sql`) − ACTIVE 예약 매수, 0 미만은 0 (사용자 결정). 진행 중(진행중·부분출하)인 코일 수주에 묶인 슬래브(LOT → 실적 → 계획 → 수주 품목, 4장 자동 예약과 같은 경로)는 열연에 쓰일 몫이라 빼고 센다 |
+| 여재 LOT·보유 기간 | 예약은 매수 단위라 LOT을 정할 수 없어 FIFO상 가장 늦게 쓰일 LOT을 여재로 보고, 그중 가장 이른 생산완료일부터 센다(여재 전환 시각이 ERD에 없다) |
+
+## 9. 정합성 보정 (REQ-INV-010, BP-INV-02 P2, TRM-062)
+
+[02] "예약 매수 합계와 재고의 예약 매수를 주기적으로 비교·보정한다", [04] BP-INV-02 "ACTIVE 예약 합계와 `reserved_qty`를 비교하고 불일치 시 보정 / 담당자 알림·보정 전후 이벤트, 예약을 임의로 삭제해 맞추지 않는다, 실시간 동시성 통제를 대신하지 않는다"(구현 제안).
+
+- 코드: `reconciliation.calculator.ts`(판단, 순수 함수) · `reconciliation.repository.ts` · `reconciliation.service.ts` · `reconciliation.scheduler.ts`. 화면은 재고 상단 [정합성 보정] → `ReconciliationModal`.
+- 대상: 재고 행이 있거나 ACTIVE 예약이 있는 제품 규격. 비교 = `inventory.reserved_qty` vs 규격별 ACTIVE `reservation.reserved_qty` 합계.
+- 판단
+
+| 상태 | 조건 | 보정 |
+| --- | --- | --- |
+| 일치 | 같음 | 없음(응답 `rows`에서 뺀다) |
+| 불일치 → 보정함 | 다르고, ACTIVE 합계 ≤ `on_hand − rolling` | `reserved_qty`를 ACTIVE 합계로 (`reconcileInventoryReservedQty.sql`: 읽은 값과 같고 가용 ≥ 0일 때만) |
+| 보정 불가 | ACTIVE 합계 > `on_hand − rolling`(맞추면 `inventory_available_qty_check` 위반), 재고 행 없음, 보정 사이 값이 바뀜 | 하지 않는다. 예약은 지우지 않고 이유를 준다 |
+
+- 잠금: 보정은 한 tx에서 재고 행 전부를 item_id 순으로 `FOR UPDATE`(`lockInventoriesForReconciliation.sql`) → ACTIVE 합계 → 조건부 UPDATE. 4장 잠금 순서(inventory → reservation)와 같다. 점검(GET)은 잠그지 않는다.
+- 실행: 점검은 전 역할, 보정은 관리자 역할(권한 코드가 없어 `roleCode === ADMIN`, 2026-10-19 사용자 결정). 서버도 띄운 직후 한 번, 그 뒤 24시간마다 SYSTEM으로 보정한다(`RESERVATION_RECONCILE_INTERVAL_HOURS`, 0이면 끔, `NODE_ENV=test`면 안 돎).
+- 알림: 보정했거나 보정 불가가 있으면 재직 중 관리자에게 같은 tx에서 알린다. 같은 내용을 읽지 않은 사원에게는 다시 보내지 않는다(매일 같은 보정 불가가 쌓이지 않게). 링크 `/inventories`.
+
+| 🟡 확인 필요 | 지금 | 근거 |
+| --- | --- | --- |
+| 작업 로그 이벤트 유형 | 공통 코드 `BUSINESS_EVENT_TYPE`에 보정 유형이 없어 작업 로그에 남기지 않는다. 보정 전·후 매수는 응답과 서버 로그(`ReconciliationService` warn)에 남는다(2026-10-19 사용자 결정). 정의서에 유형이 생기면 같은 tx에서 기록한다 | [04] BP-INV-02 "보정 전후 이벤트", [06] |
+| 알림 유형·받는 사람 | 보정 알림 유형이 없어 Factory Agent처럼 `TASK_ASSIGNED`(업무 지정)를 쓰고, "담당자"가 정해지지 않아 관리자 역할에게 보낸다(2026-10-19 사용자 결정) | [04] BP-INV-02, [06] NOTIFICATION_TYPE |
+| 보정 주기 | 24시간(Factory Agent와 같음). [04] 16장 "스케줄 주기는 설정값" | [02] REQ-INV-010 "주기적으로" |
+| API 경로 | API 목록에 없어 `inventories/reconciliation`(GET 점검·POST 보정)으로 둔다 | [CSV] |
+| `on_hand`·`rolling` 불일치 | REQ-INV-010은 예약 매수만 정해서 보지 않는다. 다른 불변식은 `npm run check-invariants -w @fantasteel/server`가 본다 | [02], [ERD] Project Note |
+
+## 10. 잠금 순서와 열연 배정 매수 (2026-10-21, #478)
+
+- 거래 전체의 잠금 순서: 수주 품목 → 생산계획 → 재고 행(item_id 오름차순) → 작업 로그 채번(EV- 앞부분). 작업 로그 채번 잠금은 트랜잭션 끝까지 잡히므로, 한 거래가 바꿀 재고 행은 첫 작업 로그 전에 `lockInventoriesFirst`로 모두 잠근다. 수주 등록·수주 취소·출고 확정·열연 실적(시작·완료를 한 번에 등록할 때)·품질 검사 등록·수정이 이렇게 한다. 전에는 수주 등록(작업 로그 → 재고)과 출고·취소(재고 → 작업 로그)가 서로 기다려 교착(40P01 → COM-999)이 날 수 있었다.
+- `rolling_allocated_qty`는 조건부로 줄인다(0 아래로 내려가면 줄이지 않고 서버 오류로 거래 전체를 되돌린다). ERD에 음수 CHECK가 없어서다. 스키마는 바꾸지 않았다.
+- 배정 확정 초안(Message → ERP)을 위한 `recommendedShipmentLotIds`(다른 초안의 LOT 제외)·`assertShipmentAllocatable`(잠그지 않는 확인)은 message-action.md 11.7.
+- (#480 리뷰) 확정 배정 해제는 `CONFIRMED`일 때만 바꾸는 조건부 갱신이다. 생산계획 취소와 불합격 판정이 겹쳐도 같은 배정을 두 번 해제하지 않고, 실제로 해제한 수만큼만 열연 배정 매수를 줄인다.
+- (#480 리뷰) 열연 배정 매수가 확정 배정보다 작아 줄일 수 없으면 COM-001(재고 정합 보정을 먼저 실행하라는 안내)로 막는다. 재고 정합 보정(9장)은 예약 매수보다 먼저 `rolling_allocated_qty`를 확정 열연 배정 수로 맞춘다(`reconcileInventoryRollingQty.sql`, 가용이 0 미만이 되면 맞추지 않음. 작업 로그 유형이 없어 서버 로그에만 남긴다).
+- (#480 리뷰) 품질 검사는 불합격으로 풀 출하 배정의 출하요청을 재고보다 먼저 잠근다(출고 확정과 같은 순서: 출하요청 → 재고 → 작업 로그). 실적 시뮬레이션은 열연까지 하는 계획이면 계획을 잠근 직후 슬래브 재고 행을 잠근다.
+- 남은 역순 🟡: 제선·제강 실적을 시작·완료 한 번에 등록하면 시작 작업 로그를 남긴 뒤 원료·용선 LOT을 잠그고, 따로 완료하면 LOT을 잠근 뒤 작업 로그를 남긴다. 같은 LOT을 두 거래가 함께 쓰면 교착(40P01 → COM-999)이 날 수 있다. 데이터는 깨지지 않고 한쪽이 실패한다. 투입량은 완료 때 정해져 시작 전에 잠글 LOT을 알 수 없어 고치지 않았다.
+

@@ -3,7 +3,7 @@ import type { NavBadgeKey } from '@/features/shell/navigation';
 import { useApprovalWaitingCount, useUnreadChatCount, useUnreadNotificationCount } from '@/hooks/useShellCounts';
 import { isDepartmentHead } from '@/lib/permissions';
 
-/** 레일 배지 숫자: 안 읽은 알림 · 안 읽은 메시지 · 승인 대기 구매요청 */
+/** 레일 배지 숫자: 안 읽은 알림 · 안 읽은 메시지 · 승인 대기 구매요청 (모두 서버, 로그인 사원 id) */
 export function useNavBadges(me: SessionUser): Record<NavBadgeKey, number> {
   const notifications = useUnreadNotificationCount(me.employeeId).data ?? 0;
   const chat = useUnreadChatCount(me.employeeId).data ?? 0;

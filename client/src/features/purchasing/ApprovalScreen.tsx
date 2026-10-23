@@ -11,7 +11,6 @@ import { EmptyNote, StateView } from '@/components/StateView';
 import { MasterItem, MasterNote, RequisitionSourceTag, RequisitionStatusBadge } from '@/features/purchasing/components/PurchasingParts';
 import { RequisitionPanel } from '@/features/purchasing/components/RequisitionPanel';
 import { useUrlParams } from '@/features/purchasing/hooks/useUrlParams';
-import { summarizeItemNames } from '@/features/purchasing/lib/purchasingView';
 import { useApprovalInbox } from '@/hooks/useApprovals';
 import { useMe } from '@/hooks/useMe';
 import { useCanView } from '@/hooks/usePermission';
@@ -35,9 +34,12 @@ export function ApprovalScreen() {
   return (
     <>
       <MasterPane
+        petKey="card:approvals.inbox"
         head={
           <div className="flex items-center gap-2">
-            <b className="text-base font-semibold">승인 대기</b>
+            <b data-pet-term="승인 대기" className="text-base font-semibold">
+              승인 대기
+            </b>
             <span className="text-xs text-ink-3">{rows.length}건</span>
             <span className="ml-auto text-cap text-ink-3">{me.headDepartmentNames.join(', ')} 부서장</span>
           </div>
@@ -46,20 +48,34 @@ export function ApprovalScreen() {
         <QueryBoundary query={inbox} loadingLabel="승인 대기 구매요청을 불러오는 중…">
           {(data) =>
             data.length === 0 ? (
-              <EmptyNote>승인 대기 구매요청이 없어요</EmptyNote>
+              // 오른쪽이 "승인할 항목이 없어요"를 크게 보이므로 되풀이하지 않는다. 주소로 연 요청이 오른쪽에 떠 있을 때만 여기서 말한다
+              activeId !== null ? (
+                <EmptyNote>승인 대기 구매요청이 없어요</EmptyNote>
+              ) : null
             ) : (
               <>
                 {data.map((purchaseRequisition) => (
-                  <MasterItem key={purchaseRequisition.id} selected={purchaseRequisition.id === activeId} onClick={() => url.set({ pr: purchaseRequisition.id })}>
+                  <MasterItem
+                    key={purchaseRequisition.id}
+                    selected={purchaseRequisition.id === activeId}
+                    onClick={() => url.set({ pr: purchaseRequisition.id })}
+                    petItem="purchaseRequisition"
+                    petItemTitle={purchaseRequisition.purchaseRequisitionNo}
+                  >
                     <span className="flex items-center gap-2">
                       <b className="font-mono text-sm font-semibold">{purchaseRequisition.purchaseRequisitionNo}</b>
                       <RequisitionStatusBadge status={purchaseRequisition.purchaseRequisitionStatus} />
-                      <span className="ml-auto text-cap text-ink-3">{purchaseRequisition.desiredReceiptDate ? `희망 ${fmtMD(purchaseRequisition.desiredReceiptDate)}` : ''}</span>
+                      <span data-pet-field="희망 입고일" className="ml-auto text-cap text-ink-3">
+                        {purchaseRequisition.desiredReceiptDate ? `희망 ${fmtMD(purchaseRequisition.desiredReceiptDate)}` : ''}
+                      </span>
                     </span>
                     <span className="text-sm text-ink">
-                      {summarizeItemNames(purchaseRequisition.items)} <span className="text-ink-3">· {fmtTon(purchaseRequisition.totalTon)}</span>
+                      {purchaseRequisition.itemName}{' '}
+                      <span data-pet-field="수량(톤)" className="text-ink-3">
+                        · {fmtTon(purchaseRequisition.requestedTon)}
+                      </span>
                     </span>
-                    <span className="flex items-center gap-1.5 text-cap text-ink-3">
+                    <span data-pet-field="요청자" className="flex items-center gap-1.5 text-cap text-ink-3">
                       {purchaseRequisition.requesterName ?? '-'} · {purchaseRequisition.departmentName ?? '-'} · 등록 {fmtMDHM(purchaseRequisition.createdAt)}
                       <RequisitionSourceTag source={purchaseRequisition.source} />
                     </span>
@@ -98,7 +114,14 @@ export function ApprovalScreen() {
             kind="empty"
             icon="approve"
             title="승인할 항목이 없어요"
-            text={`${me.headDepartmentNames.join(', ')} 부서장으로 지정돼 있어요. 부서원이 구매요청을 등록하면 여기에 올라와요`}
+            // 한 문단이면 끝의 "요" 한 글자만 다음 줄로 넘어가서, 두 문장을 줄로 나눈다
+            text={
+              <>
+                {me.headDepartmentNames.join(', ')} 부서장으로 지정돼 있어요.
+                <br />
+                부서원이 구매요청을 등록하면 여기에 올라와요.
+              </>
+            }
           />
         ) : null}
       </PageMain>

@@ -101,7 +101,7 @@ export function SimulationModal({ planId, planNo, onClose }: { planId: number; p
         </>
       }
     >
-      <p className="text-sm leading-5 text-ink-2">
+      <p className="text-sm leading-normal text-ink-2">
         이 계획의 남은 공정(제선 → 제강 → 연주 → 코일이면 열연)의 작업 실적을 시연용으로 만들어요. 계획 수율은 고정이고, 연주에서만 0~5% 샘플 손실률로 슬래브 매수가 줄어요. 열연은 슬래브 1매 = 코일 1개예요.
       </p>
       <Field label="난수 시드 (선택)" hint="비우면 실행 시각으로 정하고 결과에 보여 줘요. 같은 시드면 같은 결과가 나와요." error={error}>

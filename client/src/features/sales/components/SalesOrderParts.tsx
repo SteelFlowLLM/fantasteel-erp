@@ -1,5 +1,4 @@
 // 수주 화면(목록·등록·상세)이 함께 쓰는 작은 부품. 색·모양은 B안 그대로, 이름·표시명은 공통 코드 정의서·용어 사전대로.
-import Link from 'next/link';
 import type { ReactNode } from 'react';
 import {
   ACTOR_TYPE_LABEL,
@@ -20,6 +19,7 @@ import type { ProgressMeasure } from '@/lib/inventoryMath';
 import { PRODUCTION_PLAN_STATUS_TONE, SALES_ORDER_ITEM_STATUS_TONE } from '@/lib/statusTone';
 import type { TimelineEvent } from '@/api/salesOrders';
 import { measureText, percentOf } from '@/features/sales/lib/salesOrderForm';
+import { ScreenLink } from '@/features/shell/ScreenLink';
 
 export const SALES_ORDER_STATUS_KEYS: readonly SalesOrderItemStatus[] = ['OPEN', 'PARTIALLY_SHIPPED', 'SHIPPED', 'CANCELLED'];
 
@@ -81,9 +81,9 @@ export function ItemLabel({ lineNo, itemType, itemName, itemCode }: { lineNo?: n
       {lineNo !== undefined ? (
         <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-xs bg-surface-3 px-1 text-cap font-semibold text-ink-2">{lineNo}</span>
       ) : null}
-      <span className="text-cap text-ink-3">{ITEM_TYPE_LABEL[itemType]}</span>
+      <span className="flex-none whitespace-nowrap text-cap text-ink-3">{ITEM_TYPE_LABEL[itemType]}</span>
       <span className="truncate font-medium">{itemName}</span>
-      {itemCode ? <span className="truncate font-mono text-[11px] text-ink-3">{itemCode}</span> : null}
+      {itemCode ? <span className="truncate font-mono text-cap text-ink-3">{itemCode}</span> : null}
     </span>
   );
 }
@@ -93,12 +93,24 @@ export type MeasureTone = keyof typeof MEASURE_FILL;
 
 /**
  * 충족 지표 하나: 막대 + "n / 분모" (업무 프로세스 4.5: 분모를 늘 함께 보이고 지표를 더하지 않는다).
- * 분모가 0이면 막대 대신 '-'.
+ * 분모가 0이면 막대 대신 '-'. compact = 지표 네 칸이 나란한 충족 현황 표처럼 좁게 (최소 폭 118 → 92px)
  */
-export function MeasureBar({ measure, unit, tone = 'run', label }: { measure: ProgressMeasure; unit: string; tone?: MeasureTone; label: string }) {
+export function MeasureBar({
+  measure,
+  unit,
+  tone = 'run',
+  label,
+  compact = false,
+}: {
+  measure: ProgressMeasure;
+  unit: string;
+  tone?: MeasureTone;
+  label: string;
+  compact?: boolean;
+}) {
   const percent = percentOf(measure);
   return (
-    <div className="flex min-w-[118px] flex-col gap-1" title={`${label} ${measureText(measure, unit)}`}>
+    <div className={cn('flex flex-col gap-1', compact ? 'min-w-[92px]' : 'min-w-[118px]')} title={`${label} ${measureText(measure, unit)}`}>
       <span className="flex items-baseline justify-between gap-2 text-xs tabular-nums">
         <b className="font-semibold">{measure.qty.toLocaleString('en-US')}</b>
         <span className="text-cap text-ink-3">
@@ -140,17 +152,23 @@ export function ActorChip({ event }: { event: Pick<TimelineEvent, 'actorType' | 
 /** 작업 로그 한 줄 (목록 미리보기·상세 옆 칸): 시각·주체·유형·대상, 아래에 사람이 읽을 사유 */
 export function EventLine({ event }: { event: TimelineEvent }) {
   return (
-    <div className="flex min-w-0 flex-col gap-0.5 text-xs">
+    <div data-pet-item="businessEvent" data-pet-item-title={event.businessEventTypeLabel} className="flex min-w-0 flex-col gap-0.5 text-xs">
       <div className="flex min-w-0 items-center gap-1.5">
-        <time className="w-[70px] flex-none text-cap text-ink-3 tabular-nums">{fmtMDHM(event.occurredAt)}</time>
-        <ActorChip event={event} />
-        <span className="flex-none font-medium">{event.businessEventTypeLabel}</span>
-        <span className="min-w-0 truncate text-ink-2" title={event.targetText}>
+        <time data-pet-field="시각" className="w-[70px] flex-none text-cap text-ink-3 tabular-nums">
+          {fmtMDHM(event.occurredAt)}
+        </time>
+        <span data-pet-field="주체" className="contents">
+          <ActorChip event={event} />
+        </span>
+        <span data-pet-field="유형" className="flex-none font-medium">
+          {event.businessEventTypeLabel}
+        </span>
+        <span data-pet-field="대상" className="min-w-0 truncate text-ink-2" title={event.targetText}>
           {event.targetText}
         </span>
       </div>
       {event.reasonText ? (
-        <span className="truncate pl-[76px] text-cap text-ink-3" title={event.reasonText}>
+        <span data-pet-field="사유" className="truncate pl-[76px] text-cap text-ink-3" title={event.reasonText}>
           {event.reasonText}
         </span>
       ) : null}
@@ -161,7 +179,9 @@ export function EventLine({ event }: { event: TimelineEvent }) {
 export function SectionTitle({ children, meta }: { children: ReactNode; meta?: ReactNode }) {
   return (
     <div className="flex items-center gap-2">
-      <h3 className="text-sm font-semibold">{children}</h3>
+      <h3 data-pet-term={typeof children === 'string' ? children : undefined} className="text-sm font-semibold">
+        {children}
+      </h3>
       {meta ? <span className="text-cap text-ink-3">{meta}</span> : null}
     </div>
   );
@@ -169,9 +189,9 @@ export function SectionTitle({ children, meta }: { children: ReactNode; meta?: R
 
 export function PlanLink({ productionPlanId, productionPlanNo }: { productionPlanId: number; productionPlanNo: string }) {
   return (
-    <Link href={`/production/plans?plan=${productionPlanId}`} className="font-mono text-xs font-medium text-run hover:underline">
+    <ScreenLink href={`/production/plans?plan=${productionPlanId}`} className="font-mono text-xs font-medium text-run hover:underline" textClassName="font-mono text-xs font-medium">
       {productionPlanNo}
-    </Link>
+    </ScreenLink>
   );
 }
 

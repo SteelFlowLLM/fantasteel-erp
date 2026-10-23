@@ -1,6 +1,15 @@
 import { Injectable } from '@nestjs/common';
-import { INSPECTION_RESULT, LOT_TYPE, type InspectionResult, type LotType } from '@fantasteel/shared';
+import {
+  ALLOCATION_PURPOSE,
+  ALLOCATION_STATUS,
+  INSPECTION_RESULT,
+  LOT_STATUS,
+  LOT_TYPE,
+  type InspectionResult,
+  type LotType,
+} from '@fantasteel/shared';
 import { Prisma } from '../../generated/prisma/client';
+import { findLotEligibility, lockInventoryByItemId, lockLotsForInspectionUpdate, lockShipmentRequest } from '../../generated/prisma/sql';
 import type { Tx } from '../../prisma/prisma.service';
 
 export interface QualityInspectionListFilter {
@@ -23,12 +32,15 @@ const heatParentSelect = {
 } as const;
 
 /** 슬래브 → 히트, 코일 → 슬래브 → 히트 (lot_relation, LOT 번호 파싱으로 계보를 만들지 않음 [ERD]) */
-const inspectedLotSelect = {
+export const inspectedLotSelect = {
   id: true,
   lotNo: true,
   lotType: true,
+  lotStatus: true,
+  producedDate: true,
+  productionResult: { select: { productionPlan: { select: { id: true, productionPlanNo: true } } } },
   steelGrade: { select: { id: true, steelGradeCode: true } },
-  item: { select: { thicknessMm: true, steelGrade: { select: { id: true, steelGradeCode: true } } } },
+  item: { select: { id: true, itemCode: true, itemName: true, thicknessMm: true, steelGrade: { select: { id: true, steelGradeCode: true } } } },
   lotRelationsAsChildLot: {
     where: { parentLot: { lotType: { in: [LOT_TYPE.HEAT, LOT_TYPE.SLAB] } } },
     select: {
@@ -45,8 +57,16 @@ const inspectedLotSelect = {
   },
 } satisfies Prisma.LotSelect;
 
+/** 밀시트 잠금 확인에 쓰는 하위 LOT (히트 → 슬래브 → 코일, lot_relation) */
+const lotDescendantsSelect = {
+  lotRelationsAsParentLot: {
+    select: { childLot: { select: { id: true, lotRelationsAsParentLot: { select: { childLotId: true } } } } },
+  },
+} satisfies Prisma.LotSelect;
+
 const listLotSelect = {
   ...inspectedLotSelect,
+  ...lotDescendantsSelect,
   qualityInspection: {
     select: {
       id: true,
@@ -57,10 +77,11 @@ const listLotSelect = {
   },
 } satisfies Prisma.LotSelect;
 
-const inspectionDetailSelect = {
+export const inspectionDetailSelect = {
   id: true,
   inspectionResult: true,
   inspectedAt: true,
+  updatedAt: true,
   inspectorEmployee: { select: { id: true, employeeName: true } },
   inspectionStandard: {
     select: {
@@ -85,14 +106,56 @@ const inspectionDetailSelect = {
     },
   },
   qualityInspectionValues: { select: { inspectionStandardItemId: true, measuredValue: true } },
-  lot: { select: inspectedLotSelect },
+  lot: { select: { ...inspectedLotSelect, ...lotDescendantsSelect } },
 } satisfies Prisma.QualityInspectionSelect;
 
 export type InspectedLot = Prisma.LotGetPayload<{ select: typeof inspectedLotSelect }>;
 export type QualityInspectionListLot = Prisma.LotGetPayload<{ select: typeof listLotSelect }>;
 export type QualityInspectionDetailRecord = Prisma.QualityInspectionGetPayload<{ select: typeof inspectionDetailSelect }>;
 
+/** 판정에 필요한 기준 항목 컬럼 */
+const judgedStandardSelect = {
+  id: true,
+  inspectionStandardCode: true,
+  versionNo: true,
+  inspectionStandardItems: {
+    orderBy: { id: 'asc' },
+    select: {
+      id: true,
+      inspectionItemCode: true,
+      minValue: true,
+      maxValue: true,
+      thicknessOverMm: true,
+      thicknessUptoMm: true,
+      isRequired: true,
+    },
+  },
+} satisfies Prisma.InspectionStandardSelect;
+
+/** 작업 로그에 붙일 수주 (LOT → 실적 → 계획 → 수주 품목) */
+const lotSalesOrderSelect = {
+  productionResult: {
+    // inspectedLotSelect의 productionResult를 덮어쓰므로 계획 id·번호도 같이 읽는다
+    select: { productionPlan: { select: { id: true, productionPlanNo: true, salesOrderItem: { select: { salesOrderId: true } } } } },
+  },
+} satisfies Prisma.LotSelect;
+
 const failedHeat = { lotType: LOT_TYPE.HEAT, qualityInspection: { is: { inspectionResult: INSPECTION_RESULT.FAIL } } };
+
+/** 검사 대기 LOT: 검사 행이 없거나 PENDING. 검사 입력 대기 목록과 대시보드 판정 대기가 같은 조건을 쓴다 */
+export const pendingInspectionLotWhere = {
+  OR: [{ qualityInspection: { is: null } }, { qualityInspection: { is: { inspectionResult: INSPECTION_RESULT.PENDING } } }],
+  // 상위 히트가 불합격이면 검사할 필요가 없다 (불합격 히트의 하위 LOT은 이미 불합격, TRM-078)
+  NOT: {
+    lotRelationsAsChildLot: {
+      some: {
+        parentLot: {
+          OR: [failedHeat, { lotType: LOT_TYPE.SLAB, lotRelationsAsChildLot: { some: { parentLot: failedHeat } } }],
+        },
+      },
+    },
+  },
+} satisfies Prisma.LotWhereInput;
 
 @Injectable()
 export class QualityRepository {
@@ -120,12 +183,149 @@ export class QualityRepository {
       where: { id: lotId },
       select: {
         ...inspectedLotSelect,
+        ...lotDescendantsSelect,
         qualityInspection: { select: { id: true } },
-        productionResult: {
-          select: { productionPlan: { select: { salesOrderItem: { select: { salesOrderId: true } } } } },
+        ...lotSalesOrderSelect,
+      },
+    });
+  }
+
+  /**
+   * 측정값 수정 대상 검사: 판정에 쓴 기준 버전(바꾸지 않음)·기존 값·LOT 두께,
+   * 밀시트 확인에 쓸 하위 LOT(히트 → 슬래브 → 코일, lot_relation)
+   */
+  findInspectionForUpdate(tx: Tx, qualityInspectionId: number) {
+    return tx.qualityInspection.findUnique({
+      where: { id: qualityInspectionId },
+      select: {
+        id: true,
+        inspectionResult: true,
+        inspectionStandard: { select: judgedStandardSelect },
+        qualityInspectionValues: { select: { inspectionStandardItemId: true, measuredValue: true } },
+        lot: {
+          select: {
+            id: true,
+            lotType: true,
+            item: { select: { thicknessMm: true } },
+            ...lotSalesOrderSelect,
+            ...lotDescendantsSelect,
+          },
         },
       },
     });
+  }
+
+  /**
+   * 측정값 수정 잠금 (#487). 거래 전체 잠금 순서(출하요청 → 재고 행 → LOT)를 따른다:
+   * 이 LOT들의 출하 배정(확정·소진)이 걸린 출하요청(id 순) → 그 제품 규격의 재고 행(item_id 순) → LOT(id 순).
+   * 출고 확정(출하요청 → … → LOT 출고)·열연 실적(재고 행 → 슬래브 LOT)과 서로 기다리지 않게 한다. 없는 재고 행은 잠그지 않고 넘어간다
+   */
+  async lockForInspectionUpdate(tx: Tx, lotIds: number[]): Promise<void> {
+    const allocations = await tx.allocation.findMany({
+      where: { lotId: { in: lotIds }, allocationPurpose: ALLOCATION_PURPOSE.SHIPMENT, allocationStatus: { in: [ALLOCATION_STATUS.CONFIRMED, ALLOCATION_STATUS.CONSUMED] } },
+      select: { shipmentRequestItem: { select: { shipmentRequestId: true } } },
+    });
+    const requestIds = [...new Set(allocations.flatMap((a) => (a.shipmentRequestItem ? [a.shipmentRequestItem.shipmentRequestId] : [])))].sort((a, b) => a - b);
+    for (const id of requestIds) await tx.$queryRawTyped(lockShipmentRequest(id));
+    const lots = await tx.lot.findMany({ where: { id: { in: lotIds }, itemId: { not: null } }, select: { itemId: true } });
+    const itemIds = [...new Set(lots.flatMap((l) => (l.itemId === null ? [] : [l.itemId])))].sort((a, b) => a - b);
+    for (const itemId of itemIds) await tx.$queryRawTyped(lockInventoryByItemId(itemId));
+    await tx.$queryRawTyped(lockLotsForInspectionUpdate(lotIds));
+  }
+
+  /**
+   * 이 LOT들이 출고돼 발행된 밀시트 번호. LOT 연결 테이블이 없어
+   * allocation(SHIPMENT, CONSUMED) → 출하요청 품목 → (출하요청, 수주)로 밀시트를 찾는다 ([ERD] mill_sheet Note)
+   */
+  async findIssuedMillSheetNos(tx: Tx, lotIds: number[]): Promise<string[]> {
+    const allocations = await tx.allocation.findMany({
+      where: {
+        lotId: { in: lotIds },
+        allocationPurpose: ALLOCATION_PURPOSE.SHIPMENT,
+        allocationStatus: ALLOCATION_STATUS.CONSUMED,
+      },
+      select: { shipmentRequestItem: { select: { shipmentRequestId: true, salesOrderItem: { select: { salesOrderId: true } } } } },
+    });
+    const keys = allocations.flatMap(({ shipmentRequestItem: item }) =>
+      item ? [{ shipmentRequestId: item.shipmentRequestId, salesOrderId: item.salesOrderItem.salesOrderId }] : [],
+    );
+    if (!keys.length) return [];
+    const millSheets = await tx.millSheet.findMany({
+      where: { OR: keys },
+      select: { millSheetNo: true },
+      orderBy: { millSheetNo: 'asc' },
+    });
+    return millSheets.map((m) => m.millSheetNo);
+  }
+
+  /**
+   * 이 LOT들 가운데 재고에 들어가는 제품 LOT(슬래브·코일, AVAILABLE, 적격 = 자기 PASS + 상위 히트 PASS) id.
+   * 판정 전후로 읽어 적격이 된·빠진 매수를 LOT 단위로 센다 (inventory와 같은 적격 SQL)
+   */
+  async findEligibleProductLotIds(tx: Tx, lotIds: number[]): Promise<Set<number>> {
+    const products = await tx.lot.findMany({
+      where: { id: { in: lotIds }, lotType: { in: [LOT_TYPE.SLAB, LOT_TYPE.COIL] }, lotStatus: LOT_STATUS.AVAILABLE },
+      select: { id: true },
+    });
+    const eligible = new Set<number>();
+    for (const { id } of products) {
+      if ((await tx.$queryRawTyped(findLotEligibility(id)))[0]?.is_eligible) eligible.add(id);
+    }
+    return eligible;
+  }
+
+  /** 이 LOT들 가운데 출고돼 밀시트가 발행된 LOT id (목록 여러 행을 한 번에 확인) */
+  async findMillSheetLockedLotIds(tx: Tx, lotIds: number[]): Promise<Set<number>> {
+    if (!lotIds.length) return new Set();
+    const allocations = await tx.allocation.findMany({
+      where: { lotId: { in: lotIds }, allocationPurpose: ALLOCATION_PURPOSE.SHIPMENT, allocationStatus: ALLOCATION_STATUS.CONSUMED },
+      select: { lotId: true, shipmentRequestItem: { select: { shipmentRequestId: true, salesOrderItem: { select: { salesOrderId: true } } } } },
+    });
+    const keyed = allocations.flatMap(({ lotId, shipmentRequestItem: item }) =>
+      item ? [{ lotId, shipmentRequestId: item.shipmentRequestId, salesOrderId: item.salesOrderItem.salesOrderId }] : [],
+    );
+    if (!keyed.length) return new Set();
+    const millSheets = await tx.millSheet.findMany({
+      where: { OR: keyed.map(({ shipmentRequestId, salesOrderId }) => ({ shipmentRequestId, salesOrderId })) },
+      select: { shipmentRequestId: true, salesOrderId: true },
+    });
+    const issued = new Set(millSheets.map((m) => `${m.shipmentRequestId}:${m.salesOrderId}`));
+    return new Set(keyed.filter((k) => issued.has(`${k.shipmentRequestId}:${k.salesOrderId}`)).map((k) => k.lotId));
+  }
+
+  /** updated_at이 그대로일 때만 판정을 바꾼다(행 잠금 포함). false면 그 사이 다른 수정이 있었다 */
+  async updateInspectionResultIfUnchanged(
+    tx: Tx,
+    qualityInspectionId: number,
+    expectedUpdatedAt: Date,
+    inspectionResult: InspectionResult,
+  ): Promise<boolean> {
+    const { count } = await tx.qualityInspection.updateMany({
+      where: { id: qualityInspectionId, updatedAt: expectedUpdatedAt },
+      data: { inspectionResult },
+    });
+    return count === 1;
+  }
+
+  /** 보완은 새 값 행, 오타 수정은 같은 값 행을 고친다 ((검사, 항목) unique) */
+  async upsertQualityInspectionValues(
+    tx: Tx,
+    qualityInspectionId: number,
+    values: { inspectionStandardItemId: number; measuredValue: Prisma.Decimal }[],
+  ): Promise<void> {
+    for (const { inspectionStandardItemId, measuredValue } of values) {
+      await tx.qualityInspectionValue.upsert({
+        where: { qualityInspectionId_inspectionStandardItemId: { qualityInspectionId, inspectionStandardItemId } },
+        create: { qualityInspectionId, inspectionStandardItemId, measuredValue },
+        update: { measuredValue },
+      });
+    }
+  }
+
+  /** 측정값 지우기: 그 항목의 값 행을 지운다 (없으면 그대로) */
+  async deleteQualityInspectionValues(tx: Tx, qualityInspectionId: number, inspectionStandardItemIds: number[]): Promise<void> {
+    if (!inspectionStandardItemIds.length) return;
+    await tx.qualityInspectionValue.deleteMany({ where: { qualityInspectionId, inspectionStandardItemId: { in: inspectionStandardItemIds } } });
   }
 
   /** 그 공정·강종의 최신 기준 버전과 항목 (quality.md 4장 "기준 고르기") */
@@ -133,23 +333,7 @@ export class QualityRepository {
     return tx.inspectionStandard.findFirst({
       where: { processType, steelGradeId },
       orderBy: [{ versionNo: 'desc' }, { id: 'desc' }],
-      select: {
-        id: true,
-        inspectionStandardCode: true,
-        versionNo: true,
-        inspectionStandardItems: {
-          orderBy: { id: 'asc' },
-          select: {
-            id: true,
-            inspectionItemCode: true,
-            minValue: true,
-            maxValue: true,
-            thicknessOverMm: true,
-            thicknessUptoMm: true,
-            isRequired: true,
-          },
-        },
-      },
+      select: judgedStandardSelect,
     });
   }
 
@@ -171,24 +355,7 @@ export class QualityRepository {
   private buildListWhere(filter: QualityInspectionListFilter): Prisma.LotWhereInput {
     const conditions: Prisma.LotWhereInput[] = [{ lotType: { in: filter.lotTypes } }];
     if (filter.isPending) {
-      conditions.push({
-        OR: [
-          { qualityInspection: { is: null } },
-          { qualityInspection: { is: { inspectionResult: INSPECTION_RESULT.PENDING } } },
-        ],
-      });
-      // 상위 히트가 불합격이면 검사할 필요가 없다 (불합격 히트의 하위 LOT은 이미 불합격, TRM-078)
-      conditions.push({
-        NOT: {
-          lotRelationsAsChildLot: {
-            some: {
-              parentLot: {
-                OR: [failedHeat, { lotType: LOT_TYPE.SLAB, lotRelationsAsChildLot: { some: { parentLot: failedHeat } } }],
-              },
-            },
-          },
-        },
-      });
+      conditions.push(pendingInspectionLotWhere);
     } else {
       conditions.push({ qualityInspection: { is: { inspectionResult: { in: filter.inspectionResults } } } });
     }

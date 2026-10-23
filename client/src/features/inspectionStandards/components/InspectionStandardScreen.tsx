@@ -1,11 +1,10 @@
 'use client';
 
 // 검사 기준 (REQ-QC-002, 품질 메뉴, 검사 기준 관리 INSPECTION_STANDARD_MANAGE). 왼쪽 지금 버전 목록 | 오른쪽 버전 상세.
-// 주소: ?process=공정&grade=강종 id(목록 거르기, 기준정보 강종·준비 상태 띠에서 넘어옴) · ?id=버전 id(고른 버전)
+// 주소: ?process=공정&grade=강종 id(목록 거르기, 기준정보 강종 탭에서 넘어옴) · ?id=버전 id(고른 버전)
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useState } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 import { PERMISSION, PROCESS_TYPE_LABEL } from '@/codes';
-import { Badge } from '@/components/Badge';
 import { Button } from '@/components/Button';
 import { Select } from '@/components/Input';
 import { MasterPane, PageMain } from '@/components/Page';
@@ -23,9 +22,10 @@ import { useCanUse } from '@/hooks/usePermission';
 import { cn } from '@/lib/cn';
 
 type ProcessFilter = 'ALL' | InspectedProcessType;
-const PROCESS_FILTERS: readonly { key: ProcessFilter; label: string }[] = [
-  { key: 'ALL', label: '전체' },
-  ...INSPECTED_PROCESS_TYPES.map((p) => ({ key: p, label: PROCESS_TYPE_LABEL[p] })),
+// 화면 도우미 펫 용어(data-pet-term): '전체'는 다른 필터와 겹치지 않게 '공정 전체'로 설명한다
+const PROCESS_FILTERS: readonly { key: ProcessFilter; label: ReactNode }[] = [
+  { key: 'ALL', label: <span data-pet-term="공정 전체">전체</span> },
+  ...INSPECTED_PROCESS_TYPES.map((p) => ({ key: p, label: <span data-pet-term={PROCESS_TYPE_LABEL[p]}>{PROCESS_TYPE_LABEL[p]}</span> })),
 ];
 
 export function InspectionStandardScreen() {
@@ -64,6 +64,7 @@ export function InspectionStandardScreen() {
   return (
     <>
       <MasterPane
+        petKey="card:inspectionStandards.list"
         head={
           <>
             <div className="flex items-center gap-2">
@@ -87,7 +88,7 @@ export function InspectionStandardScreen() {
               active={processType ?? 'ALL'}
               onChange={(key) => navigate({ process: key === 'ALL' ? undefined : key, grade: steelGradeId })}
             />
-            <Select aria-label="강종" value={steelGradeId ? String(steelGradeId) : ''} onChange={(e) => navigate({ process: processType, grade: Number(e.target.value) || undefined })}>
+            <Select aria-label="강종" data-pet-term="강종 전체" value={steelGradeId ? String(steelGradeId) : ''} onChange={(e) => navigate({ process: processType, grade: Number(e.target.value) || undefined })}>
               <option value="">강종 전체</option>
               {(grades.data ?? []).map((g) => (
                 <option key={g.id} value={g.id}>
@@ -104,34 +105,53 @@ export function InspectionStandardScreen() {
             standards.length === 0 ? (
               <EmptyNote>{processType || steelGradeId ? '조건에 맞는 검사 기준이 없어요' : '등록된 검사 기준이 없어요'}</EmptyNote>
             ) : (
+              // 공정별로 묶는다: 머리에 공정이 있으니 줄마다 공정 이름을 되풀이하지 않는다.
+              // 목록은 지금 버전만 보여 주므로 "지금" 태그는 빼고 버전 번호만 회색으로 (2 이상이면 조금 진하게)
               <ul className="flex flex-col">
-                {standards.map((s) => {
-                  const active = s.id === selectedId;
-                  return (
-                    <li key={s.id}>
-                      <button
-                        type="button"
-                        aria-current={active || undefined}
-                        onClick={() => navigate({ process: processType, grade: steelGradeId, id: s.id })}
-                        className={cn(
-                          'flex w-full flex-col gap-1 border-b border-line px-4 py-2.5 text-left hover:bg-surface-2',
-                          active && 'bg-brand-tint shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-brand-tint',
-                        )}
-                      >
-                        <span className="flex items-center gap-2">
-                          <span className="font-mono text-mono font-semibold">{s.inspectionStandardCode}</span>
-                          <Badge tone="ok" plain className="ml-auto">
-                            지금 v{s.version}
-                          </Badge>
-                        </span>
-                        <span className="flex items-center gap-1.5 text-cap text-ink-3">
-                          <span className="font-medium text-ink-2">{PROCESS_TYPE_LABEL[s.processType]}</span>·<span>{s.steelGradeCode ?? '공통 (모든 강종)'}</span>·
-                          <span>항목 {s.itemCount}개</span>
-                          {s.versionCount > 1 ? <span>· 버전 {s.versionCount}개</span> : null}
-                        </span>
-                      </button>
-                    </li>
-                  );
+                {INSPECTED_PROCESS_TYPES.flatMap((p) => {
+                  const group = standards.filter((s) => s.processType === p);
+                  if (group.length === 0) return [];
+                  return [
+                    <li key={`head-${p}`} className="border-b border-line bg-surface-2 px-4 py-1.5 text-cap font-semibold text-ink-2">
+                      {PROCESS_TYPE_LABEL[p]} · {PROCESS_INSPECTION_TEXT[p]} <span className="font-normal text-ink-3">{group.length}</span>
+                    </li>,
+                    ...group.map((s) => {
+                      const active = s.id === selectedId;
+                      return (
+                        <li key={s.id}>
+                          <button
+                            type="button"
+                            aria-current={active || undefined}
+                            data-pet-item="inspectionStandard"
+                            data-pet-item-title={s.inspectionStandardCode}
+                            onClick={() => navigate({ process: processType, grade: steelGradeId, id: s.id })}
+                            className={cn(
+                              'flex w-full flex-col gap-1 border-b border-line px-4 py-2.5 text-left hover:bg-surface-2',
+                              active && 'bg-brand-tint shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-brand-tint-hover',
+                            )}
+                          >
+                            <span className="flex items-center gap-2">
+                              <span className="font-mono text-mono font-semibold" data-pet-field="검사 기준 코드">
+                                {s.inspectionStandardCode}
+                              </span>
+                              <span
+                                className={cn('ml-auto font-mono text-cap', s.version > 1 ? 'font-semibold text-ink-2' : 'text-ink-3')}
+                                title={`지금 버전 v${s.version}`}
+                                data-pet-field="지금 버전"
+                                data-pet-term="지금 버전"
+                              >
+                                v{s.version}
+                              </span>
+                            </span>
+                            <span className="flex items-center gap-1.5 text-cap text-ink-3">
+                              <span data-pet-field="강종">{s.steelGradeCode ?? '공통 (모든 강종)'}</span>·<span data-pet-field="항목 수">항목 {s.itemCount}개</span>
+                              {s.versionCount > 1 ? <span data-pet-field="버전 수">· 버전 {s.versionCount}개</span> : null}
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    }),
+                  ];
                 })}
               </ul>
             )
@@ -145,6 +165,7 @@ export function InspectionStandardScreen() {
             canEdit={canEdit}
             onSelectVersion={(id) => navigate({ process: processType, grade: steelGradeId, id })}
             onNewVersion={(detail) => setEditor({ mode: 'version', detail })}
+            onDeleted={() => navigate({ process: processType, grade: steelGradeId })}
           />
         ) : list.data ? (
           <StateView

@@ -1,0 +1,105 @@
+import { Injectable } from '@nestjs/common';
+import type { Prisma } from '../../generated/prisma/client';
+import type { Tx } from '../../prisma/prisma.service';
+
+const INSPECTION_SELECT = {
+  inspectionResult: true,
+  inspectedAt: true,
+  inspectionStandard: { select: { processType: true } },
+  qualityInspectionValues: {
+    select: {
+      measuredValue: true,
+      inspectionStandardItem: { select: { inspectionItemCode: true, inspectionItemName: true, unit: true, minValue: true, maxValue: true } },
+    },
+  },
+} as const;
+
+const LOT_SELECT = {
+  id: true,
+  lotNo: true,
+  lotType: true,
+  dispositionStatus: true,
+  dispositionReason: true,
+  steelGrade: { select: { steelGradeCode: true } },
+  item: { select: { itemCode: true, steelGrade: { select: { steelGradeCode: true } } } },
+  qualityInspection: { select: INSPECTION_SELECT },
+} as const;
+
+const CASE_SELECT = {
+  id: true,
+  caseNo: true,
+  caseCategory: true,
+  title: true,
+  phenomenon: true,
+  cause: true,
+  actionTaken: true,
+  equipmentText: true,
+  occurredDate: true,
+  createdAt: true,
+  updatedAt: true,
+  createdEmployeeId: true,
+  createdEmployee: { select: { employeeName: true, departmentId: true } },
+  pastCaseLots: { orderBy: { id: 'asc' }, select: { lot: { select: { id: true, lotNo: true } } } },
+} as const;
+
+export type PastCaseRow = Prisma.PastCaseGetPayload<{ select: typeof CASE_SELECT }>;
+
+/** 등록 사례(past_case·past_case_lot)와 초안·등록에 쓰는 LOT 조회 */
+@Injectable()
+export class PastCaseRepository {
+  /** 등록 사례 전부 (예시 사례는 shared PAST_CASE_EXAMPLES) */
+  findCases(tx: Tx): Promise<PastCaseRow[]> {
+    return tx.pastCase.findMany({ select: CASE_SELECT, orderBy: { id: 'asc' } });
+  }
+
+  findCase(tx: Tx, id: number): Promise<PastCaseRow | null> {
+    return tx.pastCase.findUnique({ where: { id }, select: CASE_SELECT });
+  }
+
+  createCase(tx: Tx, data: Omit<Prisma.PastCaseUncheckedCreateInput, 'pastCaseLots'>, lotIds: readonly number[]) {
+    return tx.pastCase.create({ data: { ...data, pastCaseLots: { create: lotIds.map((lotId) => ({ lotId })) } }, select: { id: true } });
+  }
+
+  /**
+   * 항목을 바꾸고 관련 LOT을 보낸 목록으로 맞춘다 (이미 있는 LOT 행은 그대로 둔다).
+   * 읽은 뒤 아무도 고치지 않았을 때(updatedAt이 같을 때)만 바꾼다. 바꿨으면 true
+   * 잠그는 순서는 사례(부모) → 관련 LOT(자식)이고 삭제도 같다.
+   */
+  async updateCase(tx: Tx, id: number, readUpdatedAt: Date, data: Prisma.PastCaseUncheckedUpdateManyInput, lotIds: readonly number[]): Promise<boolean> {
+    const { count } = await tx.pastCase.updateMany({ where: { id, updatedAt: readUpdatedAt }, data });
+    if (count === 0) return false;
+    await tx.pastCaseLot.deleteMany({ where: { pastCaseId: id, lotId: { notIn: [...lotIds] } } });
+    await tx.pastCaseLot.createMany({ data: lotIds.map((lotId) => ({ pastCaseId: id, lotId })), skipDuplicates: true });
+    return true;
+  }
+
+  /**
+   * 관련 LOT과 함께 지운다. 사례가 없으면 false.
+   * 수정과 같은 순서(사례 → 관련 LOT)로 잠그려고 먼저 사례 행을 건드려 잠근 뒤 자식을 지운다
+   * (DB에 FK가 없고 Prisma가 자식이 있는 부모 삭제를 막아서 자식을 먼저 지워야 하지만, 잠금은 부모가 먼저다).
+   */
+  async deleteCase(tx: Tx, id: number): Promise<boolean> {
+    const { count: locked } = await tx.pastCase.updateMany({ where: { id }, data: { updatedAt: new Date() } });
+    if (locked === 0) return false;
+    await tx.pastCaseLot.deleteMany({ where: { pastCaseId: id } });
+    const { count } = await tx.pastCase.deleteMany({ where: { id } });
+    return count === 1;
+  }
+
+  updateCaseNo(tx: Tx, id: number, caseNo: string) {
+    return tx.pastCase.update({ where: { id }, data: { caseNo }, select: { id: true } });
+  }
+
+  findLot(tx: Tx, lotId: number) {
+    return tx.lot.findUnique({ where: { id: lotId }, select: LOT_SELECT });
+  }
+
+  /** 바로 위 투입 LOT (코일 → 슬래브 → 히트를 한 단계씩 올라간다) */
+  findParentLots(tx: Tx, lotId: number) {
+    return tx.lotRelation.findMany({ where: { childLotId: lotId }, select: { parentLot: { select: LOT_SELECT } } });
+  }
+
+  findLotNos(tx: Tx, lotIds: readonly number[]) {
+    return tx.lot.findMany({ where: { id: { in: [...lotIds] } }, select: { id: true, lotNo: true } });
+  }
+}

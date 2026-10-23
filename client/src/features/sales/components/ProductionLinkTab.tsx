@@ -13,6 +13,7 @@ import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
 import { Tag } from '@/components/Tag';
+import { useCanOpenHref } from '@/hooks/usePermission';
 import { useSalesOrderProductionLinks } from '@/hooks/useSalesOrders';
 import { fmtDate, fmtNum, fmtTon } from '@/lib/format';
 import { INSPECTION_RESULT_TONE } from '@/lib/statusTone';
@@ -23,8 +24,10 @@ function PlanCard({ link }: { link: SalesOrderPlanLink }) {
   const { plan } = link;
   const unit = qtyUnitOf([plan.item.itemType]);
   const f = plan.formation;
+  const canOpen = useCanOpenHref();
+  const resultsHref = `/production/results?plan=${plan.id}`;
   return (
-    <Card>
+    <Card petKey="card:salesOrders.production">
       <CardHead
         title={<PlanLink productionPlanId={plan.id} productionPlanNo={plan.productionPlanNo} />}
         meta={link.lineNo !== null ? `품목 ${link.lineNo} · ${plan.item.itemName}` : `${plan.item.itemName} · 수주 연결 해제`}
@@ -33,8 +36,8 @@ function PlanCard({ link }: { link: SalesOrderPlanLink }) {
             {plan.isReproduction ? <Tag tone="outline">재생산</Tag> : null}
             {plan.isSurplusOnCompletion ? <Tag tone="outline">완료 후 여재</Tag> : null}
             <PlanStatusBadge status={plan.productionPlanStatus} />
-            {plan.productionPlanStatus === 'CANCELLED' ? null : (
-              <ButtonLink href={`/production/results?plan=${plan.id}`} size="sm" icon="factory">
+            {plan.productionPlanStatus === 'CANCELLED' || !canOpen(resultsHref) ? null : (
+              <ButtonLink href={resultsHref} size="sm" icon="factory">
                 작업 실적
               </ButtonLink>
             )}
@@ -60,82 +63,89 @@ function PlanCard({ link }: { link: SalesOrderPlanLink }) {
         ) : (
           <EmptyNote className="py-2">편성표를 계산할 수 없어요 (계획 수율·배합 원단위·규격 매핑 확인 필요)</EmptyNote>
         )}
-        <div className="flex flex-wrap gap-x-4 gap-y-1 text-cap text-ink-2 tabular-nums">
-          <span>
+        <div
+          data-pet-item="productionPlan"
+          data-pet-item-title={plan.productionPlanNo}
+          className="flex flex-wrap gap-x-4 gap-y-1 text-cap text-ink-2 tabular-nums"
+        >
+          <span data-pet-term="제강">
             제강 {plan.progress.heatsMadeQty}/{plan.progress.heatCount} 히트
           </span>
-          <span>
+          <span data-pet-term="연주">
             연주 {plan.progress.heatsCastQty}/{plan.progress.heatCount} 히트
           </span>
-          <span>슬래브 {plan.progress.slabQty}매</span>
-          {plan.item.itemType === 'COIL' ? <span>코일 {plan.progress.coilQty}개</span> : null}
-          <span className="text-ok">
+          <span data-pet-term="슬래브">슬래브 {plan.progress.slabQty}매</span>
+          {plan.item.itemType === 'COIL' ? <span data-pet-term="코일">코일 {plan.progress.coilQty}개</span> : null}
+          <span data-pet-term="합격" className="text-ok">
             합격 {plan.progress.passedQty}
             {unit}
           </span>
-          <span className="text-wait">
+          <span data-pet-term="판정 대기" className="text-wait">
             판정 대기 {plan.progress.pendingQty}
             {unit}
           </span>
-          <span className="text-danger">
+          <span data-pet-term="불합격" className="text-danger">
             불합격 {plan.progress.failedQty}
             {unit}
           </span>
-          <b className="font-semibold text-ink">
+          <b data-pet-term="잔여 목표" className="font-semibold text-ink">
             잔여 목표 {plan.progress.remainingTargetQty}
             {unit}
           </b>
         </div>
-        <Table compact>
-          <thead>
-            <tr>
-              <Th align="right">순번</Th>
-              <Th>히트 번호</Th>
-              <Th>전로</Th>
-              <Th>생산일</Th>
-              <Th align="right">히트 톤</Th>
-              <Th>성분 판정</Th>
-              <Th>연주</Th>
-              <Th align="right">슬래브</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {plan.heats.map((heat) => (
-              <tr key={heat.seq}>
-                <Td align="right" className="tabular-nums">
-                  {heat.seq}
-                </Td>
-                <Td>
-                  {heat.heatNo ? (
-                    <Link href={`/lots/trace?lot=${encodeURIComponent(heat.heatNo)}`} className="font-mono text-xs font-medium text-run hover:underline">
-                      {heat.heatNo}
-                    </Link>
-                  ) : (
-                    <span className="text-cap text-ink-3">제강 전</span>
-                  )}
-                </Td>
-                <Td className="font-mono text-xs">{heat.converterCode ?? '-'}</Td>
-                <Td className="tabular-nums">{heat.producedDate ? fmtDate(heat.producedDate) : '-'}</Td>
-                <Td align="right" className="tabular-nums">
-                  {heat.heatTon ? fmtTon(heat.heatTon) : '-'}
-                </Td>
-                <Td>
-                  {heat.inspectionResult ? (
-                    <Badge tone={INSPECTION_RESULT_TONE[heat.inspectionResult]}>
-                      {INSPECTION_RESULT_LABEL[heat.inspectionResult]}
-                    </Badge>
-                  ) : (
-                    '-'
-                  )}
-                </Td>
-                <Td>{heat.castDone ? <Badge tone="ok">완료</Badge> : <span className="text-cap text-ink-3">전</span>}</Td>
-                <Td align="right" className="tabular-nums">
-                  {heat.slabQty}매
-                </Td>
+        {/* 글자를 키워 표가 카드보다 넓어지면 카드 밖으로 삐져나오지 않고 카드 안에서 옆으로 스크롤한다 */}
+        <div className="overflow-x-auto">
+          <Table compact>
+            <thead>
+              <tr>
+                <Th align="right">순번</Th>
+                <Th>히트 번호</Th>
+                <Th>전로</Th>
+                <Th>생산일</Th>
+                <Th align="right">히트 톤</Th>
+                <Th>성분 판정</Th>
+                <Th>연주</Th>
+                <Th align="right">슬래브</Th>
               </tr>
-            ))}
-          </tbody>
-        </Table>
+            </thead>
+            <tbody>
+              {plan.heats.map((heat) => (
+                <tr key={heat.seq} data-pet-item="heat" data-pet-item-title={heat.heatNo ?? `순번 ${heat.seq}`}>
+                  <Td align="right" className="tabular-nums">
+                    {heat.seq}
+                  </Td>
+                  <Td>
+                    {heat.heatNo ? (
+                      <Link href={`/lots/trace?lot=${encodeURIComponent(heat.heatNo)}`} className="font-mono text-xs font-medium text-run hover:underline">
+                        {heat.heatNo}
+                      </Link>
+                    ) : (
+                      <span className="text-cap text-ink-3">제강 전</span>
+                    )}
+                  </Td>
+                  <Td className="font-mono text-xs">{heat.converterCode ?? '-'}</Td>
+                  <Td className="tabular-nums">{heat.producedDate ? fmtDate(heat.producedDate) : '-'}</Td>
+                  <Td align="right" className="tabular-nums">
+                    {heat.heatTon ? fmtTon(heat.heatTon) : '-'}
+                  </Td>
+                  <Td>
+                    {heat.inspectionResult ? (
+                      <Badge tone={INSPECTION_RESULT_TONE[heat.inspectionResult]}>
+                        {INSPECTION_RESULT_LABEL[heat.inspectionResult]}
+                      </Badge>
+                    ) : (
+                      '-'
+                    )}
+                  </Td>
+                  <Td>{heat.castDone ? <Badge tone="ok">완료</Badge> : <span className="text-cap text-ink-3">전</span>}</Td>
+                  <Td align="right" className="tabular-nums">
+                    {heat.slabQty}매
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </div>
       </CardBody>
     </Card>
   );

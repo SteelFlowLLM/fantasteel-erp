@@ -1,0 +1,337 @@
+// 작업 실적(제선 → 제강 → 연주)을 실제 DB(fs_prod)로 확인한다 (REQ-PRD-003, REQ-LOT-001~004, BP-PRD-02).
+// 같은 DB를 쓰는 다른 테스트의 원료·용선과 섞이지 않게 입고일·작업일을 2020-01로 두고 고로·전로 코드는 BF9·BOF9를 쓴다.
+import { Test, type TestingModule } from '@nestjs/testing';
+import { BUSINESS_EVENT_TYPE, type AuthUser } from '@fantasteel/shared';
+import { AppModule } from '../../app.module';
+import { AuthUserService } from '../../common/auth/auth-user.service';
+import { AppException } from '../../common/errors/app.exception';
+import * as seoulDate from '../../common/time/seoul-date';
+import { PrismaService } from '../../prisma/prisma.service';
+import { SalesOrderService } from '../sales-order/sales-order.service';
+import { ProductionResultRepository } from './production-result.repository';
+import { ProductionResultService } from './production-result.service';
+import { ProductionService } from './production.service';
+
+let moduleRef: TestingModule;
+let prisma: PrismaService;
+let results: ProductionResultService;
+let production: ProductionService;
+let salesOrders: SalesOrderService;
+let sales: AuthUser;
+let producer: AuthUser;
+let seq = 0;
+
+async function codeOf(promise: Promise<unknown>): Promise<string> {
+  try {
+    await promise;
+  } catch (e) {
+    if (e instanceof AppException) return e.code;
+    throw e;
+  }
+  throw new Error('오류가 나지 않았습니다');
+}
+
+/** 원료 입고 fixture: 구매요청 → 발주 → 입고 → 원료 LOT (purchasing 입고 API 대신 직접 만든다) */
+async function receive(itemCode: string, ton: string, receivedDate: string) {
+  seq += 1;
+  const item = await prisma.item.findUniqueOrThrow({ where: { itemCode } });
+  const supplier = await prisma.supplier.findFirstOrThrow({ orderBy: { id: 'asc' } });
+  const pr = await prisma.purchaseRequisition.create({
+    data: { purchaseRequisitionNo: `PR-PT-${seq}`, itemId: item.id, requestedTon: ton, desiredReceiptDate: new Date(`${receivedDate}T00:00:00Z`), requesterId: producer.employeeId, purchaseRequisitionStatus: 'ORDERED' },
+  });
+  const po = await prisma.purchaseOrder.create({ data: { purchaseOrderNo: `PO-PT-${seq}`, supplierId: supplier.id } });
+  const poi = await prisma.purchaseOrderItem.create({ data: { purchaseOrderId: po.id, purchaseRequisitionId: pr.id, itemId: item.id, orderedTon: ton } });
+  const gr = await prisma.goodsReceipt.create({ data: { goodsReceiptNo: `GR-PT-${seq}`, purchaseOrderItemId: poi.id, receivedTon: ton, receivedDate: new Date(`${receivedDate}T00:00:00Z`) } });
+  return prisma.lot.create({ data: { lotNo: `RM-PT-${itemCode}-${seq}`, lotType: 'RAW_MATERIAL', itemId: item.id, goodsReceiptId: gr.id, yardId: item.defaultYardId, initialTon: ton, remainingTon: ton } });
+}
+
+async function planFor(itemCode: string, orderedQty: number) {
+  const item = await prisma.item.findUniqueOrThrow({ where: { itemCode } });
+  const customer = await prisma.customer.findFirstOrThrow({ orderBy: { id: 'asc' } });
+  const result = await salesOrders.create(sales, { customerId: customer.id, items: [{ itemId: item.id, orderedQty, dueDate: '2026-12-31' }] });
+  return prisma.productionPlan.findUniqueOrThrow({ where: { productionPlanNo: result.items[0].productionPlanNo ?? '' } });
+}
+
+const lotOf = (id: number) => prisma.lot.findUniqueOrThrow({ where: { id } });
+const at = (hhmm: string) => `2020-01-03T${hhmm}:00.000Z`;
+
+beforeAll(async () => {
+  moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+  await moduleRef.init();
+  prisma = moduleRef.get(PrismaService);
+  results = moduleRef.get(ProductionResultService);
+  production = moduleRef.get(ProductionService);
+  salesOrders = moduleRef.get(SalesOrderService);
+  const authUsers = moduleRef.get(AuthUserService);
+  const load = async (employeeNo: string) => {
+    const employee = await prisma.employee.findUniqueOrThrow({ where: { employeeNo } });
+    const user = await authUsers.load(employee.id);
+    if (!user) throw new Error(employeeNo);
+    return user;
+  };
+  sales = await load('2103003');
+  producer = await load('1401006');
+}, 60_000);
+
+afterAll(async () => {
+  await moduleRef?.close();
+});
+
+describe('14.1 슬래브 4매: 제선 → 제강 → 연주', () => {
+  let planId: number;
+  let ore1: number;
+  let ore2: number;
+  let smn: number;
+  let hotMetalId: number;
+  let heatId: number;
+
+  beforeAll(async () => {
+    planId = (await planFor('SL-SS275-250x1200x10000', 4)).id;
+    ore1 = (await receive('ORE01', '300.000', '2020-01-01')).id;
+    ore2 = (await receive('ORE01', '300.000', '2020-01-02')).id;
+    await receive('COL01', '200.000', '2020-01-01');
+    await receive('LIM01', '50.000', '2020-01-01');
+    smn = (await receive('SMN01', '10.000', '2020-01-01')).id;
+  });
+
+  it('제선: 원료별 용선량 × 원단위를 입고일 순으로 차감하고 용선 LOT·기간 기반 관계를 만든다. 계획은 진행중', async () => {
+    const view = await results.register(producer, {
+      processType: 'IRONMAKING',
+      productionPlanId: planId,
+      blastFurnaceCode: 'BF9',
+      startedAt: at('00:00'),
+      completedAt: at('04:00'),
+      hotMetalTon: '277.778',
+    });
+    expect(view).toMatchObject({ processType: 'IRONMAKING', productionPlanId: null, blastFurnaceCode: 'BF9', completedAt: at('04:00'), operatorName: '강민석' });
+    expect(view.outputs).toEqual([expect.objectContaining({ lotType: 'HOT_METAL', lotNo: 'HM-BF9-200103-01', initialTon: '277.778' })]);
+    hotMetalId = view.outputs[0].lotId;
+    // 철광석 277.778 × 1.6 = 444.445t: 첫 LOT 300t 소진, 둘째 LOT에서 144.445t
+    expect(await lotOf(ore1)).toMatchObject({ lotStatus: 'CONSUMED' });
+    expect((await lotOf(ore1)).remainingTon?.toFixed(3)).toBe('0.000');
+    expect((await lotOf(ore2)).remainingTon?.toFixed(3)).toBe('155.555');
+    const relations = await prisma.lotRelation.findMany({ where: { childLotId: hotMetalId }, orderBy: { parentLotId: 'asc' } });
+    expect(relations).toHaveLength(4);
+    expect(relations.every((r) => r.lotRelationEvidence === 'PERIOD_BASED' && r.inputStartedAt?.toISOString() === at('00:00') && r.inputEndedAt?.toISOString() === at('04:00'))).toBe(true);
+    expect(view.inputTon).toBe('652.779'); // 444.445 + 166.667 + 41.667
+    expect((await prisma.productionPlan.findUniqueOrThrow({ where: { id: planId } })).productionPlanStatus).toBe('IN_PROGRESS');
+    const events = await prisma.businessEvent.findMany({ where: { targetType: 'production_result', targetId: view.id }, orderBy: { id: 'asc' } });
+    expect(events.map((e) => e.businessEventType)).toEqual([BUSINESS_EVENT_TYPE.PRODUCTION_STARTED, BUSINESS_EVENT_TYPE.PRODUCTION_RESULT_REGISTERED]);
+    expect(events[1].salesOrderId).not.toBeNull();
+  });
+
+  it('원료가 모자라면 INV-001이고 아무것도 바꾸지 않는다', async () => {
+    const before = (await lotOf(ore2)).remainingTon?.toFixed(3);
+    // 히트 1개 몫 277.778t에는 철광석 444.445t이 필요한데 155.555t만 남았다
+    expect(await codeOf(results.register(producer, { processType: 'IRONMAKING', blastFurnaceCode: 'BF8', startedAt: at('04:00'), completedAt: at('05:00'), hotMetalTon: '277.778' }))).toBe('INV-001');
+    expect((await lotOf(ore2)).remainingTon?.toFixed(3)).toBe(before);
+    expect(await prisma.productionResult.count({ where: { blastFurnaceCode: 'BF8' } })).toBe(0);
+  });
+
+  it('제강: 작업 시작 → 완료. 히트 톤 = 용선 × 제강 수율, 합금철 = 히트 톤 × kg/t ÷ 1,000, 용선→히트·합금철→히트 실제 투입', async () => {
+    const started = await results.register(producer, { processType: 'STEELMAKING', productionPlanId: planId, converterCode: 'BOF9', startedAt: at('05:00') });
+    expect(started.completedAt).toBeNull();
+    expect(await codeOf(results.register(producer, { processType: 'STEELMAKING', productionPlanId: planId, converterCode: 'BOF9', startedAt: at('05:10') }))).toBe('COM-001');
+    expect(await codeOf(results.complete(producer, started.id, { completedAt: at('04:59'), inputHotMetalTon: '277.778' }))).toBe('COM-004');
+
+    const done = await results.complete(producer, started.id, { completedAt: at('06:00'), inputHotMetalTon: '277.778' });
+    expect(done.outputs).toEqual([expect.objectContaining({ lotType: 'HEAT', lotNo: 'HT-BOF9-200103-001', initialTon: '250.000' })]);
+    heatId = done.outputs[0].lotId;
+    expect(await lotOf(hotMetalId)).toMatchObject({ lotStatus: 'CONSUMED' });
+    // SS275 합금철 10 kg/t → 250 × 10 ÷ 1,000 = 2.500t
+    expect((await lotOf(smn)).remainingTon?.toFixed(3)).toBe('7.500');
+    const relations = await prisma.lotRelation.findMany({ where: { childLotId: heatId } });
+    expect(relations.map((r) => [r.parentLotId, r.lotRelationEvidence, r.inputTon?.toFixed(3)]).sort()).toEqual([
+      [hotMetalId, 'ACTUAL_INPUT', '277.778'],
+      [smn, 'ACTUAL_INPUT', '2.500'],
+    ].sort());
+    expect(await codeOf(results.register(producer, { processType: 'STEELMAKING', productionPlanId: planId, converterCode: 'BOF9', startedAt: at('06:00'), completedAt: at('07:00'), inputHotMetalTon: '10' }))).toBe('COM-001');
+  });
+
+  it('입력 기준값: 연주 전 히트와 최대 슬래브 매수', async () => {
+    const context = await results.workContext(planId);
+    expect(context).toMatchObject({ heatCount: 1, heatsToMakeQty: 0, hotMetalTonPerHeat: '277.778', slabTheoreticalWeightTon: '23.550', lastBlastFurnaceCode: expect.any(String) });
+    expect(context.uncastHeats).toEqual([expect.objectContaining({ lotId: heatId, heatTon: '250.000', maxSlabQty: 10 })]);
+  });
+
+  it('연주: 최대 매수를 넘으면 COM-004, 10매면 슬래브 HT-…-01~10과 히트→슬래브 관계, 히트 소진, 계획 완료', async () => {
+    const started = await results.register(producer, { processType: 'CONTINUOUS_CASTING', productionPlanId: planId, heatLotId: heatId, startedAt: at('07:00') });
+    expect(started.startedHeatLotId).toBe(heatId);
+    expect(await codeOf(results.complete(producer, started.id, { completedAt: at('09:00'), slabQty: 11 }))).toBe('COM-004');
+    const done = await results.complete(producer, started.id, { completedAt: at('09:00'), slabQty: 10 });
+    expect(done.outputQty).toBe(10);
+    expect(done.outputTon).toBe('235.500');
+    expect(done.outputs.map((o) => o.lotNo)).toEqual(Array.from({ length: 10 }, (_, i) => `HT-BOF9-200103-001-${String(i + 1).padStart(2, '0')}`));
+    const slab = await lotOf(done.outputs[0].lotId);
+    expect(slab).toMatchObject({ lotType: 'SLAB', lotStatus: 'AVAILABLE' });
+    expect(slab.producedDate?.toISOString().slice(0, 10)).toBe('2020-01-03');
+    expect(await lotOf(heatId)).toMatchObject({ lotStatus: 'CONSUMED' });
+    expect(await prisma.lotRelation.count({ where: { parentLotId: heatId } })).toBe(10);
+
+    const detail = await production.getPlanDetail(planId);
+    expect(detail).toMatchObject({ productionPlanStatus: 'COMPLETED', canCancel: false });
+    expect(detail.progress).toMatchObject({ madeHeatQty: 1, castHeatQty: 1, slabQty: 10, pendingQty: 10, openWorkCount: 0 });
+    // 제선은 계획에 묶이지 않지만 이 계획 때문에 한 것(작업 시작 로그)은 상세에 함께 보인다
+    expect(detail.results.map((r) => r.processType)).toEqual(['IRONMAKING', 'STEELMAKING', 'CONTINUOUS_CASTING']);
+    // 완료 계획이라도 판정 대기 슬래브가 남아 재생산이 필요하다고 보지 않는다
+    expect(detail.reproduction).toMatchObject({ openPlanRemainingQty: 4, additionalPlanQty: 0 });
+    expect(await codeOf(results.register(producer, { processType: 'CONTINUOUS_CASTING', productionPlanId: planId, heatLotId: heatId, startedAt: at('10:00') }))).toBe('COM-001');
+  });
+
+  it('목록: 계획·공정으로 거른다', async () => {
+    const page = await results.listResults({ productionPlanId: planId });
+    expect(page.items.map((r) => r.processType)).toEqual(['CONTINUOUS_CASTING', 'STEELMAKING']);
+    const casting = await results.listResults({ productionPlanId: planId, processType: 'CONTINUOUS_CASTING' });
+    expect(casting.total).toBe(1);
+  });
+});
+
+describe('작업 실적 입력 오류', () => {
+  it('계획 없는 제강 → COM-004, 고로 코드 없는 제선 → COM-004, 없는 계획 → COM-003, 다른 계획의 히트 → COM-004', async () => {
+    expect(await codeOf(results.register(producer, { processType: 'STEELMAKING', converterCode: 'BOF9', startedAt: at('11:00') }))).toBe('COM-004');
+    expect(await codeOf(results.register(producer, { processType: 'IRONMAKING', startedAt: at('11:00') }))).toBe('COM-004');
+    expect(await codeOf(results.register(producer, { processType: 'STEELMAKING', productionPlanId: 999_999, converterCode: 'BOF9', startedAt: at('11:00') }))).toBe('COM-003');
+    const other = await planFor('SL-SS275-250x1500x10000', 1);
+    const heat = await prisma.lot.findFirstOrThrow({ where: { lotType: 'HEAT', lotNo: 'HT-BOF9-200103-001' } });
+    expect(await codeOf(results.register(producer, { processType: 'CONTINUOUS_CASTING', productionPlanId: other.id, heatLotId: heat.id, startedAt: at('11:00') }))).toBe('COM-004');
+  });
+
+  it('같은 고로에 작업 중인 제선이 있으면 새로 시작할 수 없다 (COM-001)', async () => {
+    const first = await results.register(producer, { processType: 'IRONMAKING', blastFurnaceCode: 'BF7', startedAt: at('12:00') });
+    expect(await codeOf(results.register(producer, { processType: 'IRONMAKING', blastFurnaceCode: 'BF7', startedAt: at('12:30') }))).toBe('COM-001');
+    expect(await codeOf(results.complete(producer, first.id, { completedAt: at('13:00') }))).toBe('COM-004');
+  });
+
+  it('슬래브 계획에는 열연 공정이 없다 (COM-004)', async () => {
+    const plan = await planFor('SL-SS275-250x1500x10000', 1);
+    expect(await codeOf(results.register(producer, { processType: 'HOT_ROLLING', productionPlanId: plan.id, startedAt: at('11:00') }))).toBe('COM-004');
+  });
+});
+
+describe('작업 실적 입력 기준: 히트 1개 몫·투입 순서·설비 겹침', () => {
+  // 다른 테스트의 원료·용선보다 앞선 2019-06에 두고 입고량을 딱 맞춰, 끝나면 이 묶음의 원료·용선이 남지 않게 한다
+  const on = (hhmm: string) => `2019-06-01T${hhmm}:00.000Z`;
+  let planId: number;
+
+  async function errorOf(promise: Promise<unknown>): Promise<{ code: string; message: string }> {
+    try {
+      await promise;
+    } catch (e) {
+      if (e instanceof AppException) return { code: e.code, message: e.message };
+      throw e;
+    }
+    throw new Error('오류가 나지 않았습니다');
+  }
+
+  beforeAll(async () => {
+    planId = (await planFor('SL-SS275-250x1200x10000', 4)).id;
+    // 용선 277.778t = 철광석 444.445 + 석탄 166.667 + 석회석 41.667, 히트 250t × SS275 합금철 10 kg/t = 2.500t
+    for (const [code, ton] of [['ORE01', '444.445'], ['COL01', '166.667'], ['LIM01', '41.667'], ['SMN01', '2.500']] as const) await receive(code, ton, '2019-05-31');
+  });
+
+  it('제선 용선량·제강 투입 용선은 히트 1개 몫까지. 계획 없는 제선은 제강 수율이 낮은 유형 기준', async () => {
+    const coil = await prisma.routing.findFirstOrThrow({ where: { itemType: 'COIL', processType: 'STEELMAKING' } });
+    await prisma.routing.update({ where: { id: coil.id }, data: { plannedYieldRate: '0.8000' } });
+    try {
+      // 계획 없음: 250 ÷ 0.8 = 312.500t / 슬래브 계획: 250 ÷ 0.9 = 277.778t
+      const free = await errorOf(results.register(producer, { processType: 'IRONMAKING', blastFurnaceCode: 'BF4', startedAt: on('10:00'), completedAt: on('11:00'), hotMetalTon: '312.501' }));
+      expect(free).toEqual({ code: 'COM-004', message: expect.stringContaining('312.500t') });
+      const planned = await errorOf(results.register(producer, { processType: 'IRONMAKING', productionPlanId: planId, blastFurnaceCode: 'BF4', startedAt: on('10:00'), completedAt: on('11:00'), hotMetalTon: '277.779' }));
+      expect(planned).toEqual({ code: 'COM-004', message: expect.stringContaining('277.778t') });
+    } finally {
+      await prisma.routing.update({ where: { id: coil.id }, data: { plannedYieldRate: coil.plannedYieldRate } });
+    }
+    const steel = await errorOf(results.register(producer, { processType: 'STEELMAKING', productionPlanId: planId, converterCode: 'BOF4', startedAt: on('10:00'), completedAt: on('11:00'), inputHotMetalTon: '2777.78' }));
+    expect(steel).toEqual({ code: 'COM-004', message: expect.stringContaining('277.778t') });
+    expect(await prisma.productionResult.count({ where: { OR: [{ blastFurnaceCode: 'BF4' }, { converterCode: 'BOF4' }] } })).toBe(0);
+  });
+
+  it('같은 고로의 작업 시간이 겹치면 COM-001: 시작이 다른 작업 안이거나, 완료가 다음 작업에 걸칠 때', async () => {
+    await results.register(producer, { processType: 'IRONMAKING', productionPlanId: planId, blastFurnaceCode: 'BF4', startedAt: on('00:00'), completedAt: on('04:00'), hotMetalTon: '277.778' });
+    // 입력 창은 마지막 고로(BF4)가 끝난 뒤를 시작 기본값으로 쓴다
+    expect(await results.workContext(planId)).toMatchObject({ lastBlastFurnaceCode: 'BF4', earliestIronmakingStartedAt: on('04:00') });
+    expect(await codeOf(results.register(producer, { processType: 'IRONMAKING', blastFurnaceCode: 'BF4', startedAt: on('02:00'), completedAt: on('05:00'), hotMetalTon: '1' }))).toBe('COM-001');
+    expect(await codeOf(results.register(producer, { processType: 'IRONMAKING', blastFurnaceCode: 'BF4', startedAt: '2019-05-31T22:00:00.000Z', completedAt: on('01:00'), hotMetalTon: '1' }))).toBe('COM-001');
+    expect(await prisma.productionResult.count({ where: { blastFurnaceCode: 'BF4' } })).toBe(1);
+  });
+
+  it('제강은 시작 전에 제선을 마친 용선만, 연주는 제강을 마친 뒤에 시작한다', async () => {
+    // 용선은 04:00에 나왔다: 03:00에 시작한 제강은 쓸 용선이 없다
+    expect(await codeOf(results.register(producer, { processType: 'STEELMAKING', productionPlanId: planId, converterCode: 'BOF4', startedAt: on('03:00'), completedAt: on('05:00'), inputHotMetalTon: '277.778' }))).toBe('INV-001');
+    const steel = await results.register(producer, { processType: 'STEELMAKING', productionPlanId: planId, converterCode: 'BOF4', startedAt: on('04:00'), completedAt: on('05:00'), inputHotMetalTon: '277.778' });
+    const heatId = steel.outputs[0].lotId;
+    expect((await results.workContext(planId)).uncastHeats).toEqual([expect.objectContaining({ lotId: heatId, completedAt: on('05:00') })]);
+    expect(await codeOf(results.register(producer, { processType: 'CONTINUOUS_CASTING', productionPlanId: planId, heatLotId: heatId, startedAt: on('04:30') }))).toBe('COM-004');
+    const cast = await results.register(producer, { processType: 'CONTINUOUS_CASTING', productionPlanId: planId, heatLotId: heatId, startedAt: on('05:00'), completedAt: on('07:00'), slabQty: 10 });
+    expect(cast.outputQty).toBe(10);
+  });
+});
+
+describe('동시 요청: 같은 실적을 두 번 완료하거나 같은 고로에서 둘을 시작하지 않는다', () => {
+  // 고로 BF3·BF5와 2018-01은 이 묶음만 쓴다
+  const on = (hhmm: string) => `2018-01-02T${hhmm}:00.000Z`;
+
+  it('완료 확인 뒤 다른 요청이 먼저 완료하면 COM-001이고 원료 차감·용선 LOT을 모두 되돌린다', async () => {
+    const started = await results.register(producer, { processType: 'IRONMAKING', blastFurnaceCode: 'BF3', startedAt: on('01:00') });
+    // 가장 오래된 원료라 다른 테스트의 FIFO 차감에 섞일 수 있어, 바로 넣고 끝나면 남은 양을 지운다
+    const materials: number[] = [];
+    for (const code of ['ORE01', 'COL01', 'LIM01']) materials.push((await receive(code, '10.000', '2018-01-01')).id);
+    const repository = moduleRef.get(ProductionResultRepository);
+    const completeResult = repository.completeResult.bind(repository);
+    // 계획 없는 제선은 잠금이 없다: 이 요청이 '이미 완료'를 확인하고 원료를 차감한 뒤, 완료로 바꾸기 직전에 같은 실적의 다른 완료 요청이 커밋된 상황
+    const spy = jest.spyOn(repository, 'completeResult').mockImplementationOnce(async (tx, id, data) => {
+      await prisma.productionResult.update({ where: { id: started.id }, data: { completedAt: new Date(on('02:00')) } });
+      return completeResult(tx, id, data);
+    });
+    try {
+      expect(await codeOf(results.complete(producer, started.id, { completedAt: on('02:00'), hotMetalTon: '1' }))).toBe('COM-001');
+      expect(await prisma.lot.count({ where: { productionResultId: started.id } })).toBe(0);
+      expect((await lotOf(materials[0])).remainingTon?.toFixed(3)).toBe('10.000');
+    } finally {
+      spy.mockRestore();
+      await prisma.lot.updateMany({ where: { id: { in: materials } }, data: { remainingTon: '0', lotStatus: 'CONSUMED' } });
+    }
+  });
+
+  it('같은 고로에 시작 요청 둘이 겹치면 하나만 만들고 나머지는 COM-001', async () => {
+    const repository = moduleRef.get(ProductionResultRepository);
+    const findOpenResults = repository.findOpenResults.bind(repository);
+    let second: Promise<string> | undefined;
+    // 첫 요청이 '작업 중 없음'을 확인하는 순간 두 번째 요청이 들어온다. 고로 잠금이 없으면 두 번째도 '없음'을 보고 만든다
+    const slowFind = async (...args: Parameters<typeof findOpenResults>) => {
+      second = codeOf(results.register(producer, { processType: 'IRONMAKING', blastFurnaceCode: 'BF5', startedAt: on('05:00') }));
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      return findOpenResults(...args);
+    };
+    // repository는 PrismaPromise를 돌려주지만 서비스는 await만 하므로 보통 Promise로 바꿔 끼운다
+    const spy = jest.spyOn(repository, 'findOpenResults').mockImplementationOnce(slowFind as unknown as typeof findOpenResults);
+    try {
+      await results.register(producer, { processType: 'IRONMAKING', blastFurnaceCode: 'BF5', startedAt: on('04:00') });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await second).toBe('COM-001');
+    expect(await prisma.productionResult.count({ where: { blastFurnaceCode: 'BF5' } })).toBe(1);
+  });
+});
+
+describe('작업 일시: 시간대 없는 글은 서울 시각으로 읽는다 (일정과 같음, #496)', () => {
+  it('시간대 없는 시작 일시는 +09:00으로, 읽을 수 없는 일시는 COM-004', async () => {
+    // 서울 시간대 PC에서는 new Date(글)도 같은 값이 나와 결과만 보면 고치기 전 코드도 통과한다.
+    // Jest 안에서는 process.env.TZ를 바꿔도 시간대가 바뀌지 않아(복사본), 시간대와 무관한 공통 해석 함수를 거치는지도 본다 (#509)
+    const parse = jest.spyOn(seoulDate, 'seoulDateTimeOf');
+    // 고로 BF96과 2017-03은 이 묶음만 쓴다. 서버가 UTC든 서울이든 같은 시각이어야 한다
+    const started = await results.register(producer, { processType: 'IRONMAKING', blastFurnaceCode: 'BF96', startedAt: '2017-03-02T09:00' });
+    try {
+      expect(parse).toHaveBeenCalledWith('2017-03-02T09:00');
+      parse.mockRestore();
+      expect(started.startedAt).toBe('2017-03-02T00:00:00.000Z');
+      expect(await codeOf(results.register(producer, { processType: 'IRONMAKING', blastFurnaceCode: 'BF97', startedAt: '2017-W10' }))).toBe('COM-004');
+      expect(await codeOf(results.complete(producer, started.id, { completedAt: '2017-W10', hotMetalTon: '1' }))).toBe('COM-004');
+      expect(await prisma.productionResult.count({ where: { blastFurnaceCode: 'BF97' } })).toBe(0);
+    } finally {
+      parse.mockRestore();
+      await prisma.productionResult.delete({ where: { id: started.id } });
+    }
+  });
+});

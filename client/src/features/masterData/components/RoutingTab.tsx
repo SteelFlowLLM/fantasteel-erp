@@ -1,8 +1,8 @@
 'use client';
 
-// 라우팅 (REQ-MST-005): 품목 유형(슬래브·코일)별 공정 순서와 계획 수율. 공정 추가·삭제·순서 변경은 데이터 수정만으로 한다.
+// 라우팅 (REQ-MST-005): 품목 유형(슬래브·코일)별 공정 순서와 계획 수율. 공정을 더하고 순서를 바꾸고 수율을 고친다(라우팅 삭제 API가 없어 공정은 뺄 수 없다).
 // - 열연 계획 수율은 넣지 않고 규격 매핑에서 계산한다 (REQ-MST-004).
-// - 제선 수율은 4.4 계산(원료 → 용선은 용선 1t당 원단위)에 쓰지 않아 '—'로 보이고 준비 상태에서도 누락으로 보지 않는다 (사용자 확인 필요, master.md).
+// - 제선 수율은 4.4 계산(원료 → 용선은 용선 1t당 원단위)에 쓰지 않아 '—'로 보인다 (사용자 확인 필요, master.md).
 import { useState } from 'react';
 import { ITEM_TYPE_LABEL, PROCESS_TYPE, PROCESS_TYPE_LABEL, type ProcessType } from '@/codes';
 import { masterDataApi, type MasterRoutingView } from '@/api/masterData';
@@ -49,7 +49,7 @@ function RoutingCard({ routing, canEdit, onGoTab }: { routing: MasterRoutingView
   const [adding, setAdding] = useState('');
   const fieldErrors = useMasterDataFieldErrors();
   const title = `${ITEM_TYPE_LABEL[routing.itemType]} 라우팅`;
-  const save = useAction(masterDataApi.saveRouting, { success: `${title}을 저장했어요`, onError: fieldErrors.takeFrom });
+  const save = useAction(masterDataApi.saveRouting, { success: `${title}을 저장했어요`, onError: fieldErrors.takeFrom, refreshOnStale: true });
   const dirty = !isSameDraft(steps, initial);
 
   const available = Object.values(PROCESS_TYPE).filter((p) => !steps.some((s) => s.processType === p) && !(routing.itemType === 'SLAB' && p === 'HOT_ROLLING'));
@@ -62,7 +62,7 @@ function RoutingCard({ routing, canEdit, onGoTab }: { routing: MasterRoutingView
   };
 
   return (
-    <Card>
+    <Card petKey="card:masterData.routing">
       <CardHead title={title} meta={`공정 ${steps.length}개`} />
       <Table>
         <thead>
@@ -70,7 +70,7 @@ function RoutingCard({ routing, canEdit, onGoTab }: { routing: MasterRoutingView
             <Th className="w-14">순서</Th>
             <Th>공정</Th>
             <Th>계획 수율</Th>
-            <Th aria-label="순서 바꾸기·빼기" />
+            <Th aria-label="순서 바꾸기" />
           </tr>
         </thead>
         <tbody>
@@ -79,7 +79,7 @@ function RoutingCard({ routing, canEdit, onGoTab }: { routing: MasterRoutingView
             const processError = fieldErrors.errorOf(`steps.${index}.processType`);
             const preview = RATE.test(step.plannedYieldRate.trim()) ? formatYieldPercent(step.plannedYieldRate.trim()) : null;
             return (
-              <tr key={step.processType}>
+              <tr key={step.processType} data-pet-item="routing" data-pet-item-title={`${title} · ${PROCESS_TYPE_LABEL[step.processType]}`}>
                 <Td className="tabular-nums">{index + 1}</Td>
                 <Td>
                   <span className="flex flex-col">
@@ -125,17 +125,6 @@ function RoutingCard({ routing, canEdit, onGoTab }: { routing: MasterRoutingView
                   <span className="inline-flex">
                     <IconButton icon="chevron-up" label="위로" size="sm" disabled={!canEdit || index === 0} onClick={() => move(index, -1)} />
                     <IconButton icon="chevron-down" label="아래로" size="sm" disabled={!canEdit || index === steps.length - 1} onClick={() => move(index, 1)} />
-                    <IconButton
-                      icon="x"
-                      label="공정 빼기"
-                      size="sm"
-                      disabled={!canEdit}
-                      title={canEdit ? '공정 빼기' : MASTER_LOCK_TEXT}
-                      onClick={() => {
-                        setSteps(steps.filter((_, i) => i !== index));
-                        fieldErrors.clear();
-                      }}
-                    />
                   </span>
                 </Td>
               </tr>

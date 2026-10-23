@@ -2,10 +2,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { masterDataApi, masterDataKeys } from '@/api/masterData';
 
-export function useMasterReadiness() {
-  return useQuery({ queryKey: masterDataKeys.readiness(), queryFn: masterDataApi.getReadiness });
-}
-
 export function useMasterProductSpecs() {
   return useQuery({ queryKey: masterDataKeys.productSpecs(), queryFn: masterDataApi.listProductSpecs });
 }

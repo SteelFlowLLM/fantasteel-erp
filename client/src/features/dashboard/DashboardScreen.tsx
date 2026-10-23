@@ -1,7 +1,7 @@
 'use client';
 
 // 대시보드 (P3, REQ-DSH-001·002, BP-DSH-01, SPEC 4장 3번). 사원마다 저장한 위젯 배치를 12칸 격자에 그린다.
-// 보기: 위젯 고정 · 편집: 끌어 옮기기·크기 조절·추가·제외 → 저장(이 브라우저, 사원별). '기본 배치로'는 기본 위젯 6개 배치로 되돌린다.
+// 보기: 위젯 고정 · 편집: 끌어 옮기기·크기 조절·추가·제외 → 저장(이 브라우저, 사원별). '기본 배치로'는 기본 위젯 6개 배치(품질은 수주 충족 현황 자리에 강종별 불합격률)로 되돌린다.
 // 권한(조회)이 없는 위젯은 잠금으로 보이고, P2 위젯(Agent 위험 감지·AI 활용 현황)은 준비 중으로 흐리게 보인다.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { DashboardWidgetKey } from '@/api/dashboard';
@@ -15,12 +15,11 @@ import { appendPlacement, buildDefaultPlacements, compactPlacements, removePlace
 import { WidgetAddPanel } from '@/features/dashboard/WidgetAddPanel';
 import { useDashboardLayout } from '@/hooks/useDashboardLayout';
 import { useMe } from '@/hooks/useMe';
-import { fmtMDdow, todayStr } from '@/lib/format';
 import { toast } from '@/stores/useToastStore';
 
 export function DashboardScreen() {
   const me = useMe();
-  const layout = useDashboardLayout(me.employeeId);
+  const layout = useDashboardLayout(me.employeeId, me.roleCode);
   const [editing, setEditing] = useState(false);
   // 편집 중에만 쓰는 임시 배치. null이면 저장된 배치 그대로
   const [draft, setDraft] = useState<WidgetPlacement[] | null>(null);
@@ -56,15 +55,10 @@ export function DashboardScreen() {
     <>
       <PageMain className="gap-3.5">
         <div className="flex flex-none flex-wrap items-center gap-2">
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <b className="truncate text-lg font-semibold">{me.employeeName}님, 안녕하세요</b>
-            <span className="truncate text-cap text-ink-3">
-              {me.departmentName} · {me.roleName} · {todayStr().slice(0, 5)}
-              {fmtMDdow(new Date())}
-            </span>
-          </div>
+          {/* 소속·오늘 날짜는 상단 바(날짜·시각, 이름 아래 소속)에 이미 있어 인사만 둔다 */}
+          <b className="min-w-0 flex-1 truncate text-lg font-semibold">{me.employeeName}님, 안녕하세요</b>
           {!editing ? (
-            <Button icon="widget" onClick={() => startEdit(true)}>
+            <Button icon="widget" data-pet-target="card:dashboard.edit" onClick={() => startEdit(true)}>
               위젯 편집
             </Button>
           ) : null}
@@ -81,7 +75,7 @@ export function DashboardScreen() {
                     위젯 추가
                   </Button>
                 ) : null}
-                <Button size="sm" icon="refresh" onClick={() => setDraft(buildDefaultPlacements())}>
+                <Button size="sm" icon="refresh" onClick={() => setDraft(buildDefaultPlacements(me.roleCode))}>
                   기본 배치로
                 </Button>
                 <Button size="sm" onClick={() => startEdit(false)}>

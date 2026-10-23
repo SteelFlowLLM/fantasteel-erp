@@ -33,15 +33,3 @@ export function toSeoulDateString(date: Date): string {
   const p = seoulDateParts(date);
   return `${p.year}-${pad2(p.month)}-${pad2(p.day)}`;
 }
-
-/** 업무 번호의 YYMM (예: 2610) */
-export function toSeoulYyMm(date: Date): string {
-  const p = seoulDateParts(date);
-  return `${pad2(p.year % 100)}${pad2(p.month)}`;
-}
-
-/** LOT 번호·작업 로그 번호의 YYMMDD (예: 261001) */
-export function toSeoulYyMmDd(date: Date): string {
-  const p = seoulDateParts(date);
-  return `${pad2(p.year % 100)}${pad2(p.month)}${pad2(p.day)}`;
-}

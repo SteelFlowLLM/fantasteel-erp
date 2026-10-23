@@ -3,6 +3,7 @@ import { ACTOR_TYPE, type AuthUser, type BusinessEventType } from '@fantasteel/s
 import { Prisma } from '../../generated/prisma/client';
 import type { Tx } from '../../prisma/prisma.service';
 import { NumberingService } from '../numbering/numbering.service';
+import { isInAiAssistedRun, withVoiceApprovedReason } from './ai-assisted.context';
 
 export interface BusinessEventInput {
   type: BusinessEventType;
@@ -19,10 +20,25 @@ export interface BusinessEventInput {
   after?: unknown;
   /** 사유. 정의서 9.3 사유 코드(STOCK_FIRST 등)와 사람이 읽을 문장 */
   reason?: string | null;
+  /** 명시하지 않으면 runAsAiAssisted 안에서는 true, 밖에서는 false. runAsVoiceApproved 안이면 사유 끝에 '말로 승인'이 붙는다 */
   isAiAssisted?: boolean;
   actionDraftId?: number | null;
   messageId?: number | null;
 }
+
+/** 기록된 작업 로그. 다른 모듈이 같은 tx에서 이어서 처리할 때 받는다 (예: 메신저 업무방 자동 메시지) */
+export interface RecordedBusinessEvent {
+  id: number;
+  businessEventNo: string;
+  type: BusinessEventType;
+  actor: AuthUser | 'SYSTEM';
+  target: { table: string; id: number };
+  salesOrderId: number | null;
+  after: unknown;
+}
+
+/** 작업 로그가 기록된 직후 같은 tx에서 불린다. 실패하면 본 거래도 롤백된다 */
+export type BusinessEventListener = (tx: Tx, event: RecordedBusinessEvent) => Promise<void>;
 
 const toJson = (value: unknown) =>
   value === undefined || value === null ? Prisma.DbNull : (JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue);
@@ -34,7 +50,17 @@ const toJson = (value: unknown) =>
  */
 @Injectable()
 export class BusinessEventRecorder {
+  private readonly listeners: BusinessEventListener[] = [];
+
   constructor(private readonly numbering: NumberingService) {}
+
+  /**
+   * 기록 직후 할 일을 등록한다 (모듈 초기화 때 한 번). 공통 기반이 다른 모듈을 직접 부르지 않으려고 이렇게 연결한다.
+   * 지금은 메신저가 수주 업무방에 시스템 메시지를 남기는 데 쓴다.
+   */
+  onRecorded(listener: BusinessEventListener): void {
+    this.listeners.push(listener);
+  }
 
   async record(tx: Tx, input: BusinessEventInput): Promise<{ id: number; businessEventNo: string }> {
     const businessEventNo = await this.numbering.nextDocumentNumber(tx, 'BUSINESS_EVENT');
@@ -50,8 +76,8 @@ export class BusinessEventRecorder {
         salesOrderId: input.salesOrderId ?? null,
         beforeData: toJson(input.before),
         afterData: toJson(input.after),
-        reason: input.reason ?? null,
-        isAiAssisted: input.isAiAssisted ?? false,
+        reason: withVoiceApprovedReason(input.reason ?? null),
+        isAiAssisted: input.isAiAssisted ?? isInAiAssistedRun(),
         actionDraftId: input.actionDraftId ?? null,
         messageId: input.messageId ?? null,
       },
@@ -59,6 +85,9 @@ export class BusinessEventRecorder {
     });
     const lotIds = [...new Set(input.lotIds ?? [])];
     if (lotIds.length) await tx.businessEventLot.createMany({ data: lotIds.map((lotId) => ({ businessEventId: event.id, lotId })) });
+    for (const listener of this.listeners) {
+      await listener(tx, { ...event, type: input.type, actor: input.actor, target: input.target, salesOrderId: input.salesOrderId ?? null, after: input.after });
+    }
     return event;
   }
 }

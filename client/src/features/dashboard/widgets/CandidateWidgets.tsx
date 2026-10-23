@@ -1,6 +1,7 @@
 // 추가 후보 위젯 (REQ-DSH-002): 원료 잔량 대비 소요 · 강종별 불합격률 · 납기 위험 수주 · 구매 진행 · 출하 실적 · 여재 보유 기간 · 생산량.
-// 숫자는 모두 api/dashboard.ts가 core 읽기 모델에서 가져온 값이다.
+// 숫자는 모두 api/dashboard.ts가 서버에서 읽은 값이다.
 import Link from 'next/link';
+import { useState } from 'react';
 import { PROCESS_TYPE_LABEL, PURCHASE_REQUISITION_STATUS_LABEL, type PurchaseRequisitionStatus } from '@/codes';
 import type {
   DeliveryRiskData,
@@ -13,6 +14,7 @@ import type {
 } from '@/api/dashboard';
 import { Icon } from '@/components/Icon';
 import { Table, Td, Th } from '@/components/Table';
+import { Segmented } from '@/components/Tabs';
 import { DailyBars } from '@/features/dashboard/components/DailyBars';
 import { Figure, WidgetBody, WidgetEmpty, WidgetFrame, type WidgetProps } from '@/features/dashboard/components/WidgetFrame';
 import { dueLabel } from '@/features/dashboard/lib/widgetMath';
@@ -47,7 +49,7 @@ function RawMaterialBody({ data }: { data: RawMaterialBalanceData }) {
             const short = decCmp(m.netTon, 0) > 0;
             const gross = Number(m.grossTon);
             return (
-              <tr key={m.itemId} data-risk={short || undefined}>
+              <tr key={m.itemId} data-risk={short || undefined} data-pet-item="rawMaterial" data-pet-item-title={m.itemName}>
                 <Td className="max-w-36 truncate" title={`${m.itemName} (${m.itemCode})`}>
                   <b className="font-semibold">{m.itemName}</b> <span className="font-mono text-cap text-ink-3">{m.itemCode}</span>
                 </Td>
@@ -98,30 +100,87 @@ export function RawMaterialBalanceWidget(props: WidgetProps) {
 
 // ── 강종별 불합격률 ─────────────────────────────────────
 
-function RejectRateBody({ data }: { data: RejectRateData }) {
+type RateMode = 'reject' | 'pass';
+const RATE_MODES = [
+  { key: 'reject', label: '불합격률' },
+  { key: 'pass', label: '합격률' },
+] as const satisfies readonly { key: RateMode; label: string }[];
+
+/** 보는 기준에 맞춘 비율·건수. 판정 수에는 판정 대기가 없어(PASS·FAIL만) 합격 = 판정 − 불합격 */
+const rateOf = (cell: { inspectedCount: number; failedCount: number; rejectRate: number | null }, mode: RateMode) => ({
+  rate: cell.rejectRate === null ? null : mode === 'pass' ? 1 - cell.rejectRate : cell.rejectRate,
+  count: mode === 'pass' ? cell.inspectedCount - cell.failedCount : cell.failedCount,
+});
+
+function RejectRateBody({ data, mode }: { data: RejectRateData; mode: RateMode }) {
   if (data.grades.length === 0) return <WidgetEmpty>등록된 강종이 없어요</WidgetEmpty>;
-  // 불합격률은 작은 값이라 가장 큰 값(최소 10%)을 막대 끝으로 잡는다
-  const scale = Math.max(0.1, ...data.grades.map((g) => g.rejectRate ?? 0));
-  const anyInspected = data.grades.some((g) => g.inspectedCount > 0);
+  // 막대 끝 = 100%: 막대 길이가 비율 그대로 보이게 한다 (5.6%면 5.6%만 칠한다)
+  // 판정된 검사가 없는 강종은 막대 줄 대신 한 줄에 이름만 둔다: 0%(불합격 없음)와 "모름"이 같은 빈 막대로 보이지 않게
+  const inspected = data.grades.filter((g) => g.inspectedCount > 0);
+  const notInspected = data.grades.filter((g) => g.inspectedCount === 0);
+  const isPass = mode === 'pass';
+  // 기간 전체 요약을 맨 위에 크게 둔다: 불합격이 없으면 막대가 하나도 없어 위젯이 비어 보였다
+  const totalInspected = inspected.reduce((sum, g) => sum + g.inspectedCount, 0);
+  const totalFailed = inspected.reduce((sum, g) => sum + g.failedCount, 0);
+  const total = rateOf({ inspectedCount: totalInspected, failedCount: totalFailed, rejectRate: totalInspected > 0 ? totalFailed / totalInspected : null }, mode);
+  const totalTone = !isPass && totalFailed > 0 ? 'danger' : undefined;
   return (
     <div className="flex flex-col gap-2.5 px-4 py-3">
-      {data.grades.map((g) => {
+      {inspected.length > 0 ? (
+        <div className="flex flex-wrap gap-x-5 gap-y-2 border-b border-line pb-2.5">
+          <Figure label="판정한 검사" value={fmtInt(totalInspected)} unit="건" />
+          <Figure label={isPass ? '합격' : '불합격'} value={fmtInt(total.count)} unit="건" tone={totalTone} />
+          <Figure label={isPass ? '합격률' : '불합격률'} value={fmtPct(total.rate, 1)} tone={totalTone} />
+        </div>
+      ) : null}
+      {inspected.map((g) => {
         const byProcess = g.byProcess.filter((p) => p.inspectedCount > 0);
+        const { rate, count } = rateOf(g, mode);
+        const noReject = !isPass && g.failedCount === 0;
+        // 오른쪽 숫자 칸을 고정 폭으로 둔다: 행마다 숫자 길이가 달라도 막대 길이(기준)가 같아야 비교된다
         return (
-          <div key={g.steelGradeId} className="grid grid-cols-[64px_minmax(0,1fr)_max-content] items-center gap-x-2.5 gap-y-0.5 text-xs">
+          <div
+            key={g.steelGradeId}
+            data-pet-item="steelGrade"
+            data-pet-item-title={g.steelGradeCode}
+            className="grid grid-cols-[64px_minmax(0,1fr)_104px] items-center gap-x-2.5 gap-y-0.5 text-xs"
+          >
             <b className="font-mono font-semibold">{g.steelGradeCode}</b>
-            <div className="flex h-3.5 overflow-hidden rounded-xs bg-surface-3">{g.rejectRate ? <span className="bg-danger" style={{ width: pct(g.rejectRate, scale) }} /> : null}</div>
+            {noReject ? (
+              // 0%는 막대를 그리지 않고 글자만: 색칠한 막대는 꽉 찬 비율(100%)로 읽혔다
+              <span className="flex h-3.5 items-center gap-0.5 text-2xs font-semibold text-ok">
+                <Icon name="check" size="sm" />
+                불합격 없음
+              </span>
+            ) : (
+              <div className="flex h-3.5 overflow-hidden rounded-xs bg-surface-3">{rate ? <span className={isPass ? 'bg-ok' : 'bg-danger'} style={{ width: pct(rate, 1) }} /> : null}</div>
+            )}
             <span className="text-right tabular-nums">
-              <b className={cn('font-semibold', g.rejectRate ? 'text-danger' : undefined)}>{fmtPct(g.rejectRate, 1)}</b> <span className="text-cap text-ink-3">{g.failedCount}/{g.inspectedCount}건</span>
+              <b className={cn('font-semibold', noReject ? 'text-ok' : rate ? (isPass ? 'text-ok' : 'text-danger') : undefined)} data-pet-field={isPass ? '합격률' : '불합격률'}>
+                {fmtPct(rate, 1)}
+              </b>{' '}
+              <span className="text-cap text-ink-3" data-pet-field={isPass ? '합격 / 판정' : '불합격 / 판정'}>
+                {count}/{g.inspectedCount}건
+              </span>
             </span>
-            <span className="col-start-2 col-end-4 truncate text-cap text-ink-3">
-              {byProcess.length > 0 ? byProcess.map((p) => `${PROCESS_TYPE_LABEL[p.processType]} ${p.failedCount}/${p.inspectedCount}`).join(' · ') : '판정된 검사 없음'}
+            <span className="col-start-2 col-end-4 truncate text-cap text-ink-3" data-pet-field="공정별">
+              {byProcess.map((p) => `${PROCESS_TYPE_LABEL[p.processType]} ${rateOf(p, mode).count}/${p.inspectedCount}`).join(' · ')}
             </span>
           </div>
         );
       })}
-      <span className="text-cap text-ink-3">불합격률 = 불합격 ÷ 판정된 검사 수 · 막대 끝 = {Math.round(scale * 100)}%</span>
-      {!anyInspected ? <WidgetEmpty>최근 {data.days}일 동안 판정된 검사가 없어요</WidgetEmpty> : null}
+      {inspected.length === 0 ? <WidgetEmpty>최근 {data.days}일 동안 판정된 검사가 없어요</WidgetEmpty> : null}
+      {notInspected.length > 0 ? (
+        <div className={cn('flex flex-wrap items-center gap-1.5 text-cap text-ink-3', inspected.length > 0 && 'border-t border-dashed border-line-strong pt-2')}>
+          <b className="font-semibold">판정된 검사 없는 강종</b>
+          {notInspected.map((g) => (
+            <span key={g.steelGradeId} className="rounded-xs bg-surface-3 px-1.5 font-mono">
+              {g.steelGradeCode}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      <span className="text-cap text-ink-3">{isPass ? '합격률 = 합격 ÷ 판정된 검사 수' : '불합격률 = 불합격 ÷ 판정된 검사 수'} · 막대 끝 = 100%</span>
     </div>
   );
 }
@@ -129,10 +188,17 @@ function RejectRateBody({ data }: { data: RejectRateData }) {
 export function RejectRateWidget(props: WidgetProps) {
   const access = useDashboardWidgetAccess('REJECT_RATE');
   const query = useDashboardWidget('REJECT_RATE', access.allowed);
+  const [mode, setMode] = useState<RateMode>('reject');
+  // 전환은 머리 오른쪽에 둔다(바로가기 자리): 본문 한 줄을 아껴 강종 목록이 스크롤 없이 보이게
   return (
-    <WidgetFrame widgetKey="REJECT_RATE" {...props} meta={query.data ? `최근 ${query.data.days}일 · ${fmtMD(query.data.from)}~${fmtMD(query.data.to)}` : null}>
+    <WidgetFrame
+      widgetKey="REJECT_RATE"
+      {...props}
+      meta={query.data ? `최근 ${query.data.days}일 · ${fmtMD(query.data.from)}~${fmtMD(query.data.to)}` : null}
+      actions={access.allowed ? <Segmented ariaLabel="보는 기준" items={RATE_MODES} active={mode} onChange={setMode} /> : null}
+    >
       <WidgetBody allowed={access.allowed} permissions={access.permissions} query={query}>
-        {(data) => <RejectRateBody data={data} />}
+        {(data) => <RejectRateBody data={data} mode={mode} />}
       </WidgetBody>
     </WidgetFrame>
   );
@@ -156,7 +222,7 @@ function DeliveryRiskBody({ data }: { data: DeliveryRiskData }) {
       </thead>
       <tbody>
         {data.items.map((item) => (
-          <tr key={item.salesOrderItemId} data-risk={item.isOverdue || undefined}>
+          <tr key={item.salesOrderItemId} data-risk={item.isOverdue || undefined} data-pet-item="salesOrder" data-pet-item-title={item.salesOrderNo}>
             <Td className="font-mono text-xs font-medium">
               <Link href={`/sales-orders/${item.salesOrderId}`} className="text-run hover:underline">
                 {item.salesOrderNo}
@@ -211,6 +277,7 @@ const REQUISITION_COLOR: Record<PurchaseRequisitionStatus, string> = {
   APPROVED: 'bg-run',
   REJECTED: 'bg-danger',
   ORDERED: 'bg-ok',
+  ORDER_CANCELLED: 'bg-line-strong',
 };
 
 function PurchaseProgressBody({ data }: { data: PurchaseProgressData }) {
@@ -245,15 +312,22 @@ function PurchaseProgressBody({ data }: { data: PurchaseProgressData }) {
             </span>
           </div>
           {open.purchaseOrders.map((po) => (
-            <div key={po.purchaseOrderId} className="flex h-8 min-w-0 flex-none items-center gap-2 border-b border-line text-xs">
-              <Link href={`/purchase-orders?po=${po.purchaseOrderId}`} className="flex-none font-mono font-medium text-run hover:underline">
+            <div
+              key={po.purchaseOrderId}
+              data-pet-item="purchaseOrder"
+              data-pet-item-title={po.purchaseOrderNo}
+              className="flex h-8 min-w-0 flex-none items-center gap-2 border-b border-line text-xs"
+            >
+              <Link href={`/purchase-orders?po=${po.purchaseOrderId}`} className="flex-none font-mono font-medium text-run hover:underline" data-pet-field="발주 번호">
                 {po.purchaseOrderNo}
               </Link>
-              <span className="min-w-0 truncate text-ink-2" title={`${po.supplierName} · ${po.lineCount}개 품목`}>
+              <span className="min-w-0 truncate text-ink-2" title={`${po.supplierName} · ${po.lineCount}개 품목`} data-pet-field="공급업체">
                 {po.supplierName}
               </span>
-              <span className="ml-auto flex-none tabular-nums">{fmtTon(po.scheduledReceiptTon)}</span>
-              <span className="w-16 flex-none text-right text-cap text-ink-3 tabular-nums">{po.dueDate ? `납기 ${fmtMD(po.dueDate)}` : '납기 없음'}</span>
+              <span className="ml-auto flex-none tabular-nums" data-pet-field="입고예정">
+                {fmtTon(po.scheduledReceiptTon)}
+              </span>
+              <span className="min-w-16 flex-none whitespace-nowrap text-right text-cap text-ink-3 tabular-nums" data-pet-field="입고 예정일">{po.expectedReceiptDate ? `입고 ${fmtMD(po.expectedReceiptDate)}` : '예정일 없음'}</span>
             </div>
           ))}
           {open.purchaseOrders.length === 0 ? <WidgetEmpty>입고가 남은 발주가 없어요</WidgetEmpty> : null}
@@ -292,7 +366,7 @@ function ShipmentResultBody({ data }: { data: ShipmentResultData }) {
         <Figure label="코일" value={fmtInt(data.totalCoilQty)} unit="개" />
         <Figure label="출고 중량" value={fmtTon(data.totalTon)} />
       </div>
-      <DailyBars points={data.series} />
+      <DailyBars points={data.series} petItem="goodsIssue" />
       {data.totalSlabQty + data.totalCoilQty === 0 ? <WidgetEmpty>최근 {data.days}일 동안 출고가 없어요</WidgetEmpty> : null}
     </div>
   );
@@ -323,18 +397,33 @@ function SurplusAgeBody({ data }: { data: SurplusAgeData }) {
       </div>
       <div className="flex flex-col border-t border-line">
         {data.items.map((item) => (
-          <div key={item.itemId} className="flex h-8 min-w-0 flex-none items-center gap-2 border-b border-line text-xs" title={`${item.itemCode} · ${fmtTon(item.surplusTon)} · ${item.oldestSinceDate}부터`}>
-            <span className="min-w-0 flex-1 truncate font-mono">{item.itemCode}</span>
-            <span className="flex-none tabular-nums">{item.surplusQty}매</span>
+          <div
+            key={item.itemId}
+            data-pet-item="inventory"
+            data-pet-item-title={item.itemCode}
+            className="flex h-8 min-w-0 flex-none items-center gap-2 border-b border-line text-xs"
+            title={`${item.itemCode} · ${fmtTon(item.surplusTon)} · ${item.oldestSinceDate}부터`}
+          >
+            <span className="min-w-0 flex-1 truncate font-mono" data-pet-field="규격">
+              {item.itemCode}
+            </span>
+            <span className="flex-none tabular-nums" data-pet-field="여재">
+              {item.surplusQty}매
+            </span>
             <div className="h-1.5 w-16 flex-none overflow-hidden rounded-[3px] bg-surface-3">
               <span className="block h-full bg-[#c9731a]" style={{ width: pct(item.maxAgeDays, maxAge) }} />
             </div>
-            <b className="w-10 flex-none text-right font-semibold tabular-nums">{item.maxAgeDays}일</b>
+            <b className="min-w-10 flex-none whitespace-nowrap text-right font-semibold tabular-nums" data-pet-field="보유 일수">
+              {item.maxAgeDays}일
+            </b>
           </div>
         ))}
         {data.items.length === 0 ? <WidgetEmpty>여재 슬래브가 없어요</WidgetEmpty> : null}
       </div>
-      <span className="text-cap text-ink-3">여재 = 수주에 쓰이지 않고 남은 미배정 합격 슬래브 (재고 화면 여재와 같은 값) · 보유 일수 = 여재로 바뀐 날부터</span>
+      <span className="text-cap text-ink-3">
+        {/* 서버에는 여재 전환 시각이 없어 생산완료일부터 센다 (inventory.md 8-1) */}
+        여재 = 미배정 합격 슬래브(진행 중인 코일 수주용 제외) − 수주 예약 매수 · 보유 일수 = 생산완료일부터
+      </span>
     </div>
   );
 }
@@ -361,7 +450,7 @@ function ProductionVolumeBody({ data }: { data: ProductionVolumeData }) {
         <Figure label="코일" value={fmtInt(data.totalCoilQty)} unit="개" />
         <Figure label="생산 중량" value={fmtTon(data.totalTon)} />
       </div>
-      <DailyBars points={data.series} />
+      <DailyBars points={data.series} petItem="lot" />
       {data.totalSlabQty + data.totalCoilQty === 0 ? <WidgetEmpty>최근 {data.days}일 동안 생산이 없어요</WidgetEmpty> : null}
     </div>
   );

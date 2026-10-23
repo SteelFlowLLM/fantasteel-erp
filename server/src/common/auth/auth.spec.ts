@@ -40,4 +40,10 @@ describe('쿠키 읽기', () => {
     expect(readCookie('xaccess_token=1', 'access_token')).toBeUndefined();
     expect(readCookie(undefined, 'access_token')).toBeUndefined();
   });
+
+  it('인코딩이 깨진 값은 오류 대신 없는 것으로 본다', () => {
+    expect(readCookie('access_token=%', 'access_token')).toBeUndefined();
+    expect(readCookie('access_token=%E0%A4%A; b=2', 'access_token')).toBeUndefined();
+    expect(readCookie('a=%; access_token=ok%20', 'access_token')).toBe('ok ');
+  });
 });

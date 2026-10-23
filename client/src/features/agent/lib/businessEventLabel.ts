@@ -1,15 +1,6 @@
-// 준비 중 화면(Agent·과거 사례)의 작업 로그 이벤트 표시명. 확정 코드(BUSINESS_EVENT_TYPE)와 🟡 제안 코드(PROPOSED_BUSINESS_EVENT_TYPE)를 함께 받는다.
-import {
-  BUSINESS_EVENT_TYPE_LABEL,
-  PROPOSED_BUSINESS_EVENT_TYPE_LABEL,
-  type BusinessEventType,
-  type ProposedBusinessEventType,
-} from '@/codes';
+// 과거 사례 화면의 작업 로그 이벤트 표시명. 예전 🟡 제안 코드(AGENT_RISK_DETECTED)는 2026-10-22에 확정 코드로 옮겼다 (#496).
+import { BUSINESS_EVENT_TYPE_LABEL, type BusinessEventType } from '@/codes';
 
-export type ExampleBusinessEventType = BusinessEventType | ProposedBusinessEventType;
+export type ExampleBusinessEventType = BusinessEventType;
 
-const isProposed = (businessEventType: ExampleBusinessEventType): businessEventType is ProposedBusinessEventType =>
-  businessEventType in PROPOSED_BUSINESS_EVENT_TYPE_LABEL;
-
-export const businessEventLabelOf = (businessEventType: ExampleBusinessEventType): string =>
-  isProposed(businessEventType) ? PROPOSED_BUSINESS_EVENT_TYPE_LABEL[businessEventType] : BUSINESS_EVENT_TYPE_LABEL[businessEventType];
+export const businessEventLabelOf = (businessEventType: ExampleBusinessEventType): string => BUSINESS_EVENT_TYPE_LABEL[businessEventType];

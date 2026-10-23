@@ -2,9 +2,24 @@
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/cn';
 
-export function MasterListItem({ active, onPick, children }: { active: boolean; onPick: () => void; children: ReactNode }) {
+/** petItem·petTitle: 화면 도우미 펫이 이 줄을 레코드로 읽을 때 쓰는 종류(용어 사전 변수명)와 제목 (data-pet-item) */
+export function MasterListItem({
+  active,
+  onPick,
+  petItem,
+  petTitle,
+  children,
+}: {
+  active: boolean;
+  onPick: () => void;
+  petItem?: string;
+  petTitle?: string;
+  children: ReactNode;
+}) {
   return (
     <div
+      data-pet-item={petItem}
+      data-pet-item-title={petTitle}
       role="button"
       tabIndex={0}
       aria-current={active ? 'true' : undefined}
@@ -17,7 +32,7 @@ export function MasterListItem({ active, onPick, children }: { active: boolean; 
       }}
       className={cn(
         'flex flex-col gap-1 border-b border-line px-4 py-2.5 text-sm outline-none hover:bg-surface-2 focus-visible:bg-surface-2',
-        active && 'bg-brand-tint shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-brand-tint',
+        active && 'bg-brand-tint shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-brand-tint-hover',
       )}
     >
       {children}

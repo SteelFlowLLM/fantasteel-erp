@@ -6,9 +6,9 @@ import { Fragment, useMemo, useState } from 'react';
 import { ACTOR_TYPE_LABEL, INSPECTION_RESULT_LABEL } from '@/codes';
 import { BUSINESS_EVENT_PAGE_SIZE, type BusinessEventFilter, type BusinessEventPage, type BusinessEventView } from '@/api/businessEvents';
 import { Button } from '@/components/Button';
-import { ComingSoon } from '@/components/ComingSoon';
 import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote, Spinner } from '@/components/StateView';
+import { AiAssistedTag } from '@/features/agent/components/SoonExampleParts';
 import { EventRow } from '@/features/businessEvents/components/EventRow';
 import { EVENT_TONE_DOT } from '@/features/businessEvents/lib/eventTone';
 import { useBusinessEvents } from '@/hooks/useBusinessEvents';
@@ -40,21 +40,23 @@ export function EventLegend() {
   const dot = (tone: keyof typeof EVENT_TONE_DOT) => <span className={cn('size-3 rounded-full border-2', EVENT_TONE_DOT[tone])} />;
   return (
     <span className="inline-flex flex-wrap items-center gap-3 text-xs">
-      <span className="text-cap text-ink-3">범례</span>
-      <span className="inline-flex items-center gap-1">
+      <span data-pet-term="범례" className="text-cap text-ink-3">
+        범례
+      </span>
+      <span data-pet-term={ACTOR_TYPE_LABEL.USER} className="inline-flex items-center gap-1">
         {dot('run')}
         {ACTOR_TYPE_LABEL.USER}
       </span>
-      <span className="inline-flex items-center gap-1">
+      <span data-pet-term={ACTOR_TYPE_LABEL.SYSTEM} className="inline-flex items-center gap-1">
         {dot('neutral')}
         {ACTOR_TYPE_LABEL.SYSTEM}
       </span>
-      <span className="inline-flex items-center gap-1">
+      <span data-pet-term={INSPECTION_RESULT_LABEL.FAIL} className="inline-flex items-center gap-1">
         {dot('danger')}
         {INSPECTION_RESULT_LABEL.FAIL}
       </span>
-      <span className="inline-flex items-center gap-1">
-        AI 경유 <ComingSoon grade="P2" />
+      <span data-pet-term="AI 경유" className="inline-flex items-center gap-1">
+        <AiAssistedTag />
       </span>
     </span>
   );

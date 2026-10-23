@@ -1,15 +1,16 @@
 'use client';
 
-// 사용자 메뉴: 이름 · 부서 · 역할, 부서장 표시(역할이 아님), 계정 바꾸기, 시드로 초기화
-import { useState } from 'react';
+// 사용자 메뉴: 이름 · 부서 · 역할, 부서장 표시(역할이 아님), 글자 크기, 로그아웃
+import { useEffect } from 'react';
+import { sessionApi } from '@/api/session';
 import { ROLE_LABEL } from '@/codes';
-import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Icon } from '@/components/Icon';
 import { Tag } from '@/components/Tag';
 import { PopHead, PopItem, PopPanel } from '@/features/shell/PopPanel';
 import { useMe } from '@/hooks/useMe';
 import { usePopover } from '@/hooks/usePopover';
-import { useResetToSeed } from '@/hooks/useResetToSeed';
+import { cn } from '@/lib/cn';
+import { FONT_SIZES, FONT_SIZE_LABEL } from '@/lib/fontSize';
 import { isDepartmentHead } from '@/lib/permissions';
 import { useSessionStore } from '@/stores/useSessionStore';
 import { useShellStore } from '@/stores/useShellStore';
@@ -19,20 +20,25 @@ export function UserMenu() {
   const popover = usePopover<HTMLDivElement>();
   const signOut = useSessionStore((state) => state.signOut);
   const closeAiPanel = useShellStore((state) => state.closeAiPanel);
-  const [confirmingReset, setConfirmingReset] = useState(false);
-  const reset = useResetToSeed(() => setConfirmingReset(false));
+  const fontSize = useShellStore((state) => state.fontSize);
+  const setFontSize = useShellStore((state) => state.setFontSize);
+  const hydrateFontSize = useShellStore((state) => state.hydrateFontSize);
   const isHead = isDepartmentHead(me);
   const headTitle = isHead ? `${me.headDepartmentNames.join('·')} 부서장 · 구매요청 승인권자` : undefined;
+
+  useEffect(() => {
+    hydrateFontSize();
+  }, [hydrateFontSize]);
 
   const switchAccount = () => {
     popover.setOpen(false);
     closeAiPanel();
-    // (main) 레이아웃이 세션이 비면 계정 선택 화면으로 보낸다
-    signOut();
+    // (main) 레이아웃이 세션이 비면 로그인 화면으로 보낸다. 서버 쿠키를 지우지 못해도 이 탭은 나간다
+    void sessionApi.logout().finally(signOut);
   };
 
   return (
-    <div ref={popover.ref} className="relative">
+    <div ref={popover.ref} data-pet-target="topbar:profile" className="relative">
       <button
         type="button"
         aria-label={`사원 메뉴 · ${me.employeeName}`}
@@ -41,7 +47,8 @@ export function UserMenu() {
         onClick={() => popover.setOpen(!popover.open)}
         className="ml-2 flex h-10 items-center gap-2 border-l border-line pr-2 pl-3 text-left hover:bg-surface-2"
       >
-        <span className="flex flex-col leading-[15px]">
+        {/* 글자 크기를 키우면 상단 바가 좁아져 이름이 한 자씩 끊기므로 줄바꿈하지 않는다 (옆 검색칸이 줄어든다) */}
+        <span className="flex flex-col leading-tight whitespace-nowrap">
           <span className="flex items-center gap-1.5">
             <b className="text-sm font-semibold">{me.employeeName}</b>
             {isHead ? (
@@ -73,35 +80,31 @@ export function UserMenu() {
             </span>
             {isHead ? <span className="text-cap text-ink-3">{me.headDepartmentNames.join('·')} 부서장 (구매요청 승인권자)</span> : null}
           </PopHead>
+          <div role="group" aria-label="글자 크기" className="flex flex-col gap-1.5 border-b border-line px-3.5 py-2.5">
+            <span className="text-cap text-ink-3">글자 크기</span>
+            <div className="grid grid-cols-3 gap-1">
+              {FONT_SIZES.map((size) => (
+                <button
+                  key={size}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={fontSize === size}
+                  onClick={() => setFontSize(size)}
+                  className={cn(
+                    'min-h-8 rounded-sm border px-1 text-sm',
+                    fontSize === size ? 'border-brand bg-brand-tint font-semibold text-brand' : 'border-line bg-surface text-ink-2 hover:bg-surface-2',
+                  )}
+                >
+                  {FONT_SIZE_LABEL[size]}
+                </button>
+              ))}
+            </div>
+          </div>
           <PopItem role="menuitem" centered onClick={switchAccount}>
-            <Icon name="users" className="text-ink-3" />
-            계정 바꾸기
-          </PopItem>
-          <PopItem
-            role="menuitem"
-            centered
-            onClick={() => {
-              popover.setOpen(false);
-              setConfirmingReset(true);
-            }}
-          >
-            <Icon name="refresh" className="text-ink-3" />
-            시드로 초기화
+            <Icon name="logout" className="text-ink-3" />
+            로그아웃
           </PopItem>
         </PopPanel>
-      ) : null}
-      {confirmingReset ? (
-        <ConfirmDialog
-          title="시드로 초기화"
-          confirmLabel="초기화"
-          tone="danger"
-          pending={reset.isPending}
-          onConfirm={() => reset.mutate()}
-          onCancel={() => setConfirmingReset(false)}
-        >
-          이 브라우저의 가짜 데이터를 처음 시드 상태로 되돌려요. 등록한 수주·구매요청 같은 데이터가 모두 지워지고, 열려 있는 다른 탭에도 바로
-          반영돼요. 되돌릴 수 없어요.
-        </ConfirmDialog>
       ) : null}
     </div>
   );

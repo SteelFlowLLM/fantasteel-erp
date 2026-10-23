@@ -1,5 +1,4 @@
-// 업무 오류 클래스. 화면(api/)과 가짜 서버 서비스(mock/services/)가 함께 쓴다.
-// api/client.ts는 가짜 DB를 불러오므로, 서비스는 순환 참조를 피하려고 이 파일에서 직접 가져온다.
+// 업무 오류 클래스: 9.3 오류 코드(ApiError), 입력칸별 안내(InputError·FieldErrors).
 import { ERROR_MESSAGE, type ErrorCode } from '@/codes';
 
 /**

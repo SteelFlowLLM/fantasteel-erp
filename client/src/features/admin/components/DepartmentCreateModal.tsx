@@ -3,7 +3,7 @@
 // 부서 만들기 창. 부서장은 소속 사원이 생긴 뒤 부서 탭에서 지정한다 (부서장 = 그 부서 사원).
 import { useState } from 'react';
 import { departmentAdminApi } from '@/api/adminOrganization';
-import { InputError } from '@/api/client';
+import { InputError } from '@/api/errors';
 import type { DepartmentView } from '@/api/directory';
 import { Button } from '@/components/Button';
 import { Field } from '@/components/Field';
@@ -16,7 +16,6 @@ export function DepartmentCreateModal({ departments, onClose, onSaved }: { depar
   const [departmentCode, setDepartmentCode] = useState('');
   const [departmentName, setDepartmentName] = useState('');
   const [parentId, setParentId] = useState<number | null>(null);
-  const [sortOrder, setSortOrder] = useState('0');
   const [errors, setErrors] = useState<Readonly<Record<string, string>>>({});
   const create = useAction(departmentAdminApi.create, {
     success: (saved) => `${saved.name} 부서를 만들었어요`,
@@ -26,7 +25,7 @@ export function DepartmentCreateModal({ departments, onClose, onSaved }: { depar
 
   const submit = () => {
     setErrors({});
-    create.mutate({ departmentCode, departmentName, parentId, sortOrder });
+    create.mutate({ departmentCode, departmentName, parentId });
   };
 
   return (
@@ -68,9 +67,6 @@ export function DepartmentCreateModal({ departments, onClose, onSaved }: { depar
             </option>
           ))}
         </Select>
-      </Field>
-      <Field label="정렬 순서" required error={errors.sortOrder} hint="같은 상위 부서 안에서 작은 수가 먼저 나와요" htmlFor="new-department-sort">
-        <Input id="new-department-sort" inputMode="numeric" numeric value={sortOrder} invalid={Boolean(errors.sortOrder)} onChange={(e) => setSortOrder(e.target.value)} />
       </Field>
       <p className="text-cap text-ink-3">부서장은 부서를 만들고 사원을 이 부서로 등록한 뒤, 부서 탭에서 그 사원 중 1명을 지정해요.</p>
     </Modal>

@@ -9,7 +9,7 @@ export const ICON_NAMES = [
   'eye', 'edit', 'trash', 'flame', 'coil', 'slab', 'link', 'share', 'check-circle', 'x-circle',
   'inbox', 'sort', 'gauge', 'flow', 'grid', 'downgrade', 'wave', 'maximize', 'minimize', 'key',
   'shield', 'copy', 'thumb', 'cart', 'box', 'history', 'task', 'calc', 'building', 'pin',
-  'grip', 'widget', 'radar', 'print', 'approve',
+  'grip', 'widget', 'radar', 'print', 'approve', 'volume', 'stop',
 ] as const;
 export type IconName = (typeof ICON_NAMES)[number];
 

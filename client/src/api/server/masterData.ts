@@ -1,0 +1,416 @@
+// 기준정보 화면 ↔ 서버 API (server/src/modules/master-data, API-165~188). 서버 응답을 화면이 쓰는 모양으로 바꾼다.
+// 강종·품목·야드 id는 서버 id를 그대로 쓴다. ERD·API에 없는 값(사용 여부·참조 문구·수정 시각)은 비워 두고 화면이 숨긴다.
+import type {
+  CustomerView,
+  InspectionStandardListItem,
+  ItemView,
+  PageResult,
+  ProductionSettingView,
+  RoutingView,
+  SpecificConsumptionView,
+  SpecMappingItemView,
+  SpecMappingView,
+  SteelGradeView,
+  SupplierView,
+  YardView,
+} from '@fantasteel/shared';
+import { ApiError, InputError } from '@/api/errors';
+import { serverRequest } from '@/api/http';
+import { assertUnchanged } from '@/api/validation';
+import type {
+  CustomerInput,
+  CustomerUpdateInput,
+  MasterCustomerView,
+  MasterProductionSettingView,
+  MasterProductSpecView,
+  MasterRawMaterialView,
+  MasterRoutingView,
+  MasterSpecificConsumptionView,
+  MasterSpecMappingView,
+  MasterSteelGradeView,
+  MasterSupplierView,
+  MasterYardView,
+  ProductionSettingInput,
+  ProductSpecInput,
+  ProductSpecUpdateInput,
+  RawMaterialInput,
+  RawMaterialUpdateInput,
+  RoutingSaveInput,
+  SpecBrief,
+  SpecificConsumptionChange,
+  SpecMappingInput,
+  SpecMappingUpdateInput,
+  SteelGradeInput,
+  SteelGradeUpdateInput,
+  SupplierInput,
+  SupplierUpdateInput,
+  YardInput,
+  YardUpdateInput,
+} from '@/api/masterData';
+import type { ProductItemType, RawMaterialType } from '@/codes';
+import { specificConsumptionUnitOf } from '@/lib/units';
+import { compareDecimal } from '@/lib/weight';
+
+const PAGE_SIZE = 100;
+const PRODUCT_ITEM_TYPES: readonly ProductItemType[] = ['SLAB', 'COIL'];
+
+const getItems = () => serverRequest<ItemView[]>('GET', '/items');
+const getSpecMappings = () => serverRequest<SpecMappingView[]>('GET', '/spec-mappings');
+const getSteelGrades = () => serverRequest<SteelGradeView[]>('GET', '/steel-grades');
+const getYards = () => serverRequest<YardView[]>('GET', '/yards');
+const getSuppliers = () => serverRequest<SupplierView[]>('GET', '/suppliers');
+
+const isProductItem = (item: ItemView): item is ItemView & { itemType: ProductItemType } => item.itemType === 'SLAB' || item.itemType === 'COIL';
+const nameOf = <T extends { id: number }>(rows: readonly T[], id: number | null, name: (row: T) => string): string | null => {
+  const row = rows.find((r) => r.id === id);
+  return row ? name(row) : null;
+};
+
+const specBriefOf = (item: ItemView | SpecMappingItemView): SpecBrief => ({
+  id: item.id,
+  itemCode: item.itemCode,
+  thicknessMm: item.thicknessMm ?? '0',
+  widthMm: item.widthMm ?? '0',
+  lengthMm: item.lengthMm ?? '0',
+  theoreticalWeightTon: item.theoreticalWeightTon ?? '0',
+});
+
+async function listProductSpecs(): Promise<MasterProductSpecView[]> {
+  const [items, mappings, yards] = await Promise.all([getItems(), getSpecMappings(), getYards()]);
+  return items
+    .filter(isProductItem)
+    .map((item): MasterProductSpecView => {
+      const mapping = mappings.find((m) => (item.itemType === 'SLAB' ? m.slabItem.id : m.coilItem.id) === item.id) ?? null;
+      const mapped = mapping ? (item.itemType === 'SLAB' ? mapping.coilItem : mapping.slabItem) : null;
+      return {
+        ...specBriefOf(item),
+        itemName: item.itemName,
+        itemType: item.itemType,
+        unitType: item.unitType,
+        steelGradeId: item.steelGradeId ?? 0,
+        steelGradeCode: item.steelGradeCode ?? '-',
+        defaultYardId: item.defaultYardId,
+        defaultYardName: nameOf(yards, item.defaultYardId, (y) => y.yardName) ?? '-',
+        mappingId: mapping?.id ?? null,
+        mappedSpec: mapped ? specBriefOf(mapped) : null,
+        hotRollingPlannedYieldRate: mapping?.hotRollingYieldRate ?? null,
+        // 서버는 사용 여부를 주지 않는다. 쓰인 규격의 치수 수정은 저장할 때 MST-002로 막힌다
+        isUsed: false,
+        usageText: null,
+        referenceText: null,
+        updatedAt: item.updatedAt,
+      };
+    })
+    .sort(
+      (a, b) =>
+        PRODUCT_ITEM_TYPES.indexOf(a.itemType) - PRODUCT_ITEM_TYPES.indexOf(b.itemType) ||
+        a.steelGradeId - b.steelGradeId ||
+        compareDecimal(b.thicknessMm, a.thicknessMm) ||
+        compareDecimal(a.widthMm, b.widthMm) ||
+        compareDecimal(a.lengthMm, b.lengthMm),
+    );
+}
+
+async function listSpecMappings(): Promise<MasterSpecMappingView[]> {
+  const mappings = await getSpecMappings();
+  return mappings
+    .map((m) => ({
+      id: m.id,
+      steelGradeId: m.steelGradeId,
+      steelGradeCode: m.steelGradeCode,
+      slab: specBriefOf(m.slabItem),
+      coil: specBriefOf(m.coilItem),
+      hotRollingPlannedYieldRate: m.hotRollingYieldRate,
+      // 서버는 쓰는 곳을 주지 않는다. 쓰는 규격의 매핑을 바꾸거나 지우면 서버가 COM-004와 쓰는 곳 이름으로 막는다
+      isUsed: false,
+      updatedAt: m.updatedAt,
+    }))
+    .sort((a, b) => a.steelGradeId - b.steelGradeId || a.slab.id - b.slab.id);
+}
+
+/** 제강 검사 기준 지금 버전 (강종 코드별 가장 높은 버전). 검사 기준 조회 권한이 없으면 비운다 */
+async function currentSteelmakingStandards(): Promise<Map<string, InspectionStandardListItem>> {
+  const rows: InspectionStandardListItem[] = [];
+  try {
+    for (let page = 1; ; page++) {
+      const result = await serverRequest<PageResult<InspectionStandardListItem>>('GET', '/inspection-standards', { query: { processType: 'STEELMAKING', page, size: PAGE_SIZE } });
+      rows.push(...result.items);
+      if (rows.length >= result.total || result.items.length === 0) break;
+    }
+  } catch (error) {
+    if (error instanceof ApiError && error.code === 'COM-002') return new Map();
+    throw error;
+  }
+  const current = new Map<string, InspectionStandardListItem>();
+  for (const row of rows) {
+    const seen = current.get(row.steelGradeCode);
+    if (!seen || row.versionNo > seen.versionNo) current.set(row.steelGradeCode, row);
+  }
+  return current;
+}
+
+async function listSteelGrades(): Promise<MasterSteelGradeView[]> {
+  const [grades, items, standards] = await Promise.all([getSteelGrades(), getItems(), currentSteelmakingStandards()]);
+  return grades.map((grade) => {
+    const standard = standards.get(grade.steelGradeCode);
+    return {
+      ...grade,
+      specCount: items.filter((i) => i.steelGradeId === grade.id).length,
+      steelmakingStandard: standard
+        ? { id: standard.inspectionStandardId, inspectionStandardCode: standard.inspectionStandardCode, version: standard.versionNo, itemCount: standard.items.length }
+        : null,
+      referenceText: null,
+      updatedAt: grade.updatedAt,
+    };
+  });
+}
+
+async function listRoutings(): Promise<MasterRoutingView[]> {
+  const routings = await serverRequest<RoutingView[]>('GET', '/routings');
+  return PRODUCT_ITEM_TYPES.map((itemType) => ({
+    itemType,
+    steps: routings
+      .filter((r) => r.itemType === itemType)
+      .sort((a, b) => a.sequenceNo - b.sequenceNo)
+      .map((r) => ({ id: r.id, processType: r.processType, processSeq: r.sequenceNo, plannedYieldRate: r.plannedYieldRate })),
+    // 이 품목 유형의 공정 중 가장 늦게 저장된 시각: 저장 때 expectedUpdatedAt으로 돌려보내고, 저장하면 바뀌어 폼이 다시 그려진다 (이슈 #498)
+    updatedAt: routings.filter((r) => r.itemType === itemType).map((r) => r.updatedAt).sort().at(-1) ?? null,
+  }));
+}
+
+async function listSpecificConsumptions(): Promise<MasterSpecificConsumptionView[]> {
+  const rows = await serverRequest<SpecificConsumptionView[]>('GET', '/specific-consumptions');
+  return rows.map((c) => ({
+    id: c.id,
+    itemId: c.rawMaterialItemId,
+    steelGradeId: c.steelGradeId,
+    consumptionRate: c.consumptionRate,
+    consumptionUnit: specificConsumptionUnitOf(c.rawMaterialType),
+  }));
+}
+
+async function listRawMaterials(): Promise<MasterRawMaterialView[]> {
+  const [items, yards, suppliers] = await Promise.all([getItems(), getYards(), getSuppliers()]);
+  return items
+    .filter((i): i is ItemView & { rawMaterialType: RawMaterialType } => i.itemType === 'RAW_MATERIAL' && i.rawMaterialType !== null)
+    .map((item) => ({
+      id: item.id,
+      itemCode: item.itemCode,
+      itemName: item.itemName,
+      rawMaterialType: item.rawMaterialType,
+      unitType: item.unitType,
+      defaultYardId: item.defaultYardId,
+      defaultYardName: nameOf(yards, item.defaultYardId, (y) => y.yardName) ?? '-',
+      defaultSupplierId: item.defaultSupplierId,
+      defaultSupplierName: nameOf(suppliers, item.defaultSupplierId, (s) => s.supplierName),
+      referenceText: null,
+      updatedAt: item.updatedAt,
+    }))
+    .sort((a, b) => a.itemCode.localeCompare(b.itemCode));
+}
+
+async function listCustomers(): Promise<MasterCustomerView[]> {
+  const rows = await serverRequest<CustomerView[]>('GET', '/customers');
+  return rows.map((c) => ({ ...c, referenceText: null }));
+}
+
+async function listSuppliers(): Promise<MasterSupplierView[]> {
+  return (await getSuppliers()).map((s) => ({ ...s, referenceText: null }));
+}
+
+async function listYards(): Promise<MasterYardView[]> {
+  return (await getYards()).map((y) => ({ ...y, referenceText: null }));
+}
+
+async function getProductionSetting(): Promise<MasterProductionSettingView> {
+  return serverRequest<ProductionSettingView>('GET', '/production-settings');
+}
+
+/** 원료 품목 코드 → 기본 야드 이름 (입고 화면). 기준정보 조회 권한이 없으면 이름을 비운다 */
+async function rawMaterialYardNames(): Promise<(itemCode: string) => string | null> {
+  try {
+    const [items, yards] = await Promise.all([serverRequest<ItemView[]>('GET', '/items', { query: { itemType: 'RAW_MATERIAL' } }), getYards()]);
+    const yardNameOf = new Map(yards.map((y) => [y.id, y.yardName]));
+    const byCode = new Map(items.map((i) => [i.itemCode, yardNameOf.get(i.defaultYardId) ?? null]));
+    return (itemCode) => byCode.get(itemCode) ?? null;
+  } catch (error) {
+    if (error instanceof ApiError && error.code === 'COM-002') return () => null;
+    throw error;
+  }
+}
+
+export const serverMasterDataApi = {
+  rawMaterialYardNames,
+  listProductSpecs,
+  listSpecMappings,
+  listSteelGrades,
+  listRoutings,
+  listSpecificConsumptions,
+  listRawMaterials,
+  listCustomers,
+  listSuppliers,
+  listYards,
+  getProductionSetting,
+};
+
+// ── 변경 (API-166~188). 서버 거부(COM-004·MST-002)는 그대로 화면 오류로 보인다 ──
+
+const idOf = async (method: 'POST' | 'PATCH', path: string, body: unknown): Promise<number> => (await serverRequest<{ id: number }>(method, path, { body })).id;
+
+function requireChoice(value: number | null, field: string, message: string): number {
+  if (value === null) throw new InputError(message, { [field]: message });
+  return value;
+}
+
+const createProductSpec = async (input: ProductSpecInput) =>
+  idOf('POST', '/items', {
+    itemType: input.itemType,
+    steelGradeId: requireChoice(input.steelGradeId, 'steelGradeId', '강종을 선택해 주세요'),
+    thicknessMm: input.thicknessMm.trim(),
+    widthMm: input.widthMm.trim(),
+    lengthMm: input.lengthMm.trim(),
+    defaultYardId: requireChoice(input.defaultYardId, 'defaultYardId', '기본 야드를 선택해 주세요'),
+  });
+
+const updateProductSpec = async (input: ProductSpecUpdateInput) =>
+  idOf('PATCH', `/items/${input.id}`, {
+    steelGradeId: requireChoice(input.steelGradeId, 'steelGradeId', '강종을 선택해 주세요'),
+    thicknessMm: input.thicknessMm.trim(),
+    widthMm: input.widthMm.trim(),
+    lengthMm: input.lengthMm.trim(),
+    defaultYardId: requireChoice(input.defaultYardId, 'defaultYardId', '기본 야드를 선택해 주세요'),
+    expectedUpdatedAt: input.expectedUpdatedAt || undefined,
+  });
+
+const createSpecMapping = async (input: SpecMappingInput) =>
+  idOf('POST', '/spec-mappings', {
+    slabItemId: requireChoice(input.slabItemId, 'slabItemId', '슬래브 규격을 선택해 주세요'),
+    coilItemId: requireChoice(input.coilItemId, 'coilItemId', '코일 규격을 선택해 주세요'),
+  });
+
+const updateSpecMapping = async (input: SpecMappingUpdateInput) =>
+  idOf('PATCH', `/spec-mappings/${input.id}`, {
+    slabItemId: requireChoice(input.slabItemId, 'slabItemId', '슬래브 규격을 선택해 주세요'),
+    coilItemId: requireChoice(input.coilItemId, 'coilItemId', '코일 규격을 선택해 주세요'),
+    expectedUpdatedAt: input.expectedUpdatedAt || undefined,
+  });
+
+async function updateSteelGrade(input: SteelGradeUpdateInput): Promise<number> {
+  if (!input.standardNo.trim()) throw new InputError('적용 규격 번호를 입력해 주세요', { standardNo: '적용 규격 번호를 입력해 주세요' });
+  return idOf('PATCH', `/steel-grades/${input.id}`, {
+    steelGradeCode: input.steelGradeCode,
+    steelGradeName: input.steelGradeName,
+    standardNo: input.standardNo,
+    expectedUpdatedAt: input.expectedUpdatedAt || undefined,
+  });
+}
+
+/** 서버는 적용 규격 번호가 필수다 (ERD not null) */
+async function createSteelGrade(input: SteelGradeInput): Promise<number> {
+  if (!input.standardNo.trim()) throw new InputError('적용 규격 번호를 입력해 주세요', { standardNo: '적용 규격 번호를 입력해 주세요' });
+  return idOf('POST', '/steel-grades', { steelGradeCode: input.steelGradeCode, steelGradeName: input.steelGradeName, standardNo: input.standardNo });
+}
+
+/**
+ * 화면 순서대로 공정 순서를 1부터 다시 매긴다: 있는 공정은 PATCH(순서·수율), 새 공정은 POST.
+ * 서버에는 라우팅 삭제 API가 없어 공정 빼기는 막는다.
+ * (품목 유형, 순서)가 unique라 자리를 옮길 공정은 먼저 지금 쓰는 번호보다 큰 빈 번호로 비켜 둔 뒤 제자리에 놓는다.
+ */
+async function saveRouting(input: RoutingSaveInput): Promise<number> {
+  const current = (await serverRequest<RoutingView[]>('GET', '/routings')).filter((r) => r.itemType === input.itemType).sort((a, b) => a.sequenceNo - b.sequenceNo);
+  // 폼을 연 뒤 이 품목 유형의 공정이 바뀌었으면 저장하지 않는다 (폼이 가진 시각 = 공정 중 가장 늦은 저장 시각, 이슈 #498)
+  assertUnchanged(current.map((r) => r.updatedAt).sort().at(-1) ?? '', input.expectedUpdatedAt, '라우팅');
+  if (current.some((r) => !input.steps.some((s) => s.processType === r.processType))) {
+    throw new InputError('라우팅 삭제 API가 없어 공정을 뺄 수 없어요');
+  }
+  // 한 공정을 두 번 고칠 수 있어(비켜 두기 → 제자리) 서버가 돌려준 새 저장 시각을 이어서 쓴다. 읽은 시각 그대로일 때만 서버가 바꾼다
+  const updatedAtOf = new Map(current.map((r) => [r.id, r.updatedAt]));
+  const patch = async (id: number, body: object) => {
+    const saved = await serverRequest<RoutingView>('PATCH', `/routings/${id}`, { body: { ...body, expectedUpdatedAt: updatedAtOf.get(id) } });
+    updatedAtOf.set(id, saved.updatedAt);
+  };
+  const targets = input.steps.map((step, index) => ({ step, sequenceNo: index + 1, row: current.find((r) => r.processType === step.processType) }));
+  const moving = targets.filter((t) => t.row && t.row.sequenceNo !== t.sequenceNo);
+  const spare = Math.max(input.steps.length, ...current.map((r) => r.sequenceNo)) + 1;
+  for (const [i, t] of moving.entries()) if (t.row) await patch(t.row.id, { sequenceNo: spare + i });
+  for (const { step, sequenceNo, row } of targets) {
+    if (!row) {
+      await serverRequest('POST', '/routings', { body: { itemType: input.itemType, processType: step.processType, sequenceNo, plannedYieldRate: step.plannedYieldRate } });
+      continue;
+    }
+    const rateChanged = (row.plannedYieldRate ?? null) !== step.plannedYieldRate && !(row.plannedYieldRate && step.plannedYieldRate && compareDecimal(row.plannedYieldRate, step.plannedYieldRate) === 0);
+    const moved = row.sequenceNo !== sequenceNo;
+    if (moved || rateChanged) await patch(row.id, { ...(moved ? { sequenceNo } : {}), ...(rateChanged ? { plannedYieldRate: step.plannedYieldRate } : {}) });
+  }
+  return input.steps.length;
+}
+
+/** 서버에는 원단위 삭제 API가 없어 칸 비우기는 막는다. 일괄 저장 API가 없어 칸마다 차례로 보낸다 */
+async function saveSpecificConsumptions(changes: SpecificConsumptionChange[]): Promise<number> {
+  const cleared = changes.filter((c) => !c.consumptionRate);
+  if (cleared.length > 0) {
+    throw new InputError('서버에서는 원단위를 비울 수 없어요', Object.fromEntries(cleared.map((c) => [`${c.itemId}:${c.steelGradeId ?? 'common'}`, '서버에서는 원단위를 비울 수 없어요'])));
+  }
+  const rows = await serverRequest<SpecificConsumptionView[]>('GET', '/specific-consumptions');
+  for (const c of changes) {
+    const row = rows.find((r) => r.rawMaterialItemId === c.itemId && r.steelGradeId === c.steelGradeId);
+    if (row) await serverRequest('PATCH', `/specific-consumptions/${row.id}`, { body: { consumptionRate: c.consumptionRate } });
+    else await serverRequest('POST', '/specific-consumptions', { body: { rawMaterialItemId: c.itemId, steelGradeId: c.steelGradeId, consumptionRate: c.consumptionRate } });
+  }
+  return changes.length;
+}
+
+const createRawMaterial = async (input: RawMaterialInput) =>
+  idOf('POST', '/items', {
+    itemType: 'RAW_MATERIAL',
+    itemCode: input.itemCode,
+    itemName: input.itemName,
+    rawMaterialType: input.rawMaterialType ?? undefined,
+    defaultYardId: requireChoice(input.defaultYardId, 'defaultYardId', '기본 야드를 선택해 주세요'),
+    defaultSupplierId: input.defaultSupplierId,
+  });
+
+const updateRawMaterial = async (input: RawMaterialUpdateInput) =>
+  idOf('PATCH', `/items/${input.id}`, {
+    itemName: input.itemName,
+    defaultYardId: requireChoice(input.defaultYardId, 'defaultYardId', '기본 야드를 선택해 주세요'),
+    defaultSupplierId: input.defaultSupplierId,
+    expectedUpdatedAt: input.expectedUpdatedAt || undefined,
+  });
+
+/** API-275~279. 쓰는 곳이 있으면 서버가 COM-004와 쓰는 곳 이름으로 막는다. 지운 행은 화면이 다시 불러온다 */
+async function removeAt(path: string): Promise<void> {
+  await serverRequest<unknown>('DELETE', path);
+}
+
+async function saveProductionSetting(input: ProductionSettingInput): Promise<number> {
+  const days = Number(String(input.deliveryRiskDays).trim());
+  if (!Number.isInteger(days) || days < 0) throw new InputError('납기 위험 기준일을 확인해 주세요', { deliveryRiskDays: '납기 위험 기준일은 0 이상의 정수예요' });
+  return idOf('PATCH', '/production-settings', { heatCapacityTon: input.heatCapacityTon.trim(), deliveryRiskDays: days, expectedUpdatedAt: input.expectedUpdatedAt || undefined });
+}
+
+export const serverMasterDataWriteApi = {
+  createProductSpec,
+  updateProductSpec,
+  createSpecMapping,
+  updateSpecMapping,
+  createSteelGrade,
+  updateSteelGrade,
+  saveRouting,
+  saveSpecificConsumptions,
+  createRawMaterial,
+  updateRawMaterial,
+  createCustomer: (input: CustomerInput) => idOf('POST', '/customers', input),
+  updateCustomer: (input: CustomerUpdateInput) => idOf('PATCH', `/customers/${input.id}`, { customerName: input.customerName, expectedUpdatedAt: input.expectedUpdatedAt || undefined }),
+  createSupplier: (input: SupplierInput) => idOf('POST', '/suppliers', input),
+  updateSupplier: (input: SupplierUpdateInput) => idOf('PATCH', `/suppliers/${input.id}`, { supplierName: input.supplierName, expectedUpdatedAt: input.expectedUpdatedAt || undefined }),
+  createYard: (input: YardInput) => idOf('POST', '/yards', { ...input, yardType: input.yardType ?? undefined }),
+  updateYard: (input: YardUpdateInput) => idOf('PATCH', `/yards/${input.id}`, { yardName: input.yardName, expectedUpdatedAt: input.expectedUpdatedAt || undefined }),
+  saveProductionSetting,
+  deleteItem: (id: number) => removeAt(`/items/${id}`),
+  deleteSteelGrade: (id: number) => removeAt(`/steel-grades/${id}`),
+  deleteSpecMapping: (id: number) => removeAt(`/spec-mappings/${id}`),
+  deleteCustomer: (id: number) => removeAt(`/customers/${id}`),
+  deleteSupplier: (id: number) => removeAt(`/suppliers/${id}`),
+  deleteYard: (id: number) => removeAt(`/yards/${id}`),
+};

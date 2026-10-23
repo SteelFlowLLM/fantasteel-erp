@@ -3,10 +3,10 @@
 // 측정값 입력·수정 폼 (REQ-QC-003, BP-QC-01). 항목은 판정에 쓰는 기준 버전에서 두께 구간(초과~이하)으로 거른 것이다.
 // 입력하는 동안은 미리보기만 보이고, 판정은 저장할 때 시스템이 한다. 필수 항목이 비면 판정 대기로 저장된다.
 // 이미 값이 있는 검사는 같은 기록을 고친다(바꾼 항목만 보낸다). 밀시트가 발행된 LOT은 잠긴다.
-import { useState } from 'react';
-import { InputError } from '@/api/client';
-import type { InspectionDetail, RegisterInspectionOutcome } from '@/api/inspections';
-import { Badge } from '@/components/Badge';
+import { useState, type CSSProperties } from 'react';
+import { InputError } from '@/api/errors';
+import type { InspectionDetail, InspectionFormItem, RegisterInspectionOutcome } from '@/api/inspections';
+import { Badge, type BadgeTone } from '@/components/Badge';
 import { Button } from '@/components/Button';
 import { Card, CardBody, CardHead } from '@/components/Card';
 import { Icon } from '@/components/Icon';
@@ -16,19 +16,30 @@ import { EmptyNote } from '@/components/StateView';
 import { PERMISSION } from '@/codes';
 import { LimitGauge } from '@/features/quality/components/LimitGauge';
 import { ResultBadge } from '@/features/quality/components/QualityBadges';
-import { fillTypicalValues, limitText, previewOf, sameMeasuredValue, thicknessBandText, trimNum, type ValuePreview } from '@/features/quality/lib/qualityDisplay';
+import { fillTypicalValues, measuredCardsPerRow, previewOf, sameMeasuredValue, thicknessBandText, trimNum, type ValuePreview } from '@/features/quality/lib/qualityDisplay';
 import { useRegisterInspection } from '@/hooks/useInspections';
 import { cn } from '@/lib/cn';
 import { permissionNeedText } from '@/lib/permissions';
-import type { InspectionFormItem } from '@/mock/services';
 
 function ItemBadge({ item, preview, dirty }: { item: InspectionFormItem; preview: ValuePreview; dirty: boolean }) {
-  if (item.minValue === null && item.maxValue === null) return <Badge tone="wait">기준 없음</Badge>;
+  if (item.minValue === null && item.maxValue === null) return <TermBadge term="기준 없음" tone="wait" />;
   if (!dirty && item.isPassed !== null) return <ResultBadge result={item.isPassed ? 'PASS' : 'FAIL'} />;
-  if (preview.state === 'empty') return <Badge>{item.isRequired ? '미입력' : '선택'}</Badge>;
-  if (preview.state === 'invalid') return <Badge tone="wait">숫자 확인</Badge>;
-  return <Badge tone={preview.state === 'pass' ? 'ok' : 'danger'}>미리보기 {preview.state === 'pass' ? '합격' : '불합격'}</Badge>;
+  if (preview.state === 'empty') return <TermBadge term={item.isRequired ? '미입력' : '선택'} />;
+  if (preview.state === 'invalid') return <TermBadge term="숫자 확인" tone="wait" />;
+  return <TermBadge term={`미리보기 ${preview.state === 'pass' ? '합격' : '불합격'}`} tone={preview.state === 'pass' ? 'ok' : 'danger'} />;
 }
+
+/** 배지 글자 = 화면 도우미 펫 용어 키 (inline-flex 감싸개라 배지 모양은 그대로) */
+function TermBadge({ term, tone }: { term: string; tone?: BadgeTone }) {
+  return (
+    <span className="inline-flex" data-pet-term={term}>
+      <Badge tone={tone}>{term}</Badge>
+    </span>
+  );
+}
+
+/** 측정값 마지막 칸에서 Enter를 누르면 옮겨 갈 저장 버튼 */
+const SUBMIT_ID = 'inspection-submit';
 
 export interface InspectionFormProps {
   detail: InspectionDetail;
@@ -56,6 +67,9 @@ export function InspectionForm({ detail, canEdit, onSaved }: InspectionFormProps
   const hasSavedValues = items.some((item) => item.measuredValue !== null);
   const editable = canEdit && !detail.locked && detail.standard !== null;
   const canSubmit = editable && items.length > 0 && invalidRows.length === 0 && dirtyRows.length > 0 && !register.isPending;
+  // 시연용 채우기는 채울 빈 칸이 있을 때만 보인다 (판정이 끝나 칸이 다 찬 LOT에서는 할 일이 없다)
+  const filled = fillTypicalValues(items, raw);
+  const canFill = items.some((item) => (filled[item.inspectionStandardItemId] ?? '') !== (raw[item.inspectionStandardItemId] ?? ''));
 
   const forecast =
     invalidRows.length > 0
@@ -79,23 +93,29 @@ export function InspectionForm({ detail, canEdit, onSaved }: InspectionFormProps
 
   return (
     <>
-      <Card className="flex-none">
+      <Card className="flex-none" petKey="card:inspections.form">
         <CardHead
           title="측정값"
           meta={`항목 ${items.length}개 · 필수 ${items.filter((i) => i.isRequired).length}개`}
           actions={
-            <>
-              <Button
-                size="sm"
-                icon="edit"
-                disabled={!editable || items.length === 0}
-                title={canEdit ? '비어 있는 칸만 기준 안 값으로 채워요. 저장은 직접 눌러요' : permissionNeedText([PERMISSION.INSPECTION_REGISTER])}
-                onClick={() => setRaw((prev) => fillTypicalValues(items, prev))}
-              >
-                기준 안 값으로 채우기
-              </Button>
-              <span className="text-cap text-ink-3">시연용 도우미</span>
-            </>
+            canFill ? (
+              <>
+                {/* 점선 테두리: 업무 버튼이 아니라 시연용 도우미라는 것을 모양으로 구분한다 */}
+                <Button
+                  size="sm"
+                  icon="edit"
+                  className="border-dashed"
+                  disabled={!editable}
+                  title={canEdit ? '비어 있는 칸만 기준 안 값으로 채워요. 저장은 직접 눌러요' : permissionNeedText([PERMISSION.INSPECTION_REGISTER])}
+                  onClick={() => setRaw((prev) => fillTypicalValues(items, prev))}
+                >
+                  기준 안 값으로 채우기
+                </Button>
+                <span className="text-cap text-ink-3" data-pet-term="시연용 도우미">
+                  시연용 도우미
+                </span>
+              </>
+            ) : null
           }
         />
         <CardBody>
@@ -107,27 +127,45 @@ export function InspectionForm({ detail, canEdit, onSaved }: InspectionFormProps
             </span>
           </p>
           {items.length === 0 ? <EmptyNote>이 LOT에 적용할 검사 항목이 없어요. 품질 담당이 검사 기준 화면에서 항목을 등록해야 해요.</EmptyNote> : null}
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3">
-            {rows.map(({ item, text, preview, dirty }) => {
+          {/* 좁은 화면은 280px씩 채운다. 넓은 화면(1400px~)은 한 줄 개수를 항목 수에 맞춰 3·4개 중 마지막 줄이 더 차는 쪽으로 고르고(measuredCardsPerRow),
+              어느 폭이든 덜 찬 마지막 줄은 카드를 늘려 줄 끝까지 채운다: 히트 성분 5개가 3 + 2(넓은 화면)·2 + 2 + 1(1280px)로 놓여 오른쪽 아래가 비어 보였다.
+              한 줄 폭 = (100% − 사이 간격) ÷ 개수. 반올림으로 줄이 넘치지 않게 0.5px 덜 잡는다 */}
+          <div
+            className="flex flex-wrap gap-3"
+            style={{ '--qi-per-row': measuredCardsPerRow(rows.length) } as CSSProperties}
+          >
+            {rows.map(({ item, text, preview, dirty }, index) => {
               const id = `qi-${item.inspectionStandardItemId}`;
+              const next = rows[index + 1];
+              const nextId = next ? `qi-${next.item.inspectionStandardItemId}` : SUBMIT_ID;
               const bad = preview.state === 'fail';
               const band = thicknessBandText(item.minThicknessMm, item.maxThicknessMm);
               const serverError = serverErrors[`values.${item.inspectionStandardItemId}`];
               return (
-                <div key={item.inspectionStandardItemId} className={cn('flex min-w-0 flex-col gap-1.5 rounded-md border p-3', bad ? 'border-[#e3a7a2] bg-[#fff9f8]' : 'border-line')}>
-                  <div className="flex items-center gap-1.5">
-                    <label htmlFor={id} className="text-sm font-semibold text-ink">
-                      {item.inspectionItemName}
-                      {item.isRequired ? (
-                        <span className="ml-0.5 text-danger" title="필수">
-                          *
-                        </span>
-                      ) : (
-                        <span className="ml-1.5 text-cap font-normal text-ink-3">선택</span>
-                      )}
-                    </label>
-                    <span className="font-mono text-2xs text-ink-3">{item.inspectionItemCode}</span>
-                    <span className="ml-auto">
+                <div
+                  key={item.inspectionStandardItemId}
+                  data-pet-item="qualityInspectionValue"
+                  data-pet-item-title={item.inspectionItemName}
+                  className={cn(
+                    'flex min-w-0 grow basis-[280px] flex-col gap-1.5 rounded-md border p-3 min-[1400px]:basis-[calc((100%-(var(--qi-per-row)-1)*0.75rem)/var(--qi-per-row)-0.5px)]',
+                    bad ? 'border-danger-line bg-danger-field' : 'border-line',
+                  )}
+                >
+                  {/* 영문 항목 코드는 값을 넣는 사람에게 필요 없는 말이라 카드마다 한 줄을 쓰지 않고 이름에 마우스를 올리면 보인다 */}
+                  <div className="flex items-start gap-1.5">
+                    <span className="flex min-w-0 flex-col">
+                      <label htmlFor={id} className="truncate text-sm font-semibold text-ink" title={item.inspectionItemName.includes(`(${item.inspectionItemCode})`) ? item.inspectionItemName : `${item.inspectionItemName} (${item.inspectionItemCode})`}>
+                        {item.inspectionItemName}
+                        {item.isRequired ? (
+                          <span className="ml-0.5 text-danger" title="필수">
+                            *
+                          </span>
+                        ) : (
+                          <span className="ml-1.5 text-cap font-normal text-ink-3">선택</span>
+                        )}
+                      </label>
+                    </span>
+                    <span className="ml-auto flex-none" data-pet-field="판정">
                       <ItemBadge item={item} preview={preview} dirty={dirty} />
                     </span>
                   </div>
@@ -137,6 +175,7 @@ export function InspectionForm({ detail, canEdit, onSaved }: InspectionFormProps
                     inputMode="decimal"
                     autoComplete="off"
                     suffix={item.unit ?? undefined}
+                    data-pet-field="측정값"
                     value={text}
                     disabled={!editable}
                     invalid={bad || preview.state === 'invalid' || Boolean(serverError)}
@@ -145,21 +184,27 @@ export function InspectionForm({ detail, canEdit, onSaved }: InspectionFormProps
                       setRaw((prev) => ({ ...prev, [item.inspectionStandardItemId]: value }));
                     }}
                     onKeyDown={(event) => {
-                      if (event.key === 'Enter') submit();
+                      // Enter는 저장이 아니라 다음 칸으로: 값 하나만 넣고 습관처럼 누르면 판정 대기 기록과 작업 로그가 남았다.
+                      // 마지막 칸에서는 저장 버튼으로 옮겨, 저장은 한 번 더 누르는 동작이 되게 한다
+                      if (event.key !== 'Enter' || event.nativeEvent.isComposing) return;
+                      event.preventDefault();
+                      document.getElementById(nextId)?.focus();
                     }}
                   />
                   <LimitGauge item={item} value={preview.state === 'empty' ? null : text} bad={bad} />
-                  <div className="flex flex-wrap items-center gap-x-1.5 text-cap text-ink-3">
-                    <span>기준 {limitText(item)}</span>
-                    {band ? <span>· {band}</span> : null}
-                    {preview.state === 'fail' ? (
-                      <span className="ml-auto text-danger">
-                        {preview.side === 'below' ? '하한' : '상한'}보다 {preview.gap}
-                        {item.unit ? ` ${item.unit}` : ''} {preview.side === 'below' ? '낮아요' : '높아요'}
-                      </span>
-                    ) : null}
-                    {preview.state === 'invalid' ? <span className="ml-auto text-danger">숫자(소수 4자리까지)로 입력해 주세요</span> : null}
-                  </div>
+                  {/* 기준 값은 게이지 눈금에 있다. 이 줄은 두께 구간이나 입력 확인 문구가 있을 때만 */}
+                  {band || preview.state === 'fail' || preview.state === 'invalid' ? (
+                    <div className="flex flex-wrap items-center gap-x-1.5 text-cap text-ink-3">
+                      {band ? <span data-pet-field="적용 두께 구간">{band}</span> : null}
+                      {preview.state === 'fail' ? (
+                        <span className="ml-auto text-danger">
+                          {preview.side === 'below' ? '하한' : '상한'}보다 {preview.gap}
+                          {item.unit ? ` ${item.unit}` : ''} {preview.side === 'below' ? '낮아요' : '높아요'}
+                        </span>
+                      ) : null}
+                      {preview.state === 'invalid' ? <span className="ml-auto text-danger">숫자(소수 4자리까지)로 입력해 주세요</span> : null}
+                    </div>
+                  ) : null}
                   {serverError ? (
                     <span role="alert" className="text-cap text-danger">
                       {serverError}
@@ -172,12 +217,18 @@ export function InspectionForm({ detail, canEdit, onSaved }: InspectionFormProps
         </CardBody>
       </Card>
 
-      <section aria-label="검사 저장" className="sticky bottom-0 z-[1] flex flex-none items-center gap-3 rounded-md border border-line bg-surface px-4 py-3 shadow-1">
+      <section aria-label="검사 저장" data-pet-target="card:inspections.save" data-pet-perch="" className="sticky bottom-0 z-[1] flex flex-none items-center gap-3 rounded-md border border-line bg-surface px-4 py-3 shadow-1">
         <div className="flex min-w-0 flex-col gap-0.5">
-          <span className="text-cap text-ink-3">미리보기 (저장하면 시스템이 판정해요)</span>
+          <span className="text-cap text-ink-3" data-pet-term="미리보기">
+            미리보기 (저장하면 시스템이 판정해요)
+          </span>
           <b className="text-base font-semibold">
             입력 {enteredRows.length}/{items.length}
-            {hasSavedValues ? <span className="ml-2 text-xs font-normal text-ink-3">바꾼 항목 {dirtyRows.length}개</span> : null}
+            {hasSavedValues ? (
+              <span className="ml-2 text-xs font-normal text-ink-3" data-pet-term="바꾼 항목">
+                바꾼 항목 {dirtyRows.length}개
+              </span>
+            ) : null}
           </b>
           <span className={cn('text-cap', forecast.tone)}>{forecast.text}</span>
         </div>
@@ -191,7 +242,7 @@ export function InspectionForm({ detail, canEdit, onSaved }: InspectionFormProps
               되돌리기
             </Button>
           ) : null}
-          <Button variant="primary" icon="check" disabled={!canSubmit} title={canEdit ? undefined : permissionNeedText([PERMISSION.INSPECTION_REGISTER])} onClick={submit}>
+          <Button id={SUBMIT_ID} variant="primary" icon="check" disabled={!canSubmit} title={canEdit ? undefined : permissionNeedText([PERMISSION.INSPECTION_REGISTER])} onClick={submit}>
             {register.isPending ? '저장하는 중…' : hasSavedValues ? '측정값 수정' : '검사 등록'}
           </Button>
         </div>

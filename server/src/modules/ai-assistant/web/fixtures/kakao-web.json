@@ -1,0 +1,35 @@
+{
+  "meta": { "total_count": 4821, "pageable_count": 400, "is_end": false },
+  "documents": [
+    {
+      "title": "<b>포항제철소</b> - 포스코",
+      "contents": "<b>포항제철소</b>는 1973년 1고로 &quot;첫 출선&quot;을 시작으로 &amp; 일관 제철소로 자리 잡았습니다.",
+      "url": "https://www.posco.co.kr/homepage/docs/kor7/jsp/company/posco/s91a1010050c.jsp",
+      "datetime": "2026-10-10T09:00:00.000+09:00"
+    },
+    {
+      "title": "<b>포항</b> 제철소 견학 안내",
+      "contents": "견학 신청은 홈페이지에서 할 수 있습니다.",
+      "url": "https://www.poscotour.example.kr/visit",
+      "datetime": "2026-09-01T09:00:00.000+09:00"
+    },
+    {
+      "title": "<b>포항제철소</b> - 포스코",
+      "contents": "같은 주소 다시",
+      "url": "https://www.posco.co.kr/homepage/docs/kor7/jsp/company/posco/s91a1010050c.jsp",
+      "datetime": "2026-10-10T09:00:00.000+09:00"
+    },
+    {
+      "title": "위험한 주소",
+      "contents": "javascript 주소",
+      "url": "javascript:alert(1)",
+      "datetime": "2026-10-10T09:00:00.000+09:00"
+    },
+    {
+      "title": "",
+      "contents": "제목 없음",
+      "url": "https://example.com/no-title",
+      "datetime": "2026-10-10T09:00:00.000+09:00"
+    }
+  ]
+}

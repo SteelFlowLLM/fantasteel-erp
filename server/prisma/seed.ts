@@ -75,23 +75,23 @@ const EMPLOYEES: { employeeNo: string; employeeName: string; department: Departm
  */
 const ROLE_ORDER: Role[] = ['SALES', 'PURCHASE', 'PRODUCTION', 'QUALITY', 'LOGISTICS', 'ADMIN'];
 const ROLE_PERMISSION_TABLE: [Permission, string][] = [
-  [PERMISSION.SALES_ORDER_CREATE, '● _ ○ _ ○ ○'],
-  [PERMISSION.SALES_ORDER_CANCEL, '● _ _ _ _ ○'],
-  [PERMISSION.SHIPMENT_REQUEST_MANAGE, '● _ _ _ ○ ○'],
-  [PERMISSION.PURCHASE_REQUISITION_CREATE, '_ ● ○ _ _ ○'],
-  [PERMISSION.PURCHASE_ORDER_CONFIRM, '_ ● _ _ _ ○'],
-  [PERMISSION.GOODS_RECEIPT_CONFIRM, '_ ● _ _ ○ ○'],
-  [PERMISSION.PRODUCTION_PLAN_CONFIRM, '○ ○ ● ○ _ ○'],
-  [PERMISSION.PRODUCTION_RESULT_CONFIRM, '_ _ ● ○ _ ○'],
-  [PERMISSION.HOT_ROLLING_ALLOCATE, '_ _ ● _ _ ○'],
-  [PERMISSION.INSPECTION_REGISTER, '_ _ ○ ● _ ○'],
-  [PERMISSION.INSPECTION_STANDARD_MANAGE, '_ _ ○ ● _ ○'],
-  [PERMISSION.DISPOSITION_SET, '_ _ _ ● _ ○'],
-  [PERMISSION.GOODS_ISSUE_CONFIRM, '○ _ _ ○ ● ○'],
-  [PERMISSION.MILL_SHEET_READ, '○ _ _ ○ ● ○'],
+  [PERMISSION.SALES_ORDER_CREATE, '● ○ ○ ○ ○ ○'],
+  [PERMISSION.SALES_ORDER_CANCEL, '● ○ ○ ○ ○ ○'],
+  [PERMISSION.SHIPMENT_REQUEST_MANAGE, '● ○ ○ ○ ○ ○'],
+  [PERMISSION.PURCHASE_REQUISITION_CREATE, '○ ● ○ ○ ○ ○'],
+  [PERMISSION.PURCHASE_ORDER_CONFIRM, '○ ● ○ ○ ○ ○'],
+  [PERMISSION.GOODS_RECEIPT_CONFIRM, '○ ● ○ ○ ○ ○'],
+  [PERMISSION.PRODUCTION_PLAN_CONFIRM, '○ ○ ● ○ ○ ○'],
+  [PERMISSION.PRODUCTION_RESULT_CONFIRM, '○ ○ ● ○ ○ ○'],
+  [PERMISSION.HOT_ROLLING_ALLOCATE, '○ ○ ● ○ ○ ○'],
+  [PERMISSION.INSPECTION_REGISTER, '○ ○ ○ ● ○ ○'],
+  [PERMISSION.INSPECTION_STANDARD_MANAGE, '○ ○ ○ ● ○ ○'],
+  [PERMISSION.DISPOSITION_SET, '○ ○ ○ ● ○ ○'],
+  [PERMISSION.GOODS_ISSUE_CONFIRM, '○ ○ ○ ○ ● ○'],
+  [PERMISSION.MILL_SHEET_READ, '○ ○ ○ ○ ● ○'],
   [PERMISSION.EMPLOYEE_MANAGE, '_ _ _ _ _ ●'],
   [PERMISSION.ORG_MANAGE, '_ _ _ _ _ ●'],
-  [PERMISSION.MASTER_MANAGE, '○ ○ ○ ○ _ ●'],
+  [PERMISSION.MASTER_MANAGE, '○ ○ ○ ○ ○ ●'],
 ];
 
 // ── 기준정보 ─────────────────────────────────────────────
@@ -374,11 +374,13 @@ async function seedMasterData() {
     else await prisma.specificConsumption.create({ data: { rawMaterialItemId, steelGradeId: steelGrade, consumptionRate: c.consumptionRate } });
   }
 
-  // 생산 설정값은 1행만 둔다 (REQ-MST-009 초기값)
+  return steelGradeId;
+}
+
+/** 생산 설정값은 1행만 둔다 (REQ-MST-009 초기값). 등록 API가 없어 조직만 넣을 때도 넣는다. 이미 있으면 화면에서 고친 값을 그대로 둔다 */
+async function seedProductionSetting() {
   const setting = await prisma.productionSetting.findFirst();
   if (!setting) await prisma.productionSetting.create({ data: { heatCapacityTon: '250.000', deliveryRiskDays: 3 } });
-
-  return steelGradeId;
 }
 
 async function seedInspectionStandards(steelGradeId: Map<string, number>) {
@@ -413,10 +415,16 @@ async function seedInspectionStandards(steelGradeId: Map<string, number>) {
   for (const grade of SPEC_GRADES) await add(grade, 'HOT_ROLLING', must(HOT_ROLLING_ITEMS[grade], grade));
 }
 
+/** --organization-only: 조직(직급·역할·권한·부서·사원)과 생산 설정값만 넣는다. 공용 DB는 기준정보를 화면에서 등록한다 (2026-10-08 결정) */
+const organizationOnly = process.argv.includes('--organization-only');
+
 async function main() {
   await seedOrganization();
-  const steelGradeId = await seedMasterData();
-  await seedInspectionStandards(steelGradeId);
+  await seedProductionSetting();
+  if (!organizationOnly) {
+    const steelGradeId = await seedMasterData();
+    await seedInspectionStandards(steelGradeId);
+  }
   const counts = {
     employee: await prisma.employee.count(),
     rolePermission: await prisma.rolePermission.count(),
@@ -424,6 +432,7 @@ async function main() {
     specMapping: await prisma.specMapping.count(),
     inspectionStandard: await prisma.inspectionStandard.count(),
     inspectionStandardItem: await prisma.inspectionStandardItem.count(),
+    productionSetting: await prisma.productionSetting.count(),
   };
   process.stdout.write(`[seed] ${JSON.stringify(counts)}\n`);
 }

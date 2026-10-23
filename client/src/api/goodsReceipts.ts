@@ -1,138 +1,155 @@
 // 입고 API (REQ-PUR-004, REQ-LOT-003·004, BP-PUR-02, 업무 프로세스 10장 "입고: 상태값 없음").
 // 입고 등록 = 입고 확정(수정 없음). 미입고량을 넘으면 PUR-003. 야드는 원료의 기본 야드로 자동 지정하고,
-// 입고 1건마다 원료 LOT(RM-원료코드-YYMMDD-NNN) 1개를 만든다. 규칙·작업 로그는 core 서비스(receiveGoods)가 한다.
-import { PERMISSION, type Permission, type PurchaseOrderStatus } from '@/codes';
-import { requireActor } from '@/api/actor';
-import { mockMutation, mockQuery } from '@/api/client';
+// 입고 1건마다 원료 LOT(RM-원료코드-YYMMDD-NNN) 1개를 만든다. 규칙·작업 로그는 서버가 한다.
+// 입고 취소는 원료 LOT을 쓰기 전에만 되고, 원래 입고는 두고 음수 입고 1행(반대 거래)을 더한다.
+// 두 데이터 모드 모두 실제 서버를 부른다 (api/server/purchaseOrders.ts).
+import type { LotStatus, PurchaseOrderStatus } from '@/codes';
+import type { PurchaseOrderView } from '@/api/purchasing';
+import { serverMasterDataApi } from '@/api/server/masterData';
+import { serverGoodsReceiptApi, serverPurchaseOrderApi } from '@/api/server/purchaseOrders';
 import { decCmp } from '@/lib/decimal';
-import { findById, listGoodsReceipts, listPurchaseOrders, receiveGoods, userActor } from '@/mock/services';
-
-/** 입고 화면을 볼 수 있는 권한 (조회 이상) */
-export const GOODS_RECEIPT_VIEW_PERMISSIONS: readonly Permission[] = [PERMISSION.GOODS_RECEIPT_CONFIRM, PERMISSION.PURCHASE_ORDER_CONFIRM];
 
 export const goodsReceiptKeys = {
   all: ['goods-receipts'] as const,
-  list: () => ['goods-receipts', 'list'] as const,
+  list: (withSupplierNames = true) => ['goods-receipts', 'list', withSupplierNames] as const,
   lines: () => ['goods-receipts', 'purchase-order-lines'] as const,
 };
 
-/** 입고할 발주 품목 줄 (입고예정 = 발주 − 입고 누계) */
+/** 입고 1건과 원료 LOT (서버 GoodsReceiptView와 같은 모양 + 화면용 공급업체·확정자) */
+export interface GoodsReceiptView {
+  id: number;
+  goodsReceiptNo: string;
+  purchaseOrderId: number;
+  purchaseOrderNo: string;
+  /** 발주 상태 (발주 조회 권한이 없어도 입고 응답에 들어 있다) */
+  purchaseOrderStatus: PurchaseOrderStatus;
+  purchaseOrderItemId: number;
+  itemId: number;
+  itemCode: string;
+  itemName: string;
+  receivedTon: string;
+  receivedDate: string;
+  lotId: number | null;
+  lotNo: string | null;
+  /** 원료 LOT의 지금 상태 (취소 행은 null) */
+  lotStatus: LotStatus | null;
+  yardId: number | null;
+  yardName: string | null;
+  createdAt: string;
+  supplierName: string;
+  /** 입고를 확정한 사원 (ERD에 칸이 없어 작업 로그 GOODS_RECEIPT_CONFIRMED로 본다). 취소 행은 취소한 사원 */
+  confirmedEmployeeName: string | null;
+  /** 이 행이 입고 취소면 취소한 원래 입고 (receivedTon은 음수, LOT 없음) */
+  reversedGoodsReceiptId: number | null;
+  reversedGoodsReceiptNo: string | null;
+  /** 이 입고를 취소했으면 취소 행 번호 */
+  reversalGoodsReceiptNo: string | null;
+  /** 입고 취소 사유 (원래 입고·취소 행 모두) */
+  cancelReason: string | null;
+  /** 지금 입고 취소할 수 있는지 (서버가 LOT 상태·잔량·투입·배정과 발주 상태로 정한다) */
+  isCancellable: boolean;
+}
+
+/** 입고할 발주 품목 (미입고량 = 발주량 − 입고 누계, 저장하지 않고 계산) */
 export interface ReceiptLine {
   purchaseOrderItemId: number;
   purchaseOrderId: number;
   purchaseOrderNo: string;
   purchaseOrderStatus: PurchaseOrderStatus;
   supplierName: string;
-  dueDate: string | null;
-  lineNo: number;
+  /** 발주 품목의 입고 예정일 */
+  expectedReceiptDate: string | null;
   itemId: number;
   itemCode: string;
   itemName: string;
   purchaseRequisitionNo: string | null;
   orderedTon: string;
   receivedTon: string;
-  scheduledReceiptTon: string;
+  remainingTon: string;
   /** 입고하면 들어갈 원료 기본 야드 */
   defaultYardName: string | null;
+  /** 미입고량이 0 (발주 취소·잔량 마감한 발주도 0) */
   isFullyReceived: boolean;
+  /** 발주 취소·잔량 마감해 더는 입고하지 않는 발주 */
+  isClosed: boolean;
+  /** 발주 취소·잔량 마감으로 닫은 양 */
+  closedTon: string;
 }
 
-export type GoodsReceiptView = ReturnType<typeof listGoodsReceipts>[number] & { purchaseOrderItemId: number; lotId: number | null };
+/** 입고 취소 (사유 필수, 500자) */
+export interface GoodsReceiptCancelInput {
+  goodsReceiptId: number;
+  reason: string;
+}
 
 export interface GoodsReceiptInput {
   purchaseOrderItemId: number;
   /** 톤 (소수 3자리) */
   receivedTon: string;
-  /** YYYY-MM-DD */
-  receiptDate: string;
+  /** YYYY-MM-DD, 오늘 이후는 안 된다 */
+  receivedDate: string;
 }
 
 export interface GoodsReceiptResult {
   goodsReceiptId: number;
   goodsReceiptNo: string;
   receivedTon: string;
-  receiptDate: string;
+  receivedDate: string;
   yardName: string | null;
   lotId: number;
   lotNo: string;
   purchaseOrderNo: string;
   purchaseOrderStatus: PurchaseOrderStatus;
-  /** 이 발주 품목의 입고 누계·남은 입고예정 */
+  /** 이 발주 품목의 입고 누계·미입고량 */
   lineReceivedTon: string;
-  lineScheduledReceiptTon: string;
+  lineRemainingTon: string;
+}
+
+/** 발주 목록 → 입고할 발주 품목 줄 (미입고량이 남은 것 먼저, 입고 예정일 순). 야드는 원료 코드로 찾는다 */
+function receiptLinesOf(orders: readonly PurchaseOrderView[], defaultYardNameOf: (itemCode: string) => string | null): ReceiptLine[] {
+  return orders
+    .flatMap((po) =>
+      po.items.map(
+        (line): ReceiptLine => ({
+          purchaseOrderItemId: line.id,
+          purchaseOrderId: po.id,
+          purchaseOrderNo: po.purchaseOrderNo,
+          purchaseOrderStatus: po.purchaseOrderStatus,
+          supplierName: po.supplierName,
+          expectedReceiptDate: line.expectedReceiptDate,
+          itemId: line.itemId,
+          itemCode: line.itemCode,
+          itemName: line.itemName,
+          purchaseRequisitionNo: line.purchaseRequisitionNo,
+          orderedTon: line.orderedTon,
+          receivedTon: line.receivedTon,
+          remainingTon: line.remainingTon,
+          defaultYardName: defaultYardNameOf(line.itemCode),
+          isFullyReceived: decCmp(line.remainingTon, 0) <= 0,
+          isClosed: po.purchaseOrderStatus === 'CANCELLED' || po.purchaseOrderStatus === 'CLOSED',
+          closedTon: line.closedTon,
+        }),
+      ),
+    )
+    .sort(
+      (a, b) =>
+        Number(a.isFullyReceived) - Number(b.isFullyReceived) ||
+        (a.expectedReceiptDate ?? '9999-12-31').localeCompare(b.expectedReceiptDate ?? '9999-12-31') ||
+        a.purchaseOrderNo.localeCompare(b.purchaseOrderNo) ||
+        a.purchaseOrderItemId - b.purchaseOrderItemId,
+    );
 }
 
 export const goodsReceiptApi = {
-  /** 모든 발주 품목 줄 (입고예정이 남은 줄 먼저, 납기순) */
-  lines: (): Promise<ReceiptLine[]> =>
-    mockQuery((tables) => {
-      requireActor(tables, { view: GOODS_RECEIPT_VIEW_PERMISSIONS });
-      return listPurchaseOrders(tables)
-        .flatMap((po) =>
-          po.items.map((line): ReceiptLine => {
-            const item = findById(tables, 'item', line.itemId);
-            return {
-              purchaseOrderItemId: line.id,
-              purchaseOrderId: po.id,
-              purchaseOrderNo: po.purchaseOrderNo,
-              purchaseOrderStatus: po.purchaseOrderStatus,
-              supplierName: po.supplierName,
-              dueDate: po.dueDate,
-              lineNo: line.lineNo,
-              itemId: line.itemId,
-              itemCode: line.itemCode,
-              itemName: line.itemName,
-              purchaseRequisitionNo: line.purchaseRequisitionNo,
-              orderedTon: line.orderedTon,
-              receivedTon: line.receivedTon,
-              scheduledReceiptTon: line.scheduledReceiptTon,
-              defaultYardName: findById(tables, 'yard', item?.defaultYardId)?.yardName ?? null,
-              isFullyReceived: decCmp(line.scheduledReceiptTon, 0) <= 0,
-            };
-          }),
-        )
-        .sort(
-          (a, b) =>
-            Number(a.isFullyReceived) - Number(b.isFullyReceived) ||
-            (a.dueDate ?? '9999-12-31').localeCompare(b.dueDate ?? '9999-12-31') ||
-            a.purchaseOrderNo.localeCompare(b.purchaseOrderNo) ||
-            a.lineNo - b.lineNo,
-        );
-    }),
+  /** 모든 발주 품목 (미입고량이 남은 것 먼저, 입고 예정일 순) */
+  lines: async (): Promise<ReceiptLine[]> => receiptLinesOf(await serverPurchaseOrderApi.list(), await serverMasterDataApi.rawMaterialYardNames()),
 
-  /** 입고 내역 (최근 것부터) */
-  list: (): Promise<GoodsReceiptView[]> =>
-    mockQuery((tables) => {
-      requireActor(tables, { view: GOODS_RECEIPT_VIEW_PERMISSIONS });
-      return listGoodsReceipts(tables).map((receipt) => ({
-        ...receipt,
-        purchaseOrderItemId: findById(tables, 'goodsReceipt', receipt.id)?.purchaseOrderItemId ?? 0,
-        lotId: tables.lot.find((lot) => lot.goodsReceiptId === receipt.id)?.id ?? null,
-      }));
-    }),
+  /** 입고 내역 (최근 것부터). withSupplierNames = 발주 조회 권한이 있어 공급업체 이름을 채울지 */
+  list: (withSupplierNames = true): Promise<GoodsReceiptView[]> => serverGoodsReceiptApi.list(withSupplierNames),
 
-  /** 입고 확정 (등록 = 확정): 원료 LOT 생성, 발주 입고 누계·입고예정·상태 갱신 */
-  receive: (input: GoodsReceiptInput): Promise<GoodsReceiptResult> =>
-    mockMutation((tx) => {
-      const actor = requireActor(tx.tables, { use: [PERMISSION.GOODS_RECEIPT_CONFIRM] });
-      const { goodsReceipt, lot, purchaseOrder } = receiveGoods(tx, userActor(actor.employee.id), {
-        purchaseOrderItemId: input.purchaseOrderItemId,
-        receivedTon: input.receivedTon,
-        receiptDate: input.receiptDate,
-      });
-      const line = findById(tx.tables, 'purchaseOrderItem', input.purchaseOrderItemId);
-      return {
-        goodsReceiptId: goodsReceipt.id,
-        goodsReceiptNo: goodsReceipt.goodsReceiptNo,
-        receivedTon: goodsReceipt.receivedTon,
-        receiptDate: goodsReceipt.receiptDate,
-        yardName: findById(tx.tables, 'yard', goodsReceipt.yardId)?.yardName ?? null,
-        lotId: lot.id,
-        lotNo: lot.lotNo,
-        purchaseOrderNo: purchaseOrder.purchaseOrderNo,
-        purchaseOrderStatus: purchaseOrder.purchaseOrderStatus,
-        lineReceivedTon: line?.receivedTon ?? goodsReceipt.receivedTon,
-        lineScheduledReceiptTon: line?.scheduledReceiptTon ?? '0.000',
-      };
-    }),
+  /** 입고 확정 (등록 = 확정): 원료 LOT 생성, 발주 상태 갱신 (입고 누계·미입고량은 계산값) */
+  receive: (input: GoodsReceiptInput): Promise<GoodsReceiptResult> => serverGoodsReceiptApi.receive(input),
+
+  /** 입고 취소: 원료 LOT을 썼으면 PUR-006, 취소·마감된 발주면 PUR-007. 취소 행(음수 입고)을 돌려준다 */
+  cancel: (input: GoodsReceiptCancelInput): Promise<GoodsReceiptView> => serverGoodsReceiptApi.cancel(input),
 };

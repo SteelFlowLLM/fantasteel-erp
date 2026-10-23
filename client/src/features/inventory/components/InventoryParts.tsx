@@ -30,7 +30,7 @@ export function Qty({ value, unit, tone, strong }: { value: number; unit: string
 /** 표 아래 안내 글 */
 export function TableCaption({ children }: { children: ReactNode }) {
   return (
-    <span className="flex items-start gap-1.5 text-cap leading-4 text-ink-3">
+    <span className="flex items-start gap-1.5 text-cap leading-normal text-ink-3">
       <Icon name="info" size="sm" className="mt-px flex-none" />
       <span>{children}</span>
     </span>
@@ -43,7 +43,9 @@ export function SteelGradeSelect({ value, onChange }: { value: string; onChange:
   const list = grades.data ?? [];
   return (
     <label className="flex items-center gap-1.5">
-      <span className="text-xs font-medium text-ink-2">강종</span>
+      <span data-pet-term="강종" className="text-xs font-medium text-ink-2">
+        강종
+      </span>
       <Select aria-label="강종" className="w-[130px] font-mono text-mono" value={value} onChange={(e) => onChange(e.target.value)}>
         <option value="">전체</option>
         {list.map((g) => (

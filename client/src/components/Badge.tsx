@@ -30,8 +30,9 @@ export function Badge({ tone = 'neutral', plain, title, className, children }: B
   return (
     <span
       title={title}
+      data-pet-term={typeof children === 'string' ? children : undefined}
       className={cn(
-        'inline-flex h-5 items-center gap-[5px] whitespace-nowrap rounded-xs px-[7px] text-[11.5px] leading-5 font-semibold',
+        'inline-flex min-h-5 items-center gap-[5px] whitespace-nowrap rounded-xs px-[7px] text-xs font-semibold',
         TONE[tone],
         !plain && tone !== 'outline' && DOT,
         className,
@@ -51,12 +52,14 @@ const PLACEMENT: Record<CountBadgePlacement, string> = {
   inline: 'inline-block',
 };
 
-export function CountBadge({ count, placement = 'icon', className }: { count: number; placement?: CountBadgePlacement; className?: string }) {
+/** muted = 회색 (알림을 끈 채팅방처럼 세지만 재촉하지 않을 때) */
+export function CountBadge({ count, placement = 'icon', tone = 'danger', className }: { count: number; placement?: CountBadgePlacement; tone?: 'danger' | 'muted'; className?: string }) {
   if (count <= 0) return null;
   return (
     <span
       className={cn(
-        'min-w-4 rounded-lg bg-danger px-1 text-center text-[10px] leading-4 font-semibold text-white tabular-nums',
+        tone === 'muted' ? 'bg-ink-disabled' : 'bg-danger',
+        'min-w-4 rounded-lg px-1 text-center text-[10px] leading-4 font-semibold text-white tabular-nums',
         PLACEMENT[placement],
         className,
       )}

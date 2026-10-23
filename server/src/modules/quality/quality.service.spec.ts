@@ -1,19 +1,37 @@
+import { Logger } from '@nestjs/common';
 import type { AuthUser } from '@fantasteel/shared';
 import { BusinessEventRecorder } from '../../common/business-event/business-event.recorder';
 import { NumberingRepository } from '../../common/numbering/numbering.repository';
 import { NumberingService } from '../../common/numbering/numbering.service';
+import { lockShipmentRequest } from '../../generated/prisma/sql';
 import { PrismaService } from '../../prisma/prisma.service';
+import type { FactoryAgentService } from '../factory-agent/factory-agent.service';
+import type { EligibilitySyncResult, InventoryService } from '../inventory/inventory.service';
 import { QualityRepository } from './quality.repository';
 import { QualityService } from './quality.service';
 
 const recorder = new BusinessEventRecorder(new NumberingService(new NumberingRepository()));
+// 이 파일은 검사 판정만 본다. 판정 뒤 재고 반영(inventory.onLotsEligibilityChanged)은 sales-order/sales-flow.spec.ts에서 확인한다
+const inventory = { lockInventoriesOfLots: async () => {}, onLotsEligibilityChanged: async () => [] } as unknown as InventoryService;
+/** 재고 반영 결과를 정해 두고 불린 횟수를 세는 inventory 대역 (응답 stockSync 확인용) */
+function syncingInventory(results: EligibilitySyncResult[]) {
+  const calls: number[][] = [];
+  const stub = {
+    lockInventoriesOfLots: async () => {},
+    onLotsEligibilityChanged: async (_tx: unknown, lotIds: readonly number[]) => {
+      calls.push([...lotIds]);
+      return results;
+    },
+  } as unknown as InventoryService;
+  return { stub, calls };
+}
 
 // 실제 DB(npm test의 fs_prod)를 쓴다. 다른 테스트의 LOT과 섞이지 않도록 이 파일의 LOT 번호는 모두 PREFIX로 시작한다.
 const PREFIX = 'QT-';
 
 describe('검사 대기·검사 목록 조회 (API-125, REQ-QC-001)', () => {
   const prisma = new PrismaService();
-  const service = new QualityService(prisma, new QualityRepository(), recorder);
+  const service = new QualityService(prisma, new QualityRepository(), recorder, inventory);
   const lotIds: number[] = [];
   const resultIds: number[] = [];
   const standardIds: number[] = [];
@@ -172,7 +190,7 @@ describe('검사 대기·검사 목록 조회 (API-125, REQ-QC-001)', () => {
 
 describe('검사 상세 조회 (API-116, REQ-QC-001·003)', () => {
   const prisma = new PrismaService();
-  const service = new QualityService(prisma, new QualityRepository(), recorder);
+  const service = new QualityService(prisma, new QualityRepository(), recorder, inventory);
   const lotIds: number[] = [];
   const resultIds: number[] = [];
   const inspectionIds: Record<string, number> = {};
@@ -243,6 +261,7 @@ describe('검사 상세 조회 (API-116, REQ-QC-001·003)', () => {
 
   it('검사 1건과 판정에 쓴 기준 버전, 검사자를 준다', async () => {
     const detail = await service.getQualityInspection(inspectionIds.coil9);
+    expect(detail.lockedMillSheetNos).toEqual([]);
     expect(detail).toMatchObject({
       qualityInspectionId: inspectionIds.coil9,
       lotNo: 'QD-C9',
@@ -298,7 +317,7 @@ describe('검사 상세 조회 (API-116, REQ-QC-001·003)', () => {
 
 describe('검사 등록·자동 판정 (API-117·224, REQ-QC-001·003)', () => {
   const prisma = new PrismaService();
-  const service = new QualityService(prisma, new QualityRepository(), recorder);
+  const service = new QualityService(prisma, new QualityRepository(), recorder, inventory);
   const lotIds: number[] = [];
   const resultIds: number[] = [];
   let tempSteelGradeId: number;
@@ -378,6 +397,9 @@ describe('검사 등록·자동 판정 (API-117·224, REQ-QC-001·003)', () => {
       coilPending: await coil('QR-C-PENDING', coilItem9.id),
       coilFail: await coil('QR-C-FAIL', coilItem9.id),
       coilThin: await coil('QR-C-THIN', coilItem45.id),
+      coilStock: await coil('QR-C-STOCK', coilItem9.id),
+      coilAgent: await coil('QR-C-AGENT', coilItem9.id),
+      coilAgentFail: await coil('QR-C-AGENT-FAIL', coilItem9.id),
       heat: await prisma.lot.create({ data: { lotNo: 'QR-H', lotType: 'HEAT', steelGradeId: grade.id, productionResultId: steelmaking } }),
       heatNoStandard: await prisma.lot.create({
         data: { lotNo: 'QR-H-NOSTD', lotType: 'HEAT', steelGradeId: tempGrade.id, productionResultId: steelmaking },
@@ -388,6 +410,17 @@ describe('검사 등록·자동 판정 (API-117·224, REQ-QC-001·003)', () => {
     };
     lots = Object.fromEntries(Object.entries(created).map(([key, lot]) => [key, lot.id]));
     lotIds.push(...Object.values(lots));
+
+    // 재고 반영 매수 확인용: 합격 히트 아래의 코일 (적격 = 자기 PASS + 상위 히트 PASS)
+    const stStandard = await prisma.inspectionStandard.findUniqueOrThrow({
+      where: { inspectionStandardCode_versionNo: { inspectionStandardCode: 'QS-SM355A-ST', versionNo: 1 } },
+    });
+    const stockHeat = await prisma.lot.create({ data: { lotNo: 'QR-H-STOCK', lotType: 'HEAT', steelGradeId: grade.id, productionResultId: steelmaking } });
+    lotIds.push(stockHeat.id);
+    await prisma.qualityInspection.create({
+      data: { lotId: stockHeat.id, inspectionStandardId: stStandard.id, inspectionResult: 'PASS', inspectorEmployeeId: user.employeeId, inspectedAt: new Date() },
+    });
+    await prisma.lotRelation.create({ data: { parentLotId: stockHeat.id, childLotId: lots.coilStock, lotRelationEvidence: 'ACTUAL_INPUT' } });
   });
 
   afterAll(async () => {
@@ -397,6 +430,7 @@ describe('검사 등록·자동 판정 (API-117·224, REQ-QC-001·003)', () => {
     await prisma.businessEvent.deleteMany({ where: { targetType: 'quality_inspection', targetId: { in: inspectionIds } } });
     await prisma.qualityInspectionValue.deleteMany({ where: { qualityInspectionId: { in: inspectionIds } } });
     await prisma.qualityInspection.deleteMany({ where: { id: { in: inspectionIds } } });
+    await prisma.lotRelation.deleteMany({ where: { childLotId: { in: lotIds } } });
     await prisma.lot.deleteMany({ where: { id: { in: lotIds } } });
     await prisma.productionResult.deleteMany({ where: { id: { in: resultIds } } });
     await prisma.steelGrade.delete({ where: { id: tempSteelGradeId } });
@@ -404,7 +438,15 @@ describe('검사 등록·자동 판정 (API-117·224, REQ-QC-001·003)', () => {
   });
 
   it('적용 항목이 모두 기준 안이면 PASS, 최신 기준 버전·검사자를 남기고 상세를 돌려준다', async () => {
-    const detail = await service.registerQualityInspection({ lotId: lots.coilPass, values: passValues9mm() }, user);
+    // 등록 트랜잭션은 느린 DB에서도 기본 5초 제한에 걸리지 않게 긴 제한을 쓴다 (부하 중 시연에서 COM-999)
+    const transaction = jest.spyOn(prisma, '$transaction');
+    let detail;
+    try {
+      detail = await service.registerQualityInspection({ lotId: lots.coilPass, values: passValues9mm() }, user);
+      expect(transaction.mock.calls.map((call) => call[1])).toContainEqual({ maxWait: 5_000, timeout: 30_000 });
+    } finally {
+      transaction.mockRestore();
+    }
     expect(detail).toMatchObject({
       lotId: lots.coilPass,
       inspectionResult: 'PASS',
@@ -414,6 +456,45 @@ describe('검사 등록·자동 판정 (API-117·224, REQ-QC-001·003)', () => {
     });
     expect(detail.items.every((i) => i.isPassed === true)).toBe(true);
     expect(await prisma.qualityInspectionValue.count({ where: { qualityInspectionId: detail.qualityInspectionId } })).toBe(7);
+  });
+
+  it('적격이 된 매수는 판정 전후 적격 LOT으로 센다 (재고를 다시 세며 생긴 on_hand 보정분은 섞지 않음), 자동 예약은 inventory 결과', async () => {
+    // inventory가 on_hand를 4 → 7로 다시 셌어도(보정 2매 포함) 이번 판정으로 적격이 된 LOT은 코일 1개다
+    const { stub, calls } = syncingInventory([
+      { itemId: 1, previousOnHandQty: 4, onHandQty: 7, autoReservedQty: 1, releasedReservationQty: 0, releasedAllocationCount: 0 },
+    ]);
+    const withStock = new QualityService(prisma, new QualityRepository(), recorder, stub);
+    const detail = await withStock.registerQualityInspection({ lotId: lots.coilStock, values: passValues9mm() }, user);
+    expect(calls).toEqual([[lots.coilStock]]);
+    expect(detail.stockSync).toEqual({ eligibleAddedQty: 1, autoReservedQty: 1, eligibleRemovedQty: 0, releasedReservationQty: 0, releasedAllocationCount: 0 });
+  });
+
+  it('검사 등록 응답은 Agent 감지(한 줄 큐)를 기다리지 않고, 감지를 부르지 못하면 로그만 남긴다 (#496)', async () => {
+    let release = () => {};
+    const calls: number[] = [];
+    // 전체 감지가 오래 돌아 큐가 막힌 상황: 감지가 끝나지 않아도 등록은 돌아와야 한다
+    const busyAgent = {
+      onInspectionRegistered: (lotId: number) => {
+        calls.push(lotId);
+        return new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      },
+    } as unknown as FactoryAgentService;
+    const detail = await new QualityService(prisma, new QualityRepository(), recorder, inventory, busyAgent).registerQualityInspection({ lotId: lots.coilAgent, values: passValues9mm() }, user);
+    expect(detail.inspectionResult).toBe('PASS');
+    expect(calls).toEqual([lots.coilAgent]);
+    release();
+
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    try {
+      const failingAgent = { onInspectionRegistered: () => Promise.reject(new Error('감지 큐 오류')) } as unknown as FactoryAgentService;
+      await new QualityService(prisma, new QualityRepository(), recorder, inventory, failingAgent).registerQualityInspection({ lotId: lots.coilAgentFail, values: passValues9mm() }, user);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('감지 큐 오류'));
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('작업 로그 INSPECTION_REGISTERED를 남기고 LOT 타임라인에 연결한다 (REQ-LOG-002)', async () => {
@@ -486,5 +567,362 @@ describe('검사 등록·자동 판정 (API-117·224, REQ-QC-001·003)', () => {
     await expect(service.registerQualityInspection({ lotId: lots.heatNoStandard, values: [] }, user)).rejects.toMatchObject({
       code: 'MST-001',
     });
+  });
+});
+
+describe('측정값 보완·오타 수정 (REQ-QC-003)', () => {
+  const prisma = new PrismaService();
+  const service = new QualityService(prisma, new QualityRepository(), recorder, inventory);
+  const lotIds: number[] = [];
+  const resultIds: number[] = [];
+  const standardIds: number[] = [];
+  const shipping = { salesOrderId: 0, salesOrderItemId: 0, shipmentRequestId: 0, shipmentRequestItemId: 0 };
+  let user: AuthUser;
+  let lots: Record<string, number>;
+  let hr: (code: string, over?: string) => number;
+  let st: (code: string) => number;
+
+  /** 9mm 코일의 적용 항목 7개 중 샤르피를 뺀 6개 (모두 기준 안) */
+  const valuesWithoutCharpy = () => [
+    { inspectionStandardItemId: hr('YIELD_STRENGTH', 'none'), measuredValue: '360' },
+    { inspectionStandardItemId: hr('TENSILE_STRENGTH'), measuredValue: '500' },
+    { inspectionStandardItemId: hr('ELONGATION', '5'), measuredValue: '20' },
+    { inspectionStandardItemId: hr('THICKNESS_TOL', '8'), measuredValue: '0' },
+    { inspectionStandardItemId: hr('WIDTH_TOL'), measuredValue: '0' },
+    { inspectionStandardItemId: hr('CAMBER'), measuredValue: '1' },
+  ];
+  const charpy = (measuredValue: string) => ({ inspectionStandardItemId: hr('CHARPY'), measuredValue });
+  const register = (lotId: number, values: { inspectionStandardItemId: number; measuredValue: string }[]) =>
+    service.registerQualityInspection({ lotId, values }, user);
+  const update = (qualityInspectionId: number, expectedUpdatedAt: string, values: { inspectionStandardItemId: number; measuredValue: string | null }[]) =>
+    service.updateQualityInspection(qualityInspectionId, { expectedUpdatedAt, values }, user);
+
+  beforeAll(async () => {
+    const employee = await prisma.employee.findUniqueOrThrow({ where: { employeeNo: '2205013' } });
+    user = {
+      employeeId: employee.id,
+      employeeNo: employee.employeeNo,
+      employeeName: employee.employeeName,
+      roleCode: 'QUALITY',
+      departmentId: employee.departmentId,
+      jobGradeId: employee.jobGradeId,
+      headDepartmentIds: [],
+      permissions: { INSPECTION_REGISTER: 'USE' },
+    };
+    const standardItems = async (code: string) =>
+      (
+        await prisma.inspectionStandard.findUniqueOrThrow({
+          where: { inspectionStandardCode_versionNo: { inspectionStandardCode: code, versionNo: 1 } },
+          select: { inspectionStandardItems: { select: { id: true, inspectionItemCode: true, thicknessOverMm: true } } },
+        })
+      ).inspectionStandardItems;
+    const hrItems = await standardItems('QS-SM355A-HR');
+    const stItems = await standardItems('QS-SM355A-ST');
+    hr = (code, over) =>
+      hrItems.find(
+        (i) =>
+          i.inspectionItemCode === code &&
+          (over === undefined || (over === 'none' ? i.thicknessOverMm === null : i.thicknessOverMm?.toString() === over)),
+      )!.id;
+    st = (code) => stItems.find((i) => i.inspectionItemCode === code)!.id;
+
+    const grade = await prisma.steelGrade.findUniqueOrThrow({ where: { steelGradeCode: 'SM355A' } });
+    const slabItem = await prisma.item.findUniqueOrThrow({ where: { itemCode: 'SL-SM355A-250x1500x10000' } });
+    const coilItem = await prisma.item.findUniqueOrThrow({ where: { itemCode: 'CL-SM355A-9x1400x227500' } });
+    const result = async (processType: string) => {
+      const created = await prisma.productionResult.create({
+        data: { processType, converterCode: processType === 'STEELMAKING' ? 'BOF1' : null, startedAt: new Date() },
+      });
+      resultIds.push(created.id);
+      return created.id;
+    };
+    const steelmaking = await result('STEELMAKING');
+    const casting = await result('CONTINUOUS_CASTING');
+    const rolling = await result('HOT_ROLLING');
+    const producedDate = new Date('2026-10-02');
+    const coil = (lotNo: string) =>
+      prisma.lot.create({ data: { lotNo, lotType: 'COIL', itemId: coilItem.id, productionResultId: rolling, producedDate } });
+
+    // 출고돼 밀시트가 발행된 계보: 히트 → 슬래브 → 코일(출고)
+    const shippedHeat = await prisma.lot.create({
+      data: { lotNo: 'QU-H-SHIPPED', lotType: 'HEAT', steelGradeId: grade.id, productionResultId: steelmaking },
+    });
+    const shippedSlab = await prisma.lot.create({
+      data: { lotNo: 'QU-S-SHIPPED', lotType: 'SLAB', itemId: slabItem.id, productionResultId: casting, producedDate },
+    });
+    const shippedCoil = await coil('QU-C-SHIPPED');
+    await prisma.lotRelation.createMany({
+      data: [
+        { parentLotId: shippedHeat.id, childLotId: shippedSlab.id, lotRelationEvidence: 'ACTUAL_INPUT' },
+        { parentLotId: shippedSlab.id, childLotId: shippedCoil.id, lotRelationEvidence: 'ACTUAL_INPUT' },
+      ],
+    });
+    const created = {
+      coilPending: await coil('QU-C-PENDING'),
+      coilTypo: await coil('QU-C-TYPO'),
+      coilClear: await coil('QU-C-CLEAR'),
+      coilConflict: await coil('QU-C-CONFLICT'),
+      coilVersion: await coil('QU-C-VERSION'),
+      coilStock: await coil('QU-C-STOCK'),
+      shippedHeat,
+      shippedSlab,
+      shippedCoil,
+    };
+    lots = Object.fromEntries(Object.entries(created).map(([key, lot]) => [key, lot.id]));
+    lotIds.push(...Object.values(lots));
+
+    // 재고 반영 매수 확인용: 합격 히트 아래의 코일 (적격 = 자기 PASS + 상위 히트 PASS)
+    const stStandard = await prisma.inspectionStandard.findUniqueOrThrow({
+      where: { inspectionStandardCode_versionNo: { inspectionStandardCode: 'QS-SM355A-ST', versionNo: 1 } },
+    });
+    const stockHeat = await prisma.lot.create({ data: { lotNo: 'QU-H-STOCK', lotType: 'HEAT', steelGradeId: grade.id, productionResultId: steelmaking } });
+    lotIds.push(stockHeat.id);
+    await prisma.qualityInspection.create({
+      data: { lotId: stockHeat.id, inspectionStandardId: stStandard.id, inspectionResult: 'PASS', inspectorEmployeeId: user.employeeId, inspectedAt: new Date() },
+    });
+    await prisma.lotRelation.create({ data: { parentLotId: stockHeat.id, childLotId: lots.coilStock, lotRelationEvidence: 'ACTUAL_INPUT' } });
+
+    const customer = await prisma.customer.findFirstOrThrow({ select: { id: true } });
+    const salesOrder = await prisma.salesOrder.create({
+      data: { salesOrderNo: 'QU-SO-1', customerId: customer.id, ownerEmployeeId: employee.id },
+    });
+    const salesOrderItem = await prisma.salesOrderItem.create({
+      data: { salesOrderId: salesOrder.id, itemId: coilItem.id, orderedQty: 1, dueDate: new Date('2026-10-31') },
+    });
+    const shipmentRequest = await prisma.shipmentRequest.create({
+      data: { shipmentRequestNo: 'QU-DR-1', customerId: customer.id, shipmentRequestStatus: 'ISSUED', issuedAt: new Date() },
+    });
+    const shipmentRequestItem = await prisma.shipmentRequestItem.create({
+      data: { shipmentRequestId: shipmentRequest.id, salesOrderItemId: salesOrderItem.id, requestQty: 1 },
+    });
+    await prisma.allocation.create({
+      data: { lotId: shippedCoil.id, allocationPurpose: 'SHIPMENT', shipmentRequestItemId: shipmentRequestItem.id, allocationStatus: 'CONSUMED' },
+    });
+    await prisma.millSheet.create({
+      data: { millSheetNo: 'QU-MS-1', shipmentRequestId: shipmentRequest.id, salesOrderId: salesOrder.id, snapshot: {}, issuedAt: new Date() },
+    });
+    Object.assign(shipping, {
+      salesOrderId: salesOrder.id,
+      salesOrderItemId: salesOrderItem.id,
+      shipmentRequestId: shipmentRequest.id,
+      shipmentRequestItemId: shipmentRequestItem.id,
+    });
+  });
+
+  afterAll(async () => {
+    const inspections = await prisma.qualityInspection.findMany({ where: { lotId: { in: lotIds } }, select: { id: true } });
+    const inspectionIds = inspections.map((i) => i.id);
+    await prisma.millSheet.deleteMany({ where: { shipmentRequestId: shipping.shipmentRequestId } });
+    await prisma.allocation.deleteMany({ where: { shipmentRequestItemId: shipping.shipmentRequestItemId } });
+    await prisma.shipmentRequestItem.deleteMany({ where: { id: shipping.shipmentRequestItemId } });
+    await prisma.shipmentRequest.deleteMany({ where: { id: shipping.shipmentRequestId } });
+    await prisma.salesOrderItem.deleteMany({ where: { id: shipping.salesOrderItemId } });
+    await prisma.salesOrder.deleteMany({ where: { id: shipping.salesOrderId } });
+    await prisma.businessEventLot.deleteMany({ where: { lotId: { in: lotIds } } });
+    await prisma.businessEvent.deleteMany({ where: { targetType: 'quality_inspection', targetId: { in: inspectionIds } } });
+    await prisma.qualityInspectionValue.deleteMany({ where: { qualityInspectionId: { in: inspectionIds } } });
+    await prisma.qualityInspection.deleteMany({ where: { id: { in: inspectionIds } } });
+    await prisma.lotRelation.deleteMany({ where: { childLotId: { in: lotIds } } });
+    await prisma.lot.deleteMany({ where: { id: { in: lotIds } } });
+    await prisma.productionResult.deleteMany({ where: { id: { in: resultIds } } });
+    await prisma.inspectionStandard.deleteMany({ where: { id: { in: standardIds } } });
+    await prisma.$disconnect();
+  });
+
+  it('PENDING 검사에 빠진 필수 값을 보완하면 같은 검사 행에서 PASS로 다시 판정한다', async () => {
+    const registered = await register(lots.coilPending, valuesWithoutCharpy());
+    expect(registered.inspectionResult).toBe('PENDING');
+
+    const updated = await update(registered.qualityInspectionId, registered.updatedAt, [charpy('27')]);
+    expect(updated).toMatchObject({ qualityInspectionId: registered.qualityInspectionId, inspectionResult: 'PASS' });
+    expect(updated.updatedAt).not.toBe(registered.updatedAt);
+    expect(await prisma.qualityInspection.count({ where: { lotId: lots.coilPending } })).toBe(1);
+    expect(await prisma.qualityInspectionValue.count({ where: { qualityInspectionId: registered.qualityInspectionId } })).toBe(7);
+  });
+
+  it('작업 로그 INSPECTION_REGISTERED에 변경 전·후 값과 판정을 남긴다', async () => {
+    const inspection = await prisma.qualityInspection.findUniqueOrThrow({ where: { lotId: lots.coilPending } });
+    const [, updateEvent] = await prisma.businessEvent.findMany({
+      where: { targetType: 'quality_inspection', targetId: inspection.id },
+      orderBy: { id: 'asc' },
+    });
+    expect(updateEvent).toMatchObject({ businessEventType: 'INSPECTION_REGISTERED', actorType: 'USER', actorEmployeeId: user.employeeId });
+    expect(updateEvent.beforeData).toMatchObject({ inspectionResult: 'PENDING', missingRequiredItemCodes: ['CHARPY'] });
+    expect(updateEvent.afterData).toMatchObject({
+      inspectionResult: 'PASS',
+      missingRequiredItemCodes: [],
+      inspectionStandardCode: 'QS-SM355A-HR',
+      versionNo: 1,
+    });
+    expect((updateEvent.beforeData as { values: unknown[] }).values).toHaveLength(6);
+    expect((updateEvent.afterData as { values: unknown[] }).values).toHaveLength(7);
+  });
+
+  it('판정이 그대로면 재고를 다시 맞추지 않아 stockSync는 0, 판정이 바뀌면 재고 반영 결과를 준다', async () => {
+    const { stub, calls } = syncingInventory([
+      { itemId: 1, previousOnHandQty: 5, onHandQty: 4, autoReservedQty: 0, releasedReservationQty: 1, releasedAllocationCount: 1 },
+    ]);
+    const withStock = new QualityService(prisma, new QualityRepository(), recorder, stub);
+    const registered = await withStock.registerQualityInspection({ lotId: lots.coilStock, values: [...valuesWithoutCharpy(), charpy('30')] }, user);
+    calls.length = 0;
+
+    const same = await withStock.updateQualityInspection(registered.qualityInspectionId, { expectedUpdatedAt: registered.updatedAt, values: [charpy('31')] }, user);
+    expect(same.inspectionResult).toBe('PASS');
+    expect(calls).toEqual([]);
+    expect(same.stockSync).toEqual({ eligibleAddedQty: 0, autoReservedQty: 0, eligibleRemovedQty: 0, releasedReservationQty: 0, releasedAllocationCount: 0 });
+
+    const failed = await withStock.updateQualityInspection(registered.qualityInspectionId, { expectedUpdatedAt: same.updatedAt, values: [charpy('3')] }, user);
+    expect(failed.inspectionResult).toBe('FAIL');
+    expect(calls).toEqual([[lots.coilStock]]);
+    expect(failed.stockSync).toEqual({ eligibleAddedQty: 0, autoReservedQty: 0, eligibleRemovedQty: 1, releasedReservationQty: 1, releasedAllocationCount: 1 });
+  });
+
+  it('오타 수정은 같은 값 행을 고치고, 기준을 벗어나면 FAIL로 바뀐다', async () => {
+    const registered = await register(lots.coilTypo, [...valuesWithoutCharpy(), charpy('30')]);
+    expect(registered.inspectionResult).toBe('PASS');
+    const charpyKey = { qualityInspectionId: registered.qualityInspectionId, inspectionStandardItemId: hr('CHARPY') };
+    const before = await prisma.qualityInspectionValue.findUniqueOrThrow({
+      where: { qualityInspectionId_inspectionStandardItemId: charpyKey },
+    });
+
+    const updated = await update(registered.qualityInspectionId, registered.updatedAt, [charpy('3')]);
+    expect(updated.inspectionResult).toBe('FAIL');
+    expect(updated.items.find((i) => i.inspectionItemCode === 'CHARPY')).toMatchObject({ measuredValue: '3.0000', isPassed: false });
+    const after = await prisma.qualityInspectionValue.findUniqueOrThrow({ where: { id: before.id } });
+    expect(after.measuredValue.toString()).toBe('3');
+  });
+
+  it('측정값을 null로 보내면 저장한 값 행을 지우고, 필수 항목이 비어 판정 대기(PENDING)가 된다 (2026-10-06 사용자 결정)', async () => {
+    const registered = await register(lots.coilClear, [...valuesWithoutCharpy(), charpy('30')]);
+    expect(registered.inspectionResult).toBe('PASS');
+
+    const cleared = await update(registered.qualityInspectionId, registered.updatedAt, [{ inspectionStandardItemId: hr('CHARPY'), measuredValue: null }]);
+    expect(cleared.inspectionResult).toBe('PENDING');
+    expect(cleared.items.find((i) => i.inspectionItemCode === 'CHARPY')).toMatchObject({ measuredValue: null, isPassed: null });
+    const charpyKey = { qualityInspectionId: registered.qualityInspectionId, inspectionStandardItemId: hr('CHARPY') };
+    expect(await prisma.qualityInspectionValue.findUnique({ where: { qualityInspectionId_inspectionStandardItemId: charpyKey } })).toBeNull();
+
+    // 다시 넣으면 새 값 행으로 보완된다
+    const refilled = await update(registered.qualityInspectionId, cleared.updatedAt, [charpy('28')]);
+    expect(refilled.inspectionResult).toBe('PASS');
+  });
+
+  it('같은 항목을 지우기와 값으로 두 번 보내면 COM-004', async () => {
+    const inspection = await prisma.qualityInspection.findUniqueOrThrow({ where: { lotId: lots.coilClear } });
+    await expect(
+      update(inspection.id, inspection.updatedAt.toISOString(), [{ inspectionStandardItemId: hr('CHARPY'), measuredValue: null }, charpy('30')]),
+    ).rejects.toMatchObject({ code: 'COM-004' });
+  });
+
+  it('expectedUpdatedAt이 지금 값과 다르면 COM-001, 아무것도 바꾸지 않는다', async () => {
+    const registered = await register(lots.coilConflict, valuesWithoutCharpy());
+    const first = await update(registered.qualityInspectionId, registered.updatedAt, [charpy('27')]);
+    await expect(update(registered.qualityInspectionId, registered.updatedAt, [charpy('1')])).rejects.toMatchObject({ code: 'COM-001' });
+    expect(await service.getQualityInspection(registered.qualityInspectionId)).toMatchObject({
+      inspectionResult: 'PASS',
+      updatedAt: first.updatedAt,
+    });
+  });
+
+  it('새 기준 버전이 생겨도 판정에 쓴 버전으로 다시 판정한다 ([07] 5장)', async () => {
+    const registered = await register(lots.coilVersion, valuesWithoutCharpy());
+    const v1 = await prisma.inspectionStandard.findUniqueOrThrow({ where: { id: registered.inspectionStandardId } });
+    const v2 = await prisma.inspectionStandard.create({
+      data: { inspectionStandardCode: v1.inspectionStandardCode, versionNo: 2, processType: v1.processType, steelGradeId: v1.steelGradeId },
+    });
+    standardIds.push(v2.id);
+
+    const updated = await update(registered.qualityInspectionId, registered.updatedAt, [charpy('27')]);
+    expect(updated).toMatchObject({ inspectionStandardId: v1.id, versionNo: 1, inspectionResult: 'PASS' });
+    // 뒤 테스트의 등록이 항목 없는 v2를 고르지 않게 바로 지운다
+    await prisma.inspectionStandard.delete({ where: { id: v2.id } });
+    standardIds.pop();
+  });
+
+  it('LOT 두께에 적용되지 않는 항목·같은 항목 두 번은 COM-004', async () => {
+    const inspection = await prisma.qualityInspection.findUniqueOrThrow({ where: { lotId: lots.coilTypo } });
+    const expectedUpdatedAt = inspection.updatedAt.toISOString();
+    await expect(update(inspection.id, expectedUpdatedAt, [{ inspectionStandardItemId: st('C'), measuredValue: '0.1' }])).rejects.toMatchObject({
+      code: 'COM-004',
+    });
+    await expect(update(inspection.id, expectedUpdatedAt, [charpy('30'), charpy('31')])).rejects.toMatchObject({ code: 'COM-004' });
+  });
+
+  it('밀시트가 발행된 LOT은 COM-004로 막고 밀시트 번호를 알려 준다', async () => {
+    const registered = await register(lots.shippedCoil, valuesWithoutCharpy());
+    await expect(update(registered.qualityInspectionId, registered.updatedAt, [charpy('27')])).rejects.toMatchObject({
+      code: 'COM-004',
+      message: expect.stringContaining('QU-MS-1'),
+    });
+    // 상세가 잠금(밀시트 번호)을 미리 알려 줘서 화면이 저장 전에 막는다
+    expect(await service.getQualityInspection(registered.qualityInspectionId)).toMatchObject({
+      inspectionResult: 'PENDING',
+      lockedMillSheetNos: [expect.stringContaining('QU-MS-1')],
+    });
+  });
+
+  it('출고 확정이 밀시트를 발행하는 중이면 측정값 수정은 기다렸다가 발행된 밀시트를 보고 막는다 (#487)', async () => {
+    const base = await prisma.lot.findUniqueOrThrow({ where: { id: lots.coilTypo } });
+    const raceCoil = await prisma.lot.create({ data: { lotNo: 'QU-C-RACE', lotType: 'COIL', itemId: base.itemId, productionResultId: base.productionResultId, producedDate: base.producedDate } });
+    lotIds.push(raceCoil.id);
+    const registered = await register(raceCoil.id, valuesWithoutCharpy());
+    const request = await prisma.shipmentRequest.create({ data: { shipmentRequestNo: 'QU-DR-RACE', customerId: (await prisma.customer.findFirstOrThrow()).id } });
+    const requestItem = await prisma.shipmentRequestItem.create({ data: { shipmentRequestId: request.id, salesOrderItemId: shipping.salesOrderItemId, requestQty: 1 } });
+    const allocation = await prisma.allocation.create({ data: { lotId: raceCoil.id, allocationPurpose: 'SHIPMENT', shipmentRequestItemId: requestItem.id, allocationStatus: 'CONFIRMED' } });
+
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let issuing = false;
+    // 출고 확정과 같은 순서: 출하요청을 잠그고 → 배정 소진·LOT 출고·밀시트 발행 → (멈춤) → 커밋
+    const issue = prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRawTyped(lockShipmentRequest(request.id));
+        await tx.allocation.update({ where: { id: allocation.id }, data: { allocationStatus: 'CONSUMED' } });
+        await tx.lot.update({ where: { id: raceCoil.id }, data: { lotStatus: 'SHIPPED' } });
+        await tx.millSheet.create({ data: { millSheetNo: 'QU-MS-RACE', shipmentRequestId: request.id, salesOrderId: shipping.salesOrderId, snapshot: {}, issuedAt: new Date() } });
+        issuing = true;
+        await gate;
+      },
+      { maxWait: 10_000, timeout: 30_000 },
+    );
+    while (!issuing) await new Promise((resolve) => setTimeout(resolve, 20));
+    let settled = false;
+    const updating = update(registered.qualityInspectionId, registered.updatedAt, [charpy('27')]).finally(() => (settled = true));
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(settled).toBe(false);
+    release();
+    await issue;
+    await expect(updating).rejects.toMatchObject({ code: 'COM-004', message: expect.stringContaining('QU-MS-RACE') });
+
+    await prisma.millSheet.deleteMany({ where: { shipmentRequestId: request.id } });
+    await prisma.allocation.deleteMany({ where: { shipmentRequestItemId: requestItem.id } });
+    await prisma.shipmentRequestItem.delete({ where: { id: requestItem.id } });
+    await prisma.shipmentRequest.delete({ where: { id: request.id } });
+  });
+
+  it('히트는 하위 코일이 밀시트에 들어갔으면 막는다', async () => {
+    const composition = ['C', 'SI', 'MN', 'P', 'S'].map((code) => ({ inspectionStandardItemId: st(code), measuredValue: '0.01' }));
+    const registered = await register(lots.shippedHeat, composition);
+    await expect(
+      update(registered.qualityInspectionId, registered.updatedAt, [{ inspectionStandardItemId: st('CEQ'), measuredValue: '0.4' }]),
+    ).rejects.toMatchObject({ code: 'COM-004', message: expect.stringContaining('QU-MS-1') });
+    expect((await service.getQualityInspection(registered.qualityInspectionId)).lockedMillSheetNos).toEqual([expect.stringContaining('QU-MS-1')]);
+  });
+
+  it('검사 목록도 밀시트 잠금(isLocked)을 준다: 출고된 코일과 그 상위 히트는 잠금, 출고 안 된 LOT은 아님', async () => {
+    const rowOf = async (lotId: number) => {
+      const [pending, done] = await Promise.all([
+        service.listQualityInspections({ status: 'pending', lotId }),
+        service.listQualityInspections({ status: 'done', lotId }),
+      ]);
+      return [...pending.items, ...done.items][0];
+    };
+    expect((await rowOf(lots.shippedCoil))?.isLocked).toBe(true);
+    expect((await rowOf(lots.shippedHeat))?.isLocked).toBe(true);
+    expect((await rowOf(lots.coilTypo))?.isLocked).toBe(false);
+  });
+
+  it('없는 검사 id는 COM-003', async () => {
+    await expect(update(2_000_000_000, new Date().toISOString(), [charpy('27')])).rejects.toMatchObject({ code: 'COM-003' });
   });
 });

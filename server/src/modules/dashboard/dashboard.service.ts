@@ -1,0 +1,229 @@
+import { Injectable } from '@nestjs/common';
+import {
+  ITEM_TYPE,
+  LOT_TYPE,
+  PERMISSION,
+  PROCESS_TYPE,
+  PRODUCTION_PLAN_STATUS,
+  SALES_ORDER_ITEM_STATUS,
+  SHIPMENT_REQUEST_STATUS,
+  calcWeightTon,
+  sumTon,
+  type AuthUser,
+  type ItemType,
+  type OrderFulfillmentWidget,
+  type ProcessFlowWidget,
+  type ProcessYieldWidget,
+  type ProductionResultView,
+  type ProductStockWidget,
+  type ShipmentResultWidget,
+  type SurplusAgeRow,
+  type SurplusAgeWidget,
+} from '@fantasteel/shared';
+import { hasPermission } from '../../common/auth/auth.guard';
+import { AppException } from '../../common/errors/app.exception';
+import { seoulToday } from '../../common/time/seoul-date';
+import { Prisma } from '../../generated/prisma/client';
+import { PrismaService } from '../../prisma/prisma.service';
+import { InventoryService } from '../inventory/inventory.service';
+import { ProductionResultService } from '../production/production-result.service';
+import { ProductionService, type HeatPlanBasis } from '../production/production.service';
+import { daysBetween } from '../sales-order/fulfillment.calculator';
+import { SalesOrderService } from '../sales-order/sales-order.service';
+import { DashboardRepository } from './dashboard.repository';
+
+const OPEN_STATUSES: readonly string[] = [SALES_ORDER_ITEM_STATUS.OPEN, SALES_ORDER_ITEM_STATUS.PARTIALLY_SHIPPED];
+const DAY_MS = 86_400_000;
+/** 추이 위젯 기간: 오늘 포함 최근 30일 (가정값, docs/rework/areas/dashboard.md 5장 — 화면 DASHBOARD_TREND_DAYS와 같다) */
+const TREND_DAYS = 30;
+const RESULT_PAGE_SIZE = 100;
+/** 수율은 routing.planned_yield_rate와 같은 소수 4자리 */
+const YIELD_SCALE = 4;
+
+/**
+ * 대시보드 위젯 (REQ-DSH-001, BP-DSH-01 "권한 내 집계"). 숫자는 각 모듈의 계산을 그대로 쓰고 다시 만들지 않는다.
+ * 공정 흐름 현황은 로그인한 모든 사원에게 6단계 건수를 모두 준다. 그 화면을 열 권한은 화면이 따로 본다(바로가기만 막음, 2026-10-07 사용자 결정).
+ * Agent 위험 감지·대응 후보 확정은 P2라 여기 없다.
+ */
+@Injectable()
+export class DashboardService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly repository: DashboardRepository,
+    private readonly salesOrders: SalesOrderService,
+    private readonly inventory: InventoryService,
+    private readonly production: ProductionService,
+    private readonly productionResults: ProductionResultService,
+  ) {}
+
+  async processFlow(): Promise<ProcessFlowWidget> {
+    const tx = this.prisma;
+    const [open, stock, planRows, pending, requestRows] = await Promise.all([
+      this.salesOrders.openSalesOrderFulfillments(tx),
+      this.inventory.productStock(tx),
+      this.repository.countPlansByStatus(tx),
+      this.repository.countPendingInspectionLots(tx),
+      this.repository.countShipmentRequestsByStatus(tx),
+    ]);
+    const availableOf = (itemType: ItemType) => stock.filter((r) => r.itemType === itemType).reduce((sum, r) => sum + r.availableQty, 0);
+    const openOrders = open.salesOrders.filter((so) => OPEN_STATUSES.includes(so.salesOrderStatus));
+
+    const planCount = (status: string) => planRows.find((r) => r.productionPlanStatus === status)?._count._all ?? 0;
+    const requestCount = (status: string) => requestRows.find((r) => r.shipmentRequestStatus === status)?._count._all ?? 0;
+    // 오늘 출고 확정: 서울 오늘 00:00 ~ 내일 00:00
+    const from = new Date(`${open.today}T00:00:00.000+09:00`);
+    const issued = await this.repository.countIssuedBetween(tx, from, new Date(from.getTime() + DAY_MS));
+    return {
+      today: open.today,
+      salesOrders: { openCount: openOrders.length, dueRiskCount: openOrders.filter((so) => so.isDueRisk).length },
+      productionPlans: { plannedCount: planCount(PRODUCTION_PLAN_STATUS.PLANNED), inProgressCount: planCount(PRODUCTION_PLAN_STATUS.IN_PROGRESS) },
+      inspections: { pendingCount: pending.heat + pending.slab + pending.coil, heatCount: pending.heat, slabCount: pending.slab, coilCount: pending.coil },
+      inventories: { slabAvailableQty: availableOf(ITEM_TYPE.SLAB), coilAvailableQty: availableOf(ITEM_TYPE.COIL) },
+      shipmentRequests: { requestedCount: requestCount(SHIPMENT_REQUEST_STATUS.REQUESTED), allocatedCount: requestCount(SHIPMENT_REQUEST_STATUS.ALLOCATED) },
+      goodsIssues: { issuedRequestCount: issued.requests, issuedLotCount: issued.lots },
+    };
+  }
+
+  /** 수주 충족 현황: 진행 중 수주를 가장 이른 납기 순으로. 납기 위험 = 납기까지 기준일 이하 + 미출하 있음 (기준일은 생산 설정값) */
+  async orderFulfillment(user: AuthUser): Promise<OrderFulfillmentWidget> {
+    if (!hasPermission(user, { permission: PERMISSION.SALES_ORDER_CREATE, level: 'VIEW' })) throw new AppException('COM-002');
+    const open = await this.salesOrders.openSalesOrderFulfillments(this.prisma);
+    const salesOrders = open.salesOrders
+      .filter((so) => OPEN_STATUSES.includes(so.salesOrderStatus))
+      .sort((a, b) => (a.earliestDueDate ?? '9999-12-31').localeCompare(b.earliestDueDate ?? '9999-12-31') || a.id - b.id)
+      .map((so) => ({
+        salesOrderId: so.id,
+        salesOrderNo: so.salesOrderNo,
+        customerName: so.customerName,
+        earliestDueDate: so.earliestDueDate,
+        isDueRisk: so.isDueRisk,
+        progress: so.progress,
+        items: so.fulfillments.map((i) => ({ ...i, daysToDue: daysBetween(open.today, i.dueDate) })),
+      }));
+    return { today: open.today, deliveryRiskDays: open.deliveryRiskDays, salesOrders };
+  }
+
+  /**
+   * 출하 실적 (REQ-DSH-002): 오늘 포함 최근 30일에 출고 확정한 슬래브·코일 LOT을 하루 단위로 센다.
+   * 기간·기준일은 정의가 없어 docs/rework/areas/dashboard.md 5장 가정값을 따르고, 서버에는 LOT 출고 시각이 없어 출하요청 출고 확정 시각을 쓴다.
+   */
+  async shipmentResult(user: AuthUser): Promise<ShipmentResultWidget> {
+    if (!hasPermission(user, { permission: PERMISSION.GOODS_ISSUE_CONFIRM, level: 'VIEW' })) throw new AppException('COM-002');
+    const today = seoulToday();
+    const toAt = new Date(new Date(`${today}T00:00:00.000+09:00`).getTime() + DAY_MS);
+    const dates = Array.from({ length: TREND_DAYS }, (_, i) => seoulToday(new Date(toAt.getTime() - (TREND_DAYS - i) * DAY_MS)));
+    const fromAt = new Date(`${dates[0]}T00:00:00.000+09:00`);
+    const { requests, allocations } = await this.repository.findIssuedBetween(this.prisma, fromAt, toAt);
+    const series = dates.map((date) => {
+      const lots = allocations.filter((a) => a.shipmentRequestItem?.shipmentRequest.issuedAt && seoulToday(a.shipmentRequestItem.shipmentRequest.issuedAt) === date).map((a) => a.lot);
+      return {
+        date,
+        slabQty: lots.filter((l) => l.lotType === LOT_TYPE.SLAB).length,
+        coilQty: lots.filter((l) => l.lotType === LOT_TYPE.COIL).length,
+        ton: sumTon(lots.map((l) => l.item?.theoreticalWeightTon?.toFixed(3) ?? '0')),
+      };
+    });
+    return {
+      from: dates[0],
+      to: today,
+      days: TREND_DAYS,
+      issuedRequestCount: requests,
+      totalSlabQty: series.reduce((s, p) => s + p.slabQty, 0),
+      totalCoilQty: series.reduce((s, p) => s + p.coilQty, 0),
+      totalTon: sumTon(series.map((p) => p.ton)),
+      series,
+    };
+  }
+
+  /**
+   * 공정별 수율 (REQ-DSH-001): 완료된 작업 실적의 Σ산출 ÷ Σ투입(톤)과, 계획 수율(라우팅·규격 매핑)을 투입량으로 가중한 값.
+   * 투입·산출 톤과 계획 수율은 생산 모듈 계산(작업 실적 조회·heatPlanBasisOf)을 그대로 쓴다. 제선은 계획 수율을 쓰지 않아(4.4) 수율 없이 톤만.
+   * 계산 방식은 문서에 정의가 없어 docs/rework/areas/dashboard.md 5장 가정값을 따른다. 연주 계획 대비 매수는 손실 매수 칼럼이 없어 주지 않는다.
+   */
+  async processYield(user: AuthUser): Promise<ProcessYieldWidget> {
+    if (!hasPermission(user, { permission: PERMISSION.PRODUCTION_RESULT_CONFIRM, level: 'VIEW' })) throw new AppException('COM-002');
+    const results: ProductionResultView[] = [];
+    for (let page = 1; ; page++) {
+      const result = await this.productionResults.listResults({ page, size: RESULT_PAGE_SIZE });
+      results.push(...result.items);
+      if (results.length >= result.total || result.items.length === 0) break;
+    }
+    const done = results.filter((r) => r.completedAt !== null && r.inputTon !== null && r.outputTon !== null);
+    const planIds = [...new Set(done.flatMap((r) => (r.productionPlanId === null ? [] : [r.productionPlanId])))];
+    const itemOfPlan = new Map((await this.repository.findPlanItems(this.prisma, planIds)).map((p) => [p.id, p.itemId]));
+    const basisOfItem = new Map<number, HeatPlanBasis | null>();
+    for (const itemId of new Set(itemOfPlan.values())) {
+      // 기준정보가 빠진 규격(MST-001)은 계획 수율 없이 보인다
+      basisOfItem.set(itemId, await this.production.heatPlanBasisOf(this.prisma, itemId).catch(() => null));
+    }
+    const plannedRateOf = (r: ProductionResultView): Prisma.Decimal | string | null => {
+      const basis = r.productionPlanId === null ? null : basisOfItem.get(itemOfPlan.get(r.productionPlanId) ?? 0);
+      if (!basis) return null;
+      if (r.processType === PROCESS_TYPE.STEELMAKING) return basis.steelmakingYieldRate;
+      if (r.processType === PROCESS_TYPE.CONTINUOUS_CASTING) return basis.castingYieldRate;
+      if (r.processType === PROCESS_TYPE.HOT_ROLLING) return basis.hotRollingYieldRate;
+      return null;
+    };
+    const processes = Object.values(PROCESS_TYPE).map((processType) => {
+      const rows = done.filter((r) => r.processType === processType);
+      const inputTon = sumTon(rows.map((r) => r.inputTon ?? '0'));
+      const outputTon = sumTon(rows.map((r) => r.outputTon ?? '0'));
+      const input = new Prisma.Decimal(inputTon);
+      if (processType === PROCESS_TYPE.IRONMAKING || input.lte(0)) return { processType, resultCount: rows.length, inputTon, outputTon, actualYieldRate: null, plannedYieldRate: null };
+      const rates = rows.map(plannedRateOf);
+      const plannedYieldRate = rates.some((rate) => rate === null)
+        ? null
+        : rows.reduce((sum, r, i) => sum.add(new Prisma.Decimal(r.inputTon ?? '0').mul(rates[i] ?? 0)), new Prisma.Decimal(0)).div(input).toFixed(YIELD_SCALE);
+      return { processType, resultCount: rows.length, inputTon, outputTon, actualYieldRate: new Prisma.Decimal(outputTon).div(input).toFixed(YIELD_SCALE), plannedYieldRate };
+    });
+    return { processes };
+  }
+
+  /**
+   * 여재 보유 기간 (REQ-DSH-002, TRM-048). 재고 화면을 모든 사원이 열어 권한을 보지 않는다.
+   * 여재 매수·여재 슬래브는 재고 조회와 같은 계산(InventoryService.surplusSlabs, inventory.md 8-1)을 쓴다.
+   * 여재 전환 시각이 ERD에 없어 보유 기간은 그 LOT들의 생산완료일부터 센다 (inventory.md 8장 임시 결정).
+   */
+  async surplusAge(): Promise<SurplusAgeWidget> {
+    const today = seoulToday();
+    const items: SurplusAgeRow[] = (await this.inventory.surplusSlabs(this.prisma)).map((slab) => {
+      const oldestSinceDate = slab.lots.flatMap((l) => (l.producedDate ? [l.producedDate] : [])).sort()[0] ?? today;
+      return {
+        itemId: slab.itemId,
+        itemCode: slab.itemCode,
+        steelGradeCode: slab.steelGradeCode,
+        surplusQty: slab.surplusQty,
+        surplusTon: calcWeightTon(slab.surplusQty, slab.theoreticalWeightTon),
+        oldestSinceDate,
+        maxAgeDays: Math.max(0, daysBetween(oldestSinceDate, today)),
+      };
+    });
+    items.sort((a, b) => b.maxAgeDays - a.maxAgeDays || a.itemCode.localeCompare(b.itemCode));
+    return {
+      today,
+      totalQty: items.reduce((s, r) => s + r.surplusQty, 0),
+      totalTon: sumTon(items.map((r) => r.surplusTon)),
+      maxAgeDays: items.length > 0 ? Math.max(...items.map((r) => r.maxAgeDays)) : null,
+      items,
+    };
+  }
+
+  /** 제품 재고: 슬래브·코일 합계와 재고가 있는 규격 (재고 화면은 모든 사원이 연다) */
+  async productStock(): Promise<ProductStockWidget> {
+    const rows = await this.inventory.productStock(this.prisma);
+    const totals = [ITEM_TYPE.SLAB, ITEM_TYPE.COIL].map((itemType) => {
+      const ofType = rows.filter((r) => r.itemType === itemType);
+      const sum = (pick: (r: (typeof rows)[number]) => number) => ofType.reduce((acc, r) => acc + pick(r), 0);
+      return {
+        itemType,
+        onHandQty: sum((r) => r.onHandQty),
+        reservedQty: sum((r) => r.reservedQty),
+        rollingAllocatedQty: sum((r) => r.rollingAllocatedQty),
+        availableQty: sum((r) => r.availableQty),
+        onHandTon: sumTon(ofType.map((r) => r.onHandTon)),
+        availableTon: sumTon(ofType.map((r) => r.availableTon)),
+      };
+    });
+    return { totals, items: rows.filter((r) => r.onHandQty > 0) };
+  }
+}

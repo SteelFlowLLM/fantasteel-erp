@@ -1,6 +1,6 @@
 // 구매 화면 표시용 순수 함수 (MRP 기간 기본값, 품목 요약, 공급업체 묶음, 진행률, 톤 입력 초기값).
-// 업무 규칙(순소요·승인·발주·입고)은 core 서비스가 한다. 여기는 화면에 보이는 값만 만든다.
-import { PURCHASE_ORDER_STATUS_LABEL } from '@/codes';
+// 업무 규칙(순소요·승인·발주·입고)은 서버가 한다. 여기는 화면에 보이는 값만 만든다.
+import { PURCHASE_ORDER_STATUS_LABEL, RAW_MATERIAL_TYPE } from '@/codes';
 import { decCmp, decDiv, decIsPositive, decSum } from '@/lib/decimal';
 import { fmtMD, fmtTon } from '@/lib/format';
 import type { ReceiptLine } from '@/api/goodsReceipts';
@@ -38,16 +38,18 @@ export function summarizeItemNames(items: readonly { itemName: string }[]): stri
   return items.length === 1 ? items[0].itemName : `${items[0].itemName} 외 ${items.length - 1}종`;
 }
 
-/** 입고예정 목록 줄 단추의 이름 (화면 낭독기용): "PO-2609-0001 1번 품목 · 철광석 · 가온광업 · 발주 확정 · 입고예정 500.000 t · 납기 10-10" */
-export function receiptRowLabel(line: Pick<ReceiptLine, 'purchaseOrderNo' | 'lineNo' | 'itemName' | 'supplierName' | 'purchaseOrderStatus' | 'isFullyReceived' | 'scheduledReceiptTon' | 'dueDate'>): string {
+/** 입고예정 목록 줄 단추의 이름 (화면 낭독기용): "PO-2609-0001 PR-2609-0001 · 철광석 · 가온광업 · 발주 확정 · 입고예정 500.000 t · 입고 예정 10-10" */
+export function receiptRowLabel(
+  line: Pick<ReceiptLine, 'purchaseOrderNo' | 'purchaseRequisitionNo' | 'itemName' | 'supplierName' | 'purchaseOrderStatus' | 'isFullyReceived' | 'remainingTon' | 'expectedReceiptDate'>,
+): string {
   const parts = [
-    `${line.purchaseOrderNo} ${line.lineNo}번 품목`,
+    `${line.purchaseOrderNo} ${line.purchaseRequisitionNo ?? ''}`.trim(),
     line.itemName,
     line.supplierName,
     PURCHASE_ORDER_STATUS_LABEL[line.purchaseOrderStatus],
-    line.isFullyReceived ? '입고 끝' : `입고예정 ${fmtTon(line.scheduledReceiptTon)}`,
+    line.isFullyReceived ? '입고 끝' : `입고예정 ${fmtTon(line.remainingTon)}`,
   ];
-  if (line.dueDate) parts.push(`납기 ${fmtMD(line.dueDate)}`);
+  if (line.expectedReceiptDate) parts.push(`입고 예정 ${fmtMD(line.expectedReceiptDate)}`);
   return parts.join(' · ');
 }
 
@@ -90,23 +92,23 @@ export function earliestDate(dates: readonly (string | null)[]): string | null {
   return dates.filter((d): d is string => d !== null && d !== '').sort()[0] ?? null;
 }
 
-/** 만들어질 발주 1건 미리보기: 공급업체 · 납기 · 품목 수 · 합계 톤 */
+/** 만들어질 발주 1건 미리보기: 공급업체 · 입고 예정일 · 품목 수 · 합계 톤 */
 export interface PlannedPurchaseOrder {
   supplierId: number;
   supplierName: string | null;
-  /** 입력한 납기, 비우면 그 공급업체 묶음의 가장 이른 희망 입고일(core createPurchaseOrders와 같다). 둘 다 없으면 null */
-  dueDate: string | null;
+  /** 입력한 입고 예정일, 비우면 그 공급업체 묶음의 가장 이른 희망 입고일(품목마다 자기 희망 입고일이 들어간다). 둘 다 없으면 null */
+  expectedReceiptDate: string | null;
   itemCount: number;
   totalTon: string;
 }
 
 /**
  * 고른 품목으로 만들어질 발주 (BP-PUR-01: 기본 공급업체 1곳당 발주 1건).
- * 납기를 비우면 발주마다 자기 묶음의 가장 이른 희망 입고일이 납기가 된다. 기본 공급업체가 없는 품목은 발주하지 않는다.
+ * 입고 예정일을 비우면 품목마다 자기 희망 입고일이 들어간다(미리보기는 가장 이른 날). 기본 공급업체가 없는 품목은 발주하지 않는다.
  */
 export function plannedPurchaseOrders(
-  chosen: readonly { supplierId: number | null; supplierName: string | null; desiredReceiptDate: string | null; requiredTon: string }[],
-  dueDate: string,
+  chosen: readonly { supplierId: number | null; supplierName: string | null; desiredReceiptDate: string | null; requestedTon: string }[],
+  expectedReceiptDate: string,
 ): PlannedPurchaseOrder[] {
   return groupBySupplier(chosen).flatMap((group) =>
     group.supplierId === null
@@ -115,9 +117,9 @@ export function plannedPurchaseOrders(
           {
             supplierId: group.supplierId,
             supplierName: group.supplierName,
-            dueDate: dueDate !== '' ? dueDate : earliestDate(group.items.map((i) => i.desiredReceiptDate)),
+            expectedReceiptDate: expectedReceiptDate !== '' ? expectedReceiptDate : earliestDate(group.items.map((i) => i.desiredReceiptDate)),
             itemCount: group.items.length,
-            totalTon: decSum(group.items.map((i) => i.requiredTon)),
+            totalTon: decSum(group.items.map((i) => i.requestedTon)),
           },
         ],
   );
@@ -126,41 +128,15 @@ export function plannedPurchaseOrders(
 /** 원료 LOT 번호 형식 미리보기 (9.2: RM-원료코드-YYMMDD-NNN, 번호는 확정할 때 매긴다) */
 export const rawMaterialLotNoPattern = (itemCode: string): string => `RM-${itemCode}-YYMMDD-NNN`;
 
-/** 납기가 지났고 아직 입고예정이 남았는지 */
-export function isOverdue(dueDate: string | null, today: string, scheduledReceiptTon: string): boolean {
-  return dueDate !== null && dueDate < today && decCmp(scheduledReceiptTon, 0) > 0;
+/** 입고 예정일이 지났고 아직 미입고량이 남았는지 */
+export function isOverdue(expectedReceiptDate: string | null, today: string, remainingTon: string): boolean {
+  return expectedReceiptDate !== null && expectedReceiptDate < today && decCmp(remainingTon, 0) > 0;
 }
 
 /** MRP에서 만드는 구매요청의 요청 근거 기본 문구 */
-export function mrpRequestReason(line: { productionPlanNo: string; itemName: string; netTon: string; needDate: string }, period: { from: string; to: string }): string {
-  return `MRP ${period.from} ~ ${period.to} · ${line.productionPlanNo} ${line.itemName} 순소요 ${line.netTon} t · 필요일 ${line.needDate}`;
+export function mrpRequestReason(line: { productionPlanNo: string; itemName: string; netRequirementTon: string; requiredDate: string }, period: { from: string; to: string }): string {
+  return `MRP ${period.from} ~ ${period.to} · ${line.productionPlanNo} ${line.itemName} 순소요 ${line.netRequirementTon} t · 필요일 ${line.requiredDate}`;
 }
 
-/** MRP 원료 줄에서 이 계획들이 쓰지 않은 공급 (core MrpMaterialRow의 이유별 톤) */
-export interface MrpExcludedSupply {
-  onHandEarlierPlansTon: string;
-  scheduledOtherPlansTon: string;
-  scheduledAfterNeedDateTon: string;
-  scheduledEarlierPlansTon: string;
-  scheduledSpareTon: string;
-}
-
-const tonNote = (label: string, ton: string, suffix = ''): string[] => (decIsPositive(ton) ? [`${label} ${fmtTon(ton)}${suffix}`] : []);
-
-/** '원료 LOT 잔량' 칸 아래 작은 글씨: 표에 없는 앞선(필요일이 더 이른) 계획이 먼저 쓴 몫 (없으면 빈 배열) */
-export function mrpOnHandNotes(row: Pick<MrpExcludedSupply, 'onHandEarlierPlansTon'>): string[] {
-  return tonNote('앞선 계획 몫', row.onHandEarlierPlansTon, ' 제외');
-}
-
-/**
- * '입고예정' 칸 아래 작은 글씨: 칸의 숫자(이 계획들이 필요일까지 받아 쓰는 몫)에 넣지 않은 입고예정을 이유별로.
- * 다른 계획 몫(REQ-PRD-005) · 필요일 뒤 도착(4.4) · 앞선 계획 몫 · 남는 몫(소요가 이미 채워짐). 0인 이유는 뺀다.
- */
-export function mrpScheduledReceiptNotes(row: Omit<MrpExcludedSupply, 'onHandEarlierPlansTon'>): string[] {
-  return [
-    ...tonNote('다른 계획 몫', row.scheduledOtherPlansTon, ' 제외'),
-    ...tonNote('필요일 뒤 도착', row.scheduledAfterNeedDateTon, ' 제외'),
-    ...tonNote('앞선 계획 몫', row.scheduledEarlierPlansTon, ' 제외'),
-    ...tonNote('남는 몫', row.scheduledSpareTon),
-  ];
-}
+/** 원단위 단위: 합금철은 용강 1t당 kg, 그 밖은 용선 1t당 t */
+export const mrpConsumptionUnit = (rawMaterialType: string | null): 'kg/t' | 't/t' => (rawMaterialType === RAW_MATERIAL_TYPE.FERROALLOY ? 'kg/t' : 't/t');

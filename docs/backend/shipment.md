@@ -28,19 +28,20 @@
 
 | Method | Path | 이름 | 권한 | 비고 ([CSV]) |
 | --- | --- | --- | --- | --- |
-| GET | `shipment-requests` | 출하요청 목록 | `SHIPMENT_REQUEST_MANAGE` VIEW 또는 `GOODS_ISSUE_CONFIRM` VIEW | |
+| GET | `shipment-requests` | 출하요청 목록 | `SHIPMENT_REQUEST_MANAGE` VIEW 또는 `GOODS_ISSUE_CONFIRM` VIEW | `shipmentRequestNo`(번호 일부, 대소문자 무시)로 거른다(상단 통합 검색). `withItems=true`(이슈 #476)면 줄마다 상세(`GET :id`와 같은 값: 품목·배정·출고 확정자)를 함께 준다: 화면이 목록 줄마다 상세를 따로 부르던 N+1을 없앤다 |
 | POST | `shipment-requests` | 출하요청 등록 | `SHIPMENT_REQUEST_MANAGE` USE | 출하 가능 매수 초과 시 SHP-002 |
-| GET | `shipment-requests/:id` | 출하요청 상세 | 목록과 같음 | |
+| GET | `shipment-requests/:id` | 출하요청 상세 | 목록과 같음 | 배정 줄마다 LOT 상태·생산완료일·자기 검사 판정·상위 히트(번호·판정)를 함께 준다(이슈 #519, LOT 상세와 같은 규칙, 목록 `withItems`도 같다): 출고 확정 화면이 배정 LOT마다 `GET lots/:id`를 부르던 N+1을 없앤다 |
 | POST | `shipment-requests/:id/cancel` | 출하요청 취소 | `SHIPMENT_REQUEST_MANAGE` USE | 출고 후면 SHP-003 |
 | POST | `shipment-requests/:id/issue` | 출고 확정 | `GOODS_ISSUE_CONFIRM` USE | INV-002·INV-004·SHP-002. SELECT FOR UPDATE |
-| GET | `mill-sheets` | 밀시트 목록 | `MILL_SHEET_READ` VIEW | 쿼리 예: `shipmentRequestId`, `salesOrderId` |
+| GET | `mill-sheets` | 밀시트 목록 | `MILL_SHEET_READ` VIEW | 쿼리 예: `shipmentRequestId`, `salesOrderId`. 줄마다 스냅샷에서 뽑은 `customerName`·`totalQty`·`totalWeightTon`·`heatNos`·`itemTypes`·`itemCodes`를 함께 준다(이슈 #498): 화면이 밀시트마다 상세(스냅샷 전체)를 따로 부르던 N+1을 없앤다. 스냅샷 자체는 주지 않는다. 스냅샷 JSON을 서버로 읽어 오지 않고 `listMillSheetSummaries.sql`이 필요한 칸만 뽑으며, 값이 없는 옛 스냅샷은 빈 칸(빈 글자·0·빈 배열)이 되어 목록 전체가 실패하지 않는다 |
 | GET | `mill-sheets/:id` | 밀시트 조회 | `MILL_SHEET_READ` VIEW | 저장된 스냅샷을 반환 |
 | POST | `mill-sheets/:id/pdf` | 밀시트 PDF 생성 | `MILL_SHEET_READ` USE | 실패 시 SHP-001, 같은 스냅샷으로 재시도(출고 재실행 없음) |
 
 - 다른 초안 행(`/api/…`): `GET shipment-requests/shippable`(출하 가능 품목 조회), `PATCH shipment-requests/:id/cancel`. 취소는 [05] 5장에 따라 POST.
 - "또는" 권한은 데코레이터 없이 service에서 `hasPermission`으로 확인한다.
 - 배정 추천·확정·해제는 inventory 모듈 `allocations/*`(purpose = SHIPMENT).
-- [권한표]: 영업 SHIPMENT_REQUEST_MANAGE USE·GOODS_ISSUE_CONFIRM·MILL_SHEET_READ VIEW / 물류 GOODS_ISSUE_CONFIRM·MILL_SHEET_READ USE·SHIPMENT_REQUEST_MANAGE VIEW / 품질 출고·밀시트 VIEW / 관리자 VIEW.
+- 출하요청 상세의 품목과 출하 가능 품목은 규격의 유형·1매 이론중량·강종(`itemType`·`theoreticalWeightTon`·`steelGradeCode`)을 함께 준다. 화면이 요청 톤(매수 × 이론중량)을 계산하는데, 기준정보 조회 권한이 없는 사원은 규격 목록을 읽지 못한다.
+- [권한표]: 영업 SHIPMENT_REQUEST_MANAGE USE / 물류 GOODS_ISSUE_CONFIRM·MILL_SHEET_READ USE / 그 밖의 칸은 모든 역할 VIEW(2026-10-15 업무 조회는 모든 역할).
 
 ## 4. 업무 규칙
 
@@ -51,7 +52,7 @@
 
 **배정 → 상태**: inventory가 출하 배정을 확정·해제할 때 `refreshAllocationStatus(tx, shipmentRequestId)`(이 모듈 export)를 부른다. 모든 품목 미배정 = 0이면 ALLOCATED, 아니면 REQUESTED([06] SHIPMENT_REQUEST_STATUS).
 
-**출하요청 취소**: REQUESTED·ALLOCATED만. ISSUED면 `SHP-003`. CONFIRMED 배정을 모두 해제(inventory) 후 CANCELLED.
+**출하요청 취소**: REQUESTED·ALLOCATED만. ISSUED면 `SHP-003`. CONFIRMED 배정을 모두 해제(inventory) 후 CANCELLED. 배정이 없어도 SHIPMENT_REQUEST_CANCELLED를 수주마다 한 건씩 남긴다(2026-10-14 공통 코드 추가).
 
 **출고 확정**([04] 13.3, REQ-SHP-002)
 
@@ -82,6 +83,7 @@
 | 이벤트 | 기록 | actor | target | salesOrderId | lotIds |
 | --- | --- | --- | --- | --- | --- |
 | SHIPMENT_REQUEST_CREATED | 이 모듈 | USER | `shipment_request` | 수주별로 채움 🟡 | - |
+| SHIPMENT_REQUEST_CANCELLED | 이 모듈 | USER | `shipment_request` | 수주별로 채움 | - |
 | GOODS_ISSUE_CONFIRMED | 이 모듈 | USER | `shipment_request` | 수주별로 채움 🟡 | 출고 LOT 전부 |
 | MILL_SHEET_ISSUED | 이 모듈 | USER | `mill_sheet` | 채움 | 그 밀시트의 LOT |
 | RESERVATION_CONVERTED | inventory | USER | `reservation` | 채움 | 출고 LOT |
@@ -123,12 +125,34 @@
 | --- | --- | --- |
 | 출하 가능 매수 | SHP-002의 기준 식이 없다. 후보: `min(미출하 매수, ACTIVE 예약 매수) − 진행 중(REQUESTED·ALLOCATED) 출하요청 매수` | [04] BP-SHP-01 "ACTIVE 예약·출하 가능 잔량 확인", 9.3 |
 | 부분 출고 단위 | [04] 10장은 출하요청 상태를 ISSUED 하나로 끝내므로 부분 출하는 출하요청을 나눠야 한다. 한 요청 안에서 일부 품목만 출고하는 경우는 정의 없음 | [04] 10장·13.3 |
-| 출고 전 ALLOCATED 필요 여부 | 미배정 품목이 남은 REQUESTED 상태에서 출고를 허용할지 | [04] 13.3, [06] |
+| 출고 전 ALLOCATED 필요 여부 | **구현:** 요청 품목마다 CONFIRMED 배정이 요청 매수만큼 있어야 하고(상태 컬럼이 아니라 배정 수로 본다), 모자라면 INV-001. 한 요청 안에서 일부 품목만 출고하는 경우는 지원하지 않는다(요청 전체를 출고) | [04] 13.3, [06] |
 | 이벤트 단위 | 여러 수주를 묶은 출하요청의 SHIPMENT_REQUEST_CREATED·GOODS_ISSUE_CONFIRMED를 수주별로 나눌지 | [ERD] business_event.sales_order_id |
-| 취소 이벤트 | 출하요청 취소용 BUSINESS_EVENT_TYPE이 없다 | [06] |
 | 오류 코드 | 고객사 불일치, 상태 전이 위반(이미 취소·출고)용 코드가 없다 | [04] 9.3 |
-| 중복 출고 방지 | [CSV]·13.3 "Idempotency-Key 적용 후보", 요청 키 저장소 미정. 상태(ISSUED) 검사로 1차 방어 | [CSV], 08 공통 규약 |
+| 중복 출고 방지 | **구현:** 출하요청 행을 잠근 뒤 상태(ISSUED)를 보고 이미 출고했으면 COM-001. Idempotency-Key 저장소는 아직 없다 | [CSV], 08 공통 규약 |
 | PDF 받기 | `POST mill-sheets/:id/pdf`가 파일을 돌려줄지 경로만 줄지, 다운로드 GET이 필요한지 [CSV]에 없다 | [CSV] |
 | 출하 가능 품목 조회 | 초안 행 `GET shipment-requests/shippable`이 v1 목록에 없다 | [CSV] |
 
+**출고 확정 구현 메모 (API-112)**
+
+- 이미 출고·취소된 요청은 COM-001, 배정 대기 남음 INV-001, 미합격·미검사 LOT INV-002, 이미 투입·출고된 LOT INV-004, 미출하·ACTIVE 예약 초과 SHP-002. 하나라도 어긋나면 전부 롤백한다.
+- 밀시트 스냅샷 모양은 shared의 `MillSheetSnapshot`(프런트 목업과 같은 모양). 히트·검사값은 출고 시점 값을 복사한다.
+- 작업 로그 MILL_SHEET_ISSUED의 행위자는 출고 확정한 로그인 사용자다(목업은 SYSTEM).
+- Prisma 7에서 중첩 select(배정·검사·부모 LOT)를 여러 행에 걸쳐 읽으면 "Expected zero or one element"로 실패해서, 배정과 LOT 계보·검사는 따로 읽는다.
+- 출고 후 출하요청 상세의 미배정 매수는 소진(CONSUMED)된 배정도 배정된 것으로 센다.
+
+**밀시트 PDF 구현 메모 (API-115)**
+
+- `POST mill-sheets/:id/pdf`는 파일이 아니라 갱신된 밀시트 상세(`pdfPath` 포함)를 돌려준다. 이미 만들었으면 그 경로를 그대로 돌려주고 다시 렌더링하지 않는다.
+- 저장된 스냅샷만으로 그린다(`mill-sheet-pdf.ts`). 렌더링·저장이 실패하면 SHP-001이고 스냅샷·출고는 그대로다.
+- 한글은 저장소에 포함한 Noto Sans KR(`server/assets/fonts`, OFL)로 찍는다. 서버는 `server` 폴더에서 실행해야 하고, 다른 폰트는 환경변수 `MILL_SHEET_FONT`로 지정한다.
+- 파일 받기용 GET은 만들지 않았다(8장 "PDF 받기" 미정).
+- 레이아웃은 shared의 `drawMillSheet`(`mill-sheet-pdf.ts`) 한 곳에 있고, 서버(pdfkit)와 화면(pdfkit 브라우저 빌드)이 같이 쓴다. 화면의 'PDF 생성'은 브라우저 인쇄 창 대신 브라우저에서 PDF 파일을 만들어 저장 이름 양식으로 바로 내려받는다(인쇄 창은 환경에 따라 파일 이름 칸이 비었다). 한글 글꼴은 `client/public/fonts`에도 한 벌 둔다.
+- 저장 이름은 `{밀시트 번호}_{고객사}_{발행일 YYYYMMDD}.pdf`(예: `MS-2610-0028-1_나래조선_20261006.pdf`)다. shared의 `millSheetPdfFileName`이 만들고, 서버 저장 파일·브라우저 'PDF로 저장' 기본 이름(문서 제목)·화면의 경로가 같은 규칙을 쓴다. 고객사 이름의 공백·사용할 수 없는 글자는 `_`로 바꾸고 30자까지만 쓴다. 저장소가 앞에 붙이는 임의 id(`<uuid>-`)는 그대로다.
+
 참고: `nextMillSheetNumber`는 같은 tx 안의 밀시트 수 + 1이므로, 수주가 여럿이면 밀시트를 하나 저장한 뒤 다음 번호를 받는 순서로 부른다(미리 여러 번 받으면 같은 번호가 나온다).
+
+## 9. 출고 확정 잠금·제한 시간·밀시트 날짜 (2026-10-21, #478)
+
+- 출고 확정은 품목마다 예약 전환 작업 로그를 남기므로, 모든 재고 행을 첫 작업 로그 전에 잠근다(inventory.md 10장).
+- 출고 확정 트랜잭션 제한 시간을 30초로 늘렸다(LOT마다 재검증·소진·작업 로그. 수주 등록·취소와 같은 값).
+- 밀시트 히트 생산일은 제강 실적 완료 시각을 서울 날짜로 바꿔 넣는다. 전에는 UTC로 잘라 한국 0~9시에 끝난 히트가 전날로 찍혀 같은 밀시트의 슬래브·코일 생산완료일과 어긋났다. 이미 발행한 밀시트 스냅샷은 바꾸지 않는다.

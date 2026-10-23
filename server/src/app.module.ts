@@ -4,16 +4,26 @@ import { AuthGuard } from './common/auth/auth.guard';
 import { CommonModule } from './common/common.module';
 import { AllExceptionsFilter } from './common/errors/all-exceptions.filter';
 import { ResponseInterceptor } from './common/http/response.interceptor';
+import { AiAssistantModule } from './modules/ai-assistant/ai-assistant.module';
+import { AiResearchModule } from './modules/ai-research/ai-research.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { BusinessEventModule } from './modules/business-event/business-event.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { FactoryAgentModule } from './modules/factory-agent/factory-agent.module';
+import { IntegrationModule } from './modules/integration/integration.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
+import { LlmModule } from './modules/llm/llm.module';
+import { SttModule } from './modules/stt/stt.module';
 import { LotModule } from './modules/lot/lot.module';
 import { MasterDataModule } from './modules/master-data/master-data.module';
+import { MeetingMinutesModule } from './modules/meeting-minutes/meeting-minutes.module';
+import { ScheduleEventModule } from './modules/schedule-event/schedule-event.module';
 import { MessageActionModule } from './modules/message-action/message-action.module';
 import { MessengerModule } from './modules/messenger/messenger.module';
 import { MrpModule } from './modules/mrp/mrp.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { OrganizationModule } from './modules/organization/organization.module';
+import { PastCaseModule } from './modules/past-case/past-case.module';
 import { ProductionModule } from './modules/production/production.module';
 import { PurchasingModule } from './modules/purchasing/purchasing.module';
 import { QualityModule } from './modules/quality/quality.module';
@@ -21,7 +31,8 @@ import { SalesOrderModule } from './modules/sales-order/sales-order.module';
 import { ShipmentModule } from './modules/shipment/shipment.module';
 import { PrismaModule } from './prisma/prisma.module';
 
-// 모듈은 요구사항 영역 단위 (코드 컨벤션 1장). P2 이후 모듈(factory-agent, voice-erp, ai-assistant, dashboard, past-case)은 그 단계에서 추가한다.
+// 모듈은 요구사항 영역 단위 (코드 컨벤션 1장). P2 이후 모듈(voice-erp)은 그 단계에서 추가한다.
+// past-case(EX)는 예시 사례 + 등록 사례(past_case 테이블)를 합쳐 쓴다 (2026-10-16).
 @Module({
   imports: [
     PrismaModule,
@@ -34,13 +45,24 @@ import { PrismaModule } from './prisma/prisma.module';
     ProductionModule,
     MrpModule,
     PurchasingModule,
-    LotModule,
+    // QualityModule이 먼저: GET lots/rejected(quality)가 lot 모듈의 lots/:id보다 먼저 잡혀야 한다
     QualityModule,
+    LotModule,
     ShipmentModule,
     BusinessEventModule,
     NotificationModule,
     MessengerModule,
     MessageActionModule,
+    MeetingMinutesModule,
+    ScheduleEventModule,
+    DashboardModule,
+    LlmModule,
+    IntegrationModule,
+    SttModule,
+    PastCaseModule,
+    AiAssistantModule,
+    AiResearchModule,
+    FactoryAgentModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: AuthGuard },

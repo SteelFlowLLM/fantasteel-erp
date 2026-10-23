@@ -17,14 +17,14 @@ import { MasterItem, MasterNote, RequisitionSourceTag, RequisitionStatusBadge } 
 import { RequisitionFormModal } from '@/features/purchasing/components/RequisitionFormModal';
 import { RequisitionPanel } from '@/features/purchasing/components/RequisitionPanel';
 import { useUrlParams } from '@/features/purchasing/hooks/useUrlParams';
-import { REQUISITION_SOURCE_LABEL, REQUISITION_SOURCES, summarizeItemNames } from '@/features/purchasing/lib/purchasingView';
+import { REQUISITION_SOURCE_LABEL, REQUISITION_SOURCES } from '@/features/purchasing/lib/purchasingView';
 import { useMe } from '@/hooks/useMe';
 import { useCanUse } from '@/hooks/usePermission';
 import { usePurchaseRequisitionList } from '@/hooks/usePurchaseRequisitions';
 import { fmtMD, fmtTon } from '@/lib/format';
 import { permissionNeedText } from '@/lib/permissions';
 
-const STATUS_FILTERS: readonly PurchaseRequisitionStatus[] = ['WAITING_APPROVAL', 'APPROVED', 'REJECTED', 'ORDERED'];
+const STATUS_FILTERS: readonly PurchaseRequisitionStatus[] = ['WAITING_APPROVAL', 'APPROVED', 'REJECTED', 'ORDERED', 'ORDER_CANCELLED'];
 
 function statusLine(purchaseRequisition: RequisitionView): string {
   switch (purchaseRequisition.purchaseRequisitionStatus) {
@@ -36,6 +36,8 @@ function statusLine(purchaseRequisition: RequisitionView): string {
       return `반려 · ${purchaseRequisition.approverName ?? ''} · 고쳐 다시 요청 필요`;
     case 'ORDERED':
       return `승인 ${purchaseRequisition.approverName ?? ''} · 발주 완료`;
+    case 'ORDER_CANCELLED':
+      return `발주 취소 · ${purchaseRequisition.purchaseOrderNo ?? ''} · 필요하면 새로 요청`;
   }
 }
 
@@ -63,7 +65,8 @@ export function RequisitionListScreen() {
         (word === '' ||
           purchaseRequisition.purchaseRequisitionNo.toLowerCase().includes(word) ||
           (purchaseRequisition.requesterName ?? '').includes(word) ||
-          purchaseRequisition.items.some((i) => i.itemName.includes(word) || i.itemCode.toLowerCase().includes(word))),
+          purchaseRequisition.itemName.includes(word) ||
+          purchaseRequisition.itemCode.toLowerCase().includes(word)),
     );
   }, [rows, status, source, mineOnly, keyword, me.employeeId]);
   const activeId = selectedId ?? filtered[0]?.id ?? null;
@@ -72,6 +75,7 @@ export function RequisitionListScreen() {
   return (
     <>
       <MasterPane
+        petKey="card:purchaseRequisitions.list"
         head={
           <>
             <div className="flex items-center gap-2">
@@ -93,24 +97,26 @@ export function RequisitionListScreen() {
             </div>
             <Input leadingIcon="search" placeholder="요청번호·원료·요청자 검색" value={keyword} onChange={(event) => setKeyword(event.target.value)} aria-label="구매요청 검색" />
             <div className="flex flex-wrap gap-1.5">
-              <Chip on={status === null} onClick={() => setStatus(null)}>
+              <Chip on={status === null} onClick={() => setStatus(null)} data-pet-term="전체">
                 전체 <b>{rows.length}</b>
               </Chip>
               {STATUS_FILTERS.map((value) => (
-                <Chip key={value} on={status === value} onClick={() => setStatus(status === value ? null : value)}>
+                <Chip key={value} on={status === value} onClick={() => setStatus(status === value ? null : value)} data-pet-term={PURCHASE_REQUISITION_STATUS_LABEL[value]}>
                   {PURCHASE_REQUISITION_STATUS_LABEL[value]} <b>{countOf(value)}</b>
                 </Chip>
               ))}
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-cap text-ink-3">출처</span>
+              <span data-pet-term="출처" className="text-cap text-ink-3">
+                출처
+              </span>
               {REQUISITION_SOURCES.map((value) => (
-                <Chip key={value} on={source === value} onClick={() => setSource(source === value ? null : value)}>
+                <Chip key={value} on={source === value} onClick={() => setSource(source === value ? null : value)} data-pet-term={REQUISITION_SOURCE_LABEL[value]}>
                   {REQUISITION_SOURCE_LABEL[value]} <b>{rows.filter((purchaseRequisition) => purchaseRequisition.source === value).length}</b>
                 </Chip>
               ))}
             </div>
-            <label className="flex items-center gap-1.5 text-xs text-ink-2">
+            <label data-pet-term="내 요청만 보기" className="flex items-center gap-1.5 text-xs text-ink-2">
               <input type="checkbox" checked={mineOnly} onChange={(event) => setMineOnly(event.target.checked)} />내 요청만 보기
             </label>
             {canCreate ? null : <ReadOnlyHint permissions={[PERMISSION.PURCHASE_REQUISITION_CREATE]} />}
@@ -130,20 +136,28 @@ export function RequisitionListScreen() {
                     onClick={() => url.set({ pr: purchaseRequisition.id })}
                     onDoubleClick={() => router.push(`/purchase-requisitions/${purchaseRequisition.id}`)}
                     title="두 번 누르면 상세 화면이 열려요"
+                    petItem="purchaseRequisition"
+                    petItemTitle={purchaseRequisition.purchaseRequisitionNo}
                   >
                     <span className="flex items-center gap-2">
                       <b className="font-mono text-sm font-semibold">{purchaseRequisition.purchaseRequisitionNo}</b>
                       <RequisitionStatusBadge status={purchaseRequisition.purchaseRequisitionStatus} />
-                      <span className="ml-auto text-cap text-ink-3">{purchaseRequisition.desiredReceiptDate ? `희망 ${fmtMD(purchaseRequisition.desiredReceiptDate)}` : ''}</span>
+                      <span data-pet-field="희망 입고일" className="ml-auto text-cap text-ink-3">
+                        {purchaseRequisition.desiredReceiptDate ? `희망 ${fmtMD(purchaseRequisition.desiredReceiptDate)}` : ''}
+                      </span>
                     </span>
                     <span className="flex items-center gap-1.5 text-sm text-ink">
-                      {summarizeItemNames(purchaseRequisition.items)}
-                      <span className="text-ink-3">· {fmtTon(purchaseRequisition.totalTon)}</span>
+                      {purchaseRequisition.itemName}
+                      <span data-pet-field="수량(톤)" className="text-ink-3">
+                        · {fmtTon(purchaseRequisition.requestedTon)}
+                      </span>
                     </span>
                     <span className="flex items-center gap-1.5 text-cap text-ink-3">
                       {purchaseRequisition.requesterName ?? '-'}
                       <RequisitionSourceTag source={purchaseRequisition.source} />
-                      <span className="truncate">{statusLine(purchaseRequisition)}</span>
+                      <span data-pet-field="진행" className="truncate">
+                        {statusLine(purchaseRequisition)}
+                      </span>
                     </span>
                   </MasterItem>
                 ))}

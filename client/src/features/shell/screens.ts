@@ -1,6 +1,6 @@
 // (main) 화면 목록과 여는 조건. 왼쪽 레일과 화면 잠금(RouteGuard)이 같은 표를 쓴다.
 // 권한이 있는 화면: 조회(VIEW) 이상이면 열리고, 사용(USE)이 없으면 읽기 전용이다. 등록 화면은 사용 권한이 있어야 열린다.
-// 승인함은 부서장만(REQ-AUTH-004), 대시보드·LOT 추적·작업 로그·업무·알림·메신저·재고는 모든 사원이 연다.
+// 승인함은 부서장만(REQ-AUTH-004), 대시보드·LOT 추적·작업 로그·업무·알림·메신저(Message → ERP 초안 포함)·재고는 모든 사원이 연다.
 import { PERMISSION, type Permission, type PermissionArea } from '@/codes';
 import type { IconName } from '@/components/Icon';
 import { canUse, canView, isDepartmentHead, type PermissionMap } from '@/lib/permissions';
@@ -61,7 +61,7 @@ export const SCREEN = {
     icon: 'cart',
     access: view(PERMISSION.PURCHASE_REQUISITION_CREATE),
     area: '구매',
-    match: ['/purchase-requisitions/', '/action-drafts/'],
+    match: ['/purchase-requisitions/'],
   }),
   purchaseOrders: screen({ href: '/purchase-orders', label: '발주', icon: 'building', access: view(PERMISSION.PURCHASE_ORDER_CONFIRM), area: '구매' }),
   goodsReceipts: screen({ href: '/goods-receipts', label: '입고', icon: 'box', access: view(PERMISSION.GOODS_RECEIPT_CONFIRM), area: '구매' }),
@@ -89,16 +89,28 @@ export const SCREEN = {
   employees: screen({ href: '/admin/employees', label: '사원', icon: 'users', access: view(PERMISSION.EMPLOYEE_MANAGE), area: '관리' }),
   organization: screen({ href: '/admin/organization', label: '부서·직급·권한', icon: 'key', access: view(PERMISSION.ORG_MANAGE), area: '관리' }),
   masterData: screen({ href: '/admin/master-data', label: '기준정보', icon: 'database', access: view(PERMISSION.MASTER_MANAGE), area: '관리' }),
+  llmSettings: screen({ href: '/admin/llm', label: 'AI 연결', icon: 'link', access: view(PERMISSION.ORG_MANAGE), area: '관리' }),
+  integrations: screen({ href: '/admin/integrations', label: '외부 연결', icon: 'share', access: view(PERMISSION.ORG_MANAGE), area: '관리' }),
+  orgChart: screen({ href: '/org-chart', label: '조직도', icon: 'building', access: EVERYONE }),
   lotTrace: screen({ href: '/lots/trace', label: 'LOT 추적', icon: 'trace', access: EVERYONE }),
   businessEvents: screen({ href: '/business-events', label: '작업 로그', icon: 'history', access: EVERYONE }),
   tasks: screen({ href: '/tasks', label: '업무·알림', icon: 'task', access: EVERYONE, badge: 'notifications' }),
-  messenger: screen({ href: '/messenger', label: '메신저', icon: 'chat', access: EVERYONE, badge: 'chat' }),
-  agent: screen({ href: '/agent', label: 'AI Factory Agent', icon: 'radar', access: EVERYONE, soon: 'P2' }),
-  meetings: screen({ href: '/meetings', label: '회의록', icon: 'mic', access: EVERYONE, soon: 'P2' }),
-  pastCases: screen({ href: '/past-cases', label: '과거 사례 검색', icon: 'search', access: EVERYONE, soon: 'EX' }),
+  // Message → ERP 초안은 메신저에서 만들고 연다. 볼 수 있는지(요청자·원본 방 멤버)는 서버가 확인한다 (API-253)
+  messenger: screen({ href: '/messenger', label: '메신저', icon: 'chat', access: EVERYONE, badge: 'chat', match: ['/action-drafts/'] }),
+  agent: screen({ href: '/agent', label: 'AI Factory Agent', icon: 'radar', access: EVERYONE }),
+  meetings: screen({ href: '/meetings', label: '회의록', icon: 'mic', access: EVERYONE }),
+  // 회사 Google Drive 폴더의 사진·녹음·문서 보기 (이슈 #392, 문서에 없는 기능). 읽기만 하고 연결 설정은 관리자의 외부 연결에서 한다
+  drive: screen({ href: '/drive', label: 'Drive 파일', icon: 'file', access: EVERYONE }),
+  // 철강맨AI 심층 조사 (이슈 #378, 문서에 없는 기능). 자기 조사만 보고 바꾼다 (서버가 확인)
+  aiResearch: screen({ href: '/ai-research', label: '심층 조사', icon: 'search', access: EVERYONE }),
+  schedule: screen({ href: '/schedule', label: '내 일정', icon: 'calendar', access: EVERYONE }),
+  pastCases: screen({ href: '/past-cases', label: '과거 사례 검색', icon: 'search', access: EVERYONE }),
 } as const satisfies Record<string, ScreenDef>;
 
 export const SCREENS: readonly ScreenDef[] = Object.values(SCREEN);
+
+/** 주소 → SCREEN 키. 화면 도우미 펫이 레일 메뉴와 지금 화면을 설명 키로 찾을 때 쓴다. */
+export const SCREEN_KEY_BY_HREF: ReadonlyMap<string, string> = new Map(Object.entries(SCREEN).map(([key, def]) => [def.href, key]));
 
 export interface AccessUser {
   permissions: PermissionMap;
@@ -115,6 +127,12 @@ export function canOpenScreen(user: AccessUser, access: ScreenAccess): boolean {
     case 'permission':
       return access.level === 'USE' ? canUse(user, ...access.permissions) : canView(user, ...access.permissions);
   }
+}
+
+/** 이 주소(쿼리 포함 가능)의 화면을 열 수 있는지. 표에 없는 주소는 막지 않는다(RouteGuard와 같다) */
+export function canOpenHref(user: AccessUser, href: string): boolean {
+  const screen = screenOfPath(href.split(/[?#]/)[0]);
+  return !screen || canOpenScreen(user, screen.access);
 }
 
 /** 주소가 가리키는 화면 (가장 길게 맞는 것). '/sales-orders/new'는 '등록'이 '수주'보다 길게 맞는다. */

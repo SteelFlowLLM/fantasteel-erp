@@ -7,6 +7,7 @@ import { Badge } from '@/components/Badge';
 import { Icon, type IconName } from '@/components/Icon';
 import { lotStatusTone } from '@/features/inventory/lib/inventoryDisplay';
 import { ShipmentRequestStatusBadge } from '@/features/shipment/components/ShipmentBadges';
+import { useCanOpenHref } from '@/hooks/usePermission';
 import { cn } from '@/lib/cn';
 import { fmtDateTime, fmtHM, fmtMD, fmtMDHM } from '@/lib/format';
 import { INSPECTION_RESULT_TONE } from '@/lib/statusTone';
@@ -35,8 +36,10 @@ export function LotStatusBadge({ status }: { status: LotStatus }) {
 /** 출하요청 상태 배지 = 출하 화면의 배지 그대로 */
 export const ShipmentStatusBadge = ShipmentRequestStatusBadge;
 
-/** 업무 번호·LOT 번호 링크 (옛 hl-link-id) */
+/** 업무 번호·LOT 번호 링크 (옛 hl-link-id). 그 화면을 열 권한이 없으면 링크 없이 번호만 보인다 */
 export function LinkId({ href, title, className, children }: { href: string; title?: string; className?: string; children: ReactNode }) {
+  const canOpen = useCanOpenHref();
+  if (!canOpen(href)) return <MonoId className={className}>{children}</MonoId>;
   return (
     <Link href={href} title={title} className={cn('font-mono text-mono text-run no-underline hover:underline', className)}>
       {children}
@@ -62,8 +65,10 @@ export function fmtPeriod(start: string | null, end: string | null, full = false
 export function PanelSection({ title, meta, children }: { title: ReactNode; meta?: ReactNode; children: ReactNode }) {
   return (
     <section className="flex min-w-0 flex-col gap-1.5 border-t border-line pt-2.5">
-      <div className="flex items-center gap-2 text-[12.5px]">
-        <b className="font-semibold">{title}</b>
+      <div className="flex items-center gap-2 text-sm">
+        <b data-pet-term={typeof title === 'string' ? title : undefined} className="font-semibold">
+          {title}
+        </b>
         {meta ? <span className="ml-auto text-cap text-ink-3">{meta}</span> : null}
       </div>
       {children}

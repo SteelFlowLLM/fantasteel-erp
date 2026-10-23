@@ -16,7 +16,7 @@ import {
   type ActorType,
   type BusinessEventType,
 } from '@/codes';
-import { ApiError } from '@/api/client';
+import { ApiError } from '@/api/errors';
 import type { BusinessEventFilter } from '@/api/businessEvents';
 import { Button, ButtonLink } from '@/components/Button';
 import { Card, CardFoot, CardHead } from '@/components/Card';
@@ -131,29 +131,35 @@ export function BusinessEventScreen() {
       <span className="-mt-2 text-cap text-ink-3">작업 로그는 기록만 남고 고치거나 지울 수 없어요</span>
 
       <div className="flex flex-none flex-wrap items-center gap-2">
-        <SalesOrderPicker
-          salesOrderId={filter.salesOrderId}
-          salesOrderNo={salesOrderNo}
-          onPick={(id) => patch({ salesOrderId: String(id) })}
-          onClear={() => patch({ salesOrderId: null })}
-        />
-        <LotPicker lotId={filter.lotId} lotNo={lotNo} onPick={(id) => patch({ lotId: String(id) })} onClear={() => patch({ lotId: null })} />
-        <span className="mx-1 h-5 w-px bg-line" aria-hidden="true" />
-        <span className="text-xs font-medium text-ink-2">주체</span>
-        <Chip on={!filter.actorType} onClick={() => patch({ actorType: null })}>
-          전체
-        </Chip>
-        {[ACTOR_TYPE.USER, ACTOR_TYPE.SYSTEM].map((actor) => (
-          <Chip key={actor} on={filter.actorType === actor} onClick={() => patch({ actorType: actor })}>
-            {ACTOR_TYPE_LABEL[actor]}
+        {/* 펫 강조 테두리가 오른쪽 빈자리·조건 초기화까지 넓게 그려지지 않게, 고르는 칸만 따로 묶어 설명 키를 단다 */}
+        <div data-pet-target="card:businessEvents.subject" className="flex min-w-0 flex-wrap items-center gap-2">
+          <SalesOrderPicker
+            salesOrderId={filter.salesOrderId}
+            salesOrderNo={salesOrderNo}
+            onPick={(id) => patch({ salesOrderId: String(id) })}
+            onClear={() => patch({ salesOrderId: null })}
+          />
+          <LotPicker lotId={filter.lotId} lotNo={lotNo} onPick={(id) => patch({ lotId: String(id) })} onClear={() => patch({ lotId: null })} />
+          <span className="mx-1 h-5 w-px bg-line" aria-hidden="true" />
+          <span data-pet-term="주체" className="text-xs font-medium text-ink-2">
+            주체
+          </span>
+          <Chip on={!filter.actorType} data-pet-term="주체" onClick={() => patch({ actorType: null })}>
+            전체
           </Chip>
-        ))}
+          {[ACTOR_TYPE.USER, ACTOR_TYPE.SYSTEM].map((actor) => (
+            <Chip key={actor} on={filter.actorType === actor} data-pet-term={ACTOR_TYPE_LABEL[actor]} onClick={() => patch({ actorType: actor })}>
+              {ACTOR_TYPE_LABEL[actor]}
+            </Chip>
+          ))}
+        </div>
         <Button size="sm" variant="ghost" icon="refresh" className="ml-auto" disabled={!anyFilter} onClick={() => router.replace(pathname)}>
           조건 초기화
         </Button>
       </div>
-      <div className="flex flex-none flex-wrap items-center gap-2">
-        <Select className="w-[200px]" aria-label="작업 로그 유형" value={filter.businessEventType ?? ''} onChange={(e) => patch({ eventType: e.target.value || null })}>
+      {/* 오른쪽이 비는 줄이라 내용 너비만큼만 차지하게 해 펫 강조 테두리가 칸에 맞는다 */}
+      <div data-pet-target="card:businessEvents.filters" className="flex max-w-full flex-none flex-wrap items-center gap-2 self-start">
+        <Select className="w-[200px]" aria-label="작업 로그 유형" data-pet-term="유형" value={filter.businessEventType ?? ''} onChange={(e) => patch({ eventType: e.target.value || null })}>
           <option value="">유형: 전체</option>
           {BUSINESS_EVENT_AREAS.map((area) => (
             <optgroup key={area} label={area}>
@@ -165,7 +171,7 @@ export function BusinessEventScreen() {
             </optgroup>
           ))}
         </Select>
-        <Select className="w-[170px]" aria-label="대상" value={filter.targetType ?? ''} onChange={(e) => patch({ targetType: e.target.value || null })}>
+        <Select className="w-[170px]" aria-label="대상" data-pet-term="대상" value={filter.targetType ?? ''} onChange={(e) => patch({ targetType: e.target.value || null })}>
           <option value="">대상: 전체</option>
           {TARGET_FILTER_TABLES.map((table) => (
             <option key={table} value={table}>
@@ -174,13 +180,15 @@ export function BusinessEventScreen() {
           ))}
         </Select>
         <span className="mx-1 h-5 w-px bg-line" aria-hidden="true" />
-        <span className="text-xs font-medium text-ink-2">기간</span>
+        <span data-pet-term="기간" className="text-xs font-medium text-ink-2">
+          기간
+        </span>
         <DateInput value={filter.from ?? ''} onChange={(value) => patch({ from: value })} ariaLabel="시작일" placeholder="시작일" className="w-[140px]" />
         <span className="text-ink-3">~</span>
         <DateInput value={filter.to ?? ''} onChange={(value) => patch({ to: value })} ariaLabel="종료일" placeholder="종료일" min={filter.from} className="w-[140px]" />
       </div>
 
-      <Card className="min-h-[320px] flex-1">
+      <Card className="min-h-[320px] flex-1" petKey="card:businessEvents.timeline">
         <CardHead
           title={isReplay ? '이력 재현' : '최근 작업 로그'}
           meta={isReplay ? '처리와 판단을 일어난 순서대로 다시 봐요 (같은 시각은 작업 로그 순)' : '최신순이에요. 수주나 LOT을 고르면 이력 재현이 돼요'}

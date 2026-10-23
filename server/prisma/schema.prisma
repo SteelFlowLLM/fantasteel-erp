@@ -25,6 +25,7 @@ model Employee {
   jobGradeId Int @map("job_grade_id")
   roleId Int @map("role_id") /// 사원당 역할 1개
   isActive Boolean @default(true) @map("is_active") /// 퇴사 처리. 사원은 삭제하지 않음
+  email String? @db.VarChar /// 회사 메일 주소. Notion 캘린더 일정 초대에 쓴다 (2026-10-19, 이슈 #391)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
@@ -39,10 +40,22 @@ model Employee {
   purchaseRequisitionsAsApprover PurchaseRequisition[] @relation("PurchaseRequisitionApprover")
   businessEventsAsActorEmployee BusinessEvent[] @relation("BusinessEventActorEmployee")
   tasksAsAssignee Task[] @relation("TaskAssignee")
+  tasksAsCreator Task[] @relation("TaskCreator")
+  scheduleEventsAsCreator ScheduleEvent[] @relation("ScheduleEventCreator")
+  meetingMinutesAsCreator MeetingMinutes[] @relation("MeetingMinutesCreator")
+  meetingAttendees MeetingAttendee[] @relation("MeetingAttendeeEmployee")
+  pastCasesAsCreatedEmployee PastCase[] @relation("PastCaseCreatedEmployee")
+  integrationConnectionsAsConnectedBy IntegrationConnection[] @relation("IntegrationConnectionConnectedBy")
+  scheduleEventAttendees ScheduleEventAttendee[] @relation("ScheduleEventAttendeeEmployee")
   notificationsAsRecipient Notification[] @relation("NotificationRecipient")
   chatRoomMembers ChatRoomMember[] @relation("ChatRoomMemberEmployee")
   messagesAsSender Message[] @relation("MessageSender")
+  messageReactions MessageReaction[] @relation("MessageReactionEmployee")
   actionDraftsAsRequester ActionDraft[] @relation("ActionDraftRequester")
+  aiResearchRuns AiResearchRun[] @relation("AiResearchRunEmployee")
+  aiResearchSchedules AiResearchSchedule[] @relation("AiResearchScheduleEmployee")
+  aiChatThreads AiChatThread[] @relation("AiChatThreadEmployee")
+  aiActionCardRuns AiActionCardRun[] @relation("AiActionCardRunEmployee")
 
   @@index([departmentId])
   @@index([jobGradeId])
@@ -495,6 +508,7 @@ model Lot {
   lotRelationsAsChildLot LotRelation[] @relation("LotRelationChildLot")
   qualityInspection QualityInspection? @relation("QualityInspectionLot")
   businessEventLots BusinessEventLot[] @relation("BusinessEventLotLot")
+  pastCaseLots PastCaseLot[] @relation("PastCaseLotLot")
 
   @@index([itemId])
   @@index([steelGradeId])
@@ -601,6 +615,42 @@ model QualityInspectionValue {
   @@map("quality_inspection_value")
 }
 
+model PastCase {
+  id Int @id @default(autoincrement()) /// 시퀀스 6부터 (예시 사례 CASE-0001~0005와 겹치지 않게, 마이그레이션 SQL)
+  caseNo String @unique @map("case_no") @db.VarChar /// CASE-{id 4자리} (번호 형식 TBD, 가정값)
+  caseCategory String @map("case_category") @db.VarChar /// CASE_CATEGORY: QUALITY·EQUIPMENT
+  title String @db.VarChar
+  phenomenon String
+  cause String?
+  actionTaken String? @map("action_taken")
+  equipmentText String? @map("equipment_text") @db.VarChar /// 설비 마스터 없이 텍스트 (REQ-CASE-001)
+  occurredDate DateTime @map("occurred_date") @db.Date
+  createdEmployeeId Int @map("created_employee_id") /// 등록자
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  createdEmployee Employee @relation("PastCaseCreatedEmployee", fields: [createdEmployeeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  pastCaseLots PastCaseLot[] @relation("PastCaseLotPastCase")
+
+  @@index([createdEmployeeId])
+  @@map("past_case")
+}
+
+model PastCaseLot {
+  id Int @id @default(autoincrement())
+  pastCaseId Int @map("past_case_id")
+  lotId Int @map("lot_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  pastCase PastCase @relation("PastCaseLotPastCase", fields: [pastCaseId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  lot Lot @relation("PastCaseLotLot", fields: [lotId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([pastCaseId, lotId])
+  @@index([lotId])
+  @@map("past_case_lot")
+}
+
 // ───────────────────────────── 구매 (PUR) ─────────────────────────────
 
 /// / CHECK requested_ton > 0 / service: 승인자 = 요청자 소속 부서의 부서장. 반려 후 수정하면 WAITING_APPROVAL로 재요청 /
@@ -676,13 +726,16 @@ model GoodsReceipt {
   id Int @id @default(autoincrement())
   goodsReceiptNo String @unique @map("goods_receipt_no") @db.VarChar /// GR-YYMM-NNNN
   purchaseOrderItemId Int @map("purchase_order_item_id")
-  receivedTon Decimal @map("received_ton") @db.Decimal(12, 3)
-  receivedDate DateTime @map("received_date") @db.Date /// 원료 FIFO 기준
+  receivedTon Decimal @map("received_ton") @db.Decimal(12, 3) /// 입고 취소 행은 음수
+  receivedDate DateTime @map("received_date") @db.Date /// 원료 FIFO 기준. 입고 취소 행은 취소한 날
+  reversedGoodsReceiptId Int? @unique @map("reversed_goods_receipt_id") /// 입고 취소(반대 거래)면 취소한 원래 입고
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   lot Lot? @relation("LotGoodsReceipt")
   purchaseOrderItem PurchaseOrderItem @relation("GoodsReceiptPurchaseOrderItem", fields: [purchaseOrderItemId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  reversedGoodsReceipt GoodsReceipt? @relation("GoodsReceiptReversal", fields: [reversedGoodsReceiptId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  reversal GoodsReceipt? @relation("GoodsReceiptReversal")
 
   @@index([purchaseOrderItemId])
   @@map("goods_receipt")
@@ -744,15 +797,118 @@ model Task {
   taskTitle String @map("task_title") @db.VarChar
   taskDescription String? @map("task_description")
   assigneeId Int @map("assignee_id")
+  creatorId Int @map("creator_id") /// 업무를 등록한 사원. 등록자·담당자만 수정 (2026-10-08)
   dueDate DateTime @map("due_date") @db.Date
   taskStatus String @default("OPEN") @map("task_status") @db.VarChar /// TASK_STATUS
+  linkPath String? @map("link_path") @db.VarChar /// 관련 ERP 화면 이동 경로 (2026-10-08)
+  messageId Int? @map("message_id") /// 메시지에서 등록한 업무의 원본 메시지 (스키마 2차)
+  meetingMinutesId Int? @map("meeting_minutes_id") /// 회의록에서 등록한 업무의 원본 회의록 (2026-10-15)
+  notionPageId String? @map("notion_page_id") @db.VarChar /// Notion 할 일 데이터베이스 페이지 id (2026-10-19, 이슈 #391)
+  notionSyncedAt DateTime? @map("notion_synced_at") @db.Timestamptz(3) /// Notion에 마지막으로 반영한 행의 updated_at
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   assignee Employee @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  creator Employee @relation("TaskCreator", fields: [creatorId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  message Message? @relation("TaskMessage", fields: [messageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  meetingMinutes MeetingMinutes? @relation("TaskMeetingMinutes", fields: [meetingMinutesId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([assigneeId])
+  @@index([creatorId])
+  @@index([messageId])
+  @@index([meetingMinutesId])
   @@map("task")
+}
+
+/// Voice2ERP 회의록 (REQ-VOC-001~004, 2026-10-15). 원본 음성은 저장하지 않는다
+model MeetingMinutes {
+  id Int @id @default(autoincrement())
+  meetingMinutesTitle String @map("meeting_minutes_title") @db.VarChar
+  meetingDate DateTime @map("meeting_date") @db.Date
+  meetingMinutesStatus String @map("meeting_minutes_status") @db.VarChar /// MEETING_MINUTES_STATUS (CHECK)
+  transcript String? /// STT 전체 기록 (원본 전사). AI 요약과 구분한다
+  transcriptSegments Json? @map("transcript_segments") @db.JsonB /// 전사 구간 [{start, end, text}]. AI 분석의 근거 발언 번호가 가리킨다
+  summary String? /// AI 요약 (검토 후 확정본)
+  analysisResult Json? @map("analysis_result") @db.JsonB /// AI 분석 결과·검토 중 수정본
+  failureReason String? @map("failure_reason") @db.VarChar /// 전사·분석 실패 사유 (FAILED일 때)
+  analysisProgress Json? @map("analysis_progress") @db.JsonB /// AI 정리 진행 {phase, current, total}. ANALYZING일 때만 읽는다
+  transcriptionProgress Json? @map("transcription_progress") @db.JsonB /// 음성 전사 진행 {phase, current, total}. TRANSCRIBING일 때만 읽는다
+  creatorId Int @map("creator_id") /// 회의록 작성자. 후보 항목을 허가하는 사람
+  confirmedAt DateTime? @map("confirmed_at") @db.Timestamptz(3) /// 확정 시각. 확정 후 수정·재분석 불가
+  notionPageUrl String? @map("notion_page_url") @db.VarChar /// Notion으로 내보낸 페이지 주소. 한 번만 내보낸다
+  notionExportedAt DateTime? @map("notion_exported_at") @db.Timestamptz(3) /// Notion 내보내기 시각. 주소가 없는데 값이 있으면 내보내는 중
+  notionPageId String? @map("notion_page_id") @db.VarChar /// Notion 회의록 데이터베이스 페이지 id (2026-10-19, 이슈 #391)
+  notionSyncedAt DateTime? @map("notion_synced_at") @db.Timestamptz(3) /// Notion에 마지막으로 반영한 행의 updated_at
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  creator Employee @relation("MeetingMinutesCreator", fields: [creatorId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  attendees MeetingAttendee[] @relation("MeetingAttendeeMeetingMinutes")
+  tasks Task[] @relation("TaskMeetingMinutes")
+  scheduleEvents ScheduleEvent[] @relation("ScheduleEventMeetingMinutes")
+  actionDrafts ActionDraft[] @relation("ActionDraftMeetingMinutes")
+  chatThreads AiChatThread[] @relation("AiChatThreadMeetingMinutes")
+
+  @@index([creatorId])
+  @@index([meetingDate])
+  @@map("meeting_minutes")
+}
+
+model MeetingAttendee {
+  id Int @id @default(autoincrement())
+  meetingMinutesId Int @map("meeting_minutes_id")
+  employeeId Int @map("employee_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  meetingMinutes MeetingMinutes @relation("MeetingAttendeeMeetingMinutes", fields: [meetingMinutesId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  employee Employee @relation("MeetingAttendeeEmployee", fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([meetingMinutesId, employeeId])
+  @@index([employeeId])
+  @@map("meeting_attendee")
+}
+
+/// 시각이 있는 일정 (2026-10-10). 마감일만 있는 할 일은 task에 둔다. end_at > start_at은 마이그레이션 CHECK
+model ScheduleEvent {
+  id Int @id @default(autoincrement())
+  scheduleEventTitle String @map("schedule_event_title") @db.VarChar
+  scheduleEventDescription String? @map("schedule_event_description")
+  startAt DateTime @map("start_at") @db.Timestamptz(3)
+  endAt DateTime @map("end_at") @db.Timestamptz(3) /// start_at보다 뒤 (CHECK)
+  creatorId Int @map("creator_id") /// 일정을 등록한 사원. Voice2ERP 제안은 회의록 작성자가 허가해야 저장
+  linkPath String? @map("link_path") @db.VarChar /// 관련 ERP 화면 이동 경로
+  meetingMinutesId Int? @map("meeting_minutes_id") /// 회의록에서 등록한 일정의 원본 회의록
+  notionPageId String? @map("notion_page_id") @db.VarChar /// Notion 일정 데이터베이스 페이지 id (2026-10-19, 이슈 #391)
+  notionSyncedAt DateTime? @map("notion_synced_at") @db.Timestamptz(3) /// Notion에 마지막으로 반영한 행의 updated_at
+  notionCalendarEventId String? @map("notion_calendar_event_id") @db.VarChar /// Notion 캘린더 일정 id (이슈 #391 2단계)
+  notionSync Boolean @default(true) @map("notion_sync") /// Notion 업무 공간에 반영할지 (이슈 #434). 일정마다 고른다
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  creator Employee @relation("ScheduleEventCreator", fields: [creatorId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  meetingMinutes MeetingMinutes? @relation("ScheduleEventMeetingMinutes", fields: [meetingMinutesId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  attendees ScheduleEventAttendee[] @relation("ScheduleEventAttendeeEvent")
+
+  @@index([creatorId])
+  @@index([startAt])
+  @@index([meetingMinutesId])
+  @@map("schedule_event")
+}
+
+model ScheduleEventAttendee {
+  id Int @id @default(autoincrement())
+  scheduleEventId Int @map("schedule_event_id")
+  employeeId Int @map("employee_id") /// 이 사원의 캘린더에 표시·알림. 등록자도 참석하면 행을 둔다
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  scheduleEvent ScheduleEvent @relation("ScheduleEventAttendeeEvent", fields: [scheduleEventId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  employee Employee @relation("ScheduleEventAttendeeEmployee", fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([scheduleEventId, employeeId])
+  @@index([employeeId])
+  @@map("schedule_event_attendee")
 }
 
 /// / 부분 unique (중복 알림 방지) / - (message_id, recipient_id) WHERE message_id IS NOT NULL / - (business_event_id, recipient_id) WHERE business_event_id IS NOT NULL /
@@ -784,10 +940,12 @@ model ChatRoom {
   chatRoomType String @map("chat_room_type") @db.VarChar /// CHAT_ROOM_TYPE: DIRECT, GROUP, WORK
   chatRoomName String? @map("chat_room_name") @db.VarChar
   salesOrderId Int? @map("sales_order_id") /// 업무방만
+  pinnedMessageId Int? @map("pinned_message_id") /// 방 위에 고정한 공지 메시지 (스키마 2차)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   salesOrder SalesOrder? @relation("ChatRoomSalesOrder", fields: [salesOrderId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  pinnedMessage Message? @relation("ChatRoomPinnedMessage", fields: [pinnedMessageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   chatRoomMembers ChatRoomMember[] @relation("ChatRoomMemberChatRoom")
   messages Message[] @relation("MessageChatRoom")
 
@@ -800,6 +958,8 @@ model ChatRoomMember {
   chatRoomId Int @map("chat_room_id")
   employeeId Int @map("employee_id")
   lastReadMessageId Int? @map("last_read_message_id") /// 안 읽은 수 계산 기준
+  muted Boolean @default(false) /// 이 방 알림 끄기 (스키마 2차)
+  pinnedAt DateTime? @map("pinned_at") @db.Timestamptz(3) /// 내 목록 위에 고정한 시각. null이면 고정 안 함 (스키마 2차)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
@@ -813,36 +973,83 @@ model ChatRoomMember {
   @@map("chat_room_member")
 }
 
+/// CHECK message_type = 'USER' → sender_id IS NOT NULL / CHECK message_type = 'SYSTEM' → sender_id IS NULL / 부분 unique (sender_id, client_message_id) WHERE client_message_id IS NOT NULL
 model Message {
   id Int @id @default(autoincrement())
   chatRoomId Int @map("chat_room_id")
-  senderId Int @map("sender_id")
+  messageType String @default("USER") @map("message_type") @db.VarChar /// MESSAGE_TYPE: USER, SYSTEM
+  senderId Int? @map("sender_id") /// SYSTEM이면 null
   content String?
-  attachmentPath String? @map("attachment_path") @db.VarChar /// Storage 경로. 메시지 1건에 파일 1개
-  attachmentName String? @map("attachment_name") @db.VarChar
+  emoticonKey String? @map("emoticon_key") @db.VarChar(32) /// 이모티콘 키 (스키마 4차). 허용 목록은 shared MESSAGE_EMOTICONS. 글·첨부와 함께 보낼 수 있음
+  clientMessageId String? @map("client_message_id") @db.VarChar(64) /// 화면이 만든 보내기 id(UUID). 재전송 중복 방지
+  parentMessageId Int? @map("parent_message_id") /// 답글 대상. 같은 방 메시지만(service)
+  editedAt DateTime? @map("edited_at") @db.Timestamptz(3) /// 본문을 마지막으로 고친 시각
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3) /// 삭제 표시. 행은 지우지 않음
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3) /// 발송 시각
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   businessEvents BusinessEvent[] @relation("BusinessEventMessage")
   notifications Notification[] @relation("NotificationMessage")
   chatRoomMembersAsLastReadMessage ChatRoomMember[] @relation("ChatRoomMemberLastReadMessage")
+  chatRoomsAsPinnedMessage ChatRoom[] @relation("ChatRoomPinnedMessage")
+  tasks Task[] @relation("TaskMessage")
+  messageReactions MessageReaction[] @relation("MessageReactionMessage")
+  messageAttachments MessageAttachment[] @relation("MessageAttachmentMessage")
   chatRoom ChatRoom @relation("MessageChatRoom", fields: [chatRoomId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  sender Employee @relation("MessageSender", fields: [senderId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  sender Employee? @relation("MessageSender", fields: [senderId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  parentMessage Message? @relation("MessageParentMessage", fields: [parentMessageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  messagesAsParentMessage Message[] @relation("MessageParentMessage")
   actionDrafts ActionDraft[] @relation("ActionDraftMessage")
 
-  @@index([chatRoomId])
+  @@index([chatRoomId, id])
   @@index([senderId])
+  @@index([parentMessageId])
   @@map("message")
 }
 
-/// / 부분 unique: (message_id, action_type) /   WHERE draft_status IN ('AI_GENERATED', 'WAITING_APPROVAL', 'APPROVED')  (미처리 초안 중복 방지) / 결과는 생성된 업무 테이블의 action_draft_id로 연결 (purchase_requisition.action_draft_id) /
+/// 이모지 반응 (스키마 2차). 한 사람이 한 메시지에 같은 이모지는 한 번
+model MessageReaction {
+  id Int @id @default(autoincrement())
+  messageId Int @map("message_id")
+  employeeId Int @map("employee_id")
+  emoji String @db.VarChar(16) /// 허용 목록은 shared MESSAGE_REACTION_EMOJIS (스키마 2차)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  message Message @relation("MessageReactionMessage", fields: [messageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  employee Employee @relation("MessageReactionEmployee", fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([messageId, employeeId, emoji])
+  @@index([employeeId])
+  @@map("message_reaction")
+}
+
+/// 메시지 첨부 파일 (스키마 3차). 메시지 1건에 여러 개, sort_order 순으로 보인다
+model MessageAttachment {
+  id Int @id @default(autoincrement())
+  messageId Int @map("message_id")
+  filePath String @map("file_path") @db.VarChar /// Storage 경로
+  fileName String @map("file_name") @db.VarChar
+  fileSize Int? @map("file_size") /// 바이트. 스키마 3차 전에 올린 첨부는 null
+  sortOrder Int @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  message Message @relation("MessageAttachmentMessage", fields: [messageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([messageId, sortOrder])
+  @@map("message_attachment")
+}
+
+/// / 부분 unique: (message_id, action_type) /   WHERE draft_status IN ('AI_GENERATED', 'WAITING_APPROVAL', 'APPROVED')  (미처리 초안 중복 방지) / 부분 unique: (payload->'agent'->>'targetKey') /   WHERE message_id IS NULL AND payload->'agent'->>'targetKey' IS NOT NULL /   AND draft_status IN ('AI_GENERATED', 'WAITING_APPROVAL', 'APPROVED')  (Agent 대응 후보의 같은 대상 미처리 중복 방지, REQ-AGT-005, 2026-10-21) /   마이그레이션이 만들기 전에 이미 있는 중복은 가장 진행된 1건(APPROVED > WAITING_APPROVAL > AI_GENERATED, 같으면 id가 작은 것)만 남기고 나머지를 REJECTED('[자동] …')로 닫는다 / 결과는 생성된 업무 테이블의 action_draft_id로 연결 (purchase_requisition.action_draft_id) /
 model ActionDraft {
   id Int @id @default(autoincrement())
   actionType String @map("action_type") @db.VarChar /// ACTION_TYPE. P1은 PURCHASE_REQUISITION_CREATE
   draftStatus String @default("AI_GENERATED") @map("draft_status") @db.VarChar /// DRAFT_STATUS
   payload Json @db.JsonB /// 추출 스키마 값
   messageId Int? @map("message_id") /// 추출 원본
-  requesterId Int? @map("requester_id") /// 확정 주체. 구매요청 초안은 메시지 작성자
+  meetingMinutesId Int? @map("meeting_minutes_id") /// 회의록에서 추출한 초안의 원본 (2026-10-15)
+  requesterId Int? @map("requester_id") /// 확정 주체. 구매요청 초안은 메시지 작성자, 회의록 초안은 회의록 작성자
   confirmedAt DateTime? @map("confirmed_at") @db.Timestamptz(3)
   rejectReason String? @map("reject_reason") @db.VarChar
   executionErrorCode String? @map("execution_error_code") @db.VarChar /// 핸들러 실행 실패. 상태는 추가하지 않음
@@ -853,9 +1060,223 @@ model ActionDraft {
   purchaseRequisition PurchaseRequisition? @relation("PurchaseRequisitionActionDraft")
   businessEvents BusinessEvent[] @relation("BusinessEventActionDraft")
   message Message? @relation("ActionDraftMessage", fields: [messageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  meetingMinutes MeetingMinutes? @relation("ActionDraftMeetingMinutes", fields: [meetingMinutesId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   requester Employee? @relation("ActionDraftRequester", fields: [requesterId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([messageId])
+  @@index([meetingMinutesId])
   @@index([requesterId])
   @@map("action_draft")
+}
+
+// ───────────────────────────── 외부 연결 (MCP·OAuth) ─────────────────────────────
+
+model IntegrationConnection {
+  id Int @id @default(autoincrement())
+  providerKey String @unique @map("provider_key") @db.VarChar /// 연결 대상 (notion, google-drive). 서버 코드의 프리셋 키
+  serverUrl String? @map("server_url") @db.VarChar /// MCP 서버 주소. MCP가 아닌 연결은 비어 있다
+  oauthClientInformation String? @map("oauth_client_information") /// OAuth 클라이언트 정보 (암호문)
+  oauthTokens String? @map("oauth_tokens") /// 액세스·리프레시 토큰 (암호문)
+  oauthCodeVerifier String? @map("oauth_code_verifier") /// PKCE code verifier (암호문). 연결 중에만 있다
+  oauthState String? @unique @map("oauth_state") @db.VarChar /// OAuth 콜백 확인값. 연결 중에만 있다
+  oauthStateExpiresAt DateTime? @map("oauth_state_expires_at") @db.Timestamptz(3)
+  settings Json @default("{}") @db.JsonB /// 연결별 설정 (Notion: 상위 페이지 id·업무 공간 데이터베이스 id, Google Drive: 녹음·사진 폴더 id)
+  connectedById Int? @map("connected_by_id") /// 마지막으로 연결을 시작한 관리자
+  connectedAt DateTime? @map("connected_at") @db.Timestamptz(3) /// 연결 완료 시각. 토큰이 없는데 값이 있으면 다시 연결해야 한다
+  lastError String? @map("last_error") @db.VarChar /// 마지막 실패 이유 (비밀값 없음)
+  lastErrorAt DateTime? @map("last_error_at") @db.Timestamptz(3) /// last_error를 남긴 시각. last_error를 지우면 함께 비운다
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  connectedBy Employee? @relation("IntegrationConnectionConnectedBy", fields: [connectedById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([connectedById])
+  @@map("integration_connection")
+}
+
+/// 외부 연결 장애 (이슈 #518, 문서에 없는 기능). 해결되지 않은 장애마다 (연결 대상, 종류) 한 줄이고, 풀리면 지운다
+model IntegrationFault {
+  id Int @id @default(autoincrement())
+  providerKey String @map("provider_key") @db.VarChar /// 연결 대상 (notion, google-drive)
+  faultKind String @map("fault_kind") @db.VarChar /// RECONNECT_REQUIRED·CREDENTIAL_ERROR·REQUEST_FAILED·SYNC_FAILED (CHECK, 공통 코드 아님)
+  failureCount Int @default(1) @map("failure_count") /// 해결되기 전까지 이어진 실패 횟수
+  lastMessage String @map("last_message") @db.VarChar /// 마지막 실패 이유 (500자, 비밀값 없음)
+  firstFailedAt DateTime @default(now()) @map("first_failed_at") @db.Timestamptz(3)
+  lastFailedAt DateTime @default(now()) @map("last_failed_at") @db.Timestamptz(3)
+  notifiedAt DateTime? @map("notified_at") @db.Timestamptz(3) /// 장애 알림을 마지막으로 보낸 시각. 비었으면 아직 알리지 않았다
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([providerKey, faultKind])
+  @@map("integration_fault")
+}
+
+/// Notion 업무 공간 반영 실패 목록 (이슈 #518, 문서에 없는 기능). 반영에 실패한 행마다 한 줄이고, 성공하면 지운다
+model NotionSyncFailure {
+  id Int @id @default(autoincrement())
+  targetType String @map("target_type") @db.VarChar /// 반영에 실패한 행의 테이블명: schedule_event, meeting_minutes, task (CHECK)
+  targetId Int @map("target_id") /// 그 행의 id (FK 없음)
+  failureCount Int @default(1) @map("failure_count") /// 이어서 실패한 횟수
+  lastError String @map("last_error") @db.VarChar /// 마지막 실패 이유 (500자)
+  isResultUnknown Boolean @default(false) @map("is_result_unknown") /// Notion에 만들어졌는지 알 수 없는 실패. 한 번 true가 되면 성공해서 줄이 지워질 때까지 true
+  retryAfter DateTime @map("retry_after") @db.Timestamptz(3) /// 자동 반영이 이 시각 전에는 이 행을 건너뛴다
+  firstFailedAt DateTime @default(now()) @map("first_failed_at") @db.Timestamptz(3)
+  lastFailedAt DateTime @default(now()) @map("last_failed_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([targetType, targetId])
+  @@index([retryAfter])
+  @@map("notion_sync_failure")
+}
+
+// ───────────────────────────── 철강맨AI 심층 조사 (이슈 #378) ─────────────────────────────
+
+model AiResearchRun {
+  id Int @id @default(autoincrement())
+  employeeId Int @map("employee_id") /// 조사를 만든 사원 (본인만 본다)
+  question String /// 사용자가 물은 조사 질문
+  seed Json? @db.JsonB /// 철강맨AI에서 먼저 알아본 것 {answer, sources:[{title, url}]} (이슈 #408). 계획을 세울 때 참고한다
+  status String @db.VarChar /// PLANNING·AWAITING_APPROVAL·QUEUED·RUNNING·COMPLETED·FAILED·CANCELLED (CHECK, 공통 코드 아님)
+  plan Json? @db.JsonB /// 조사 계획 {title, steps:[{title, query}]}
+  planRevision Int @default(0) @map("plan_revision") /// 계획을 고칠 때마다 1씩 오른다 (시작할 때 맞춰 본다)
+  budget Json @db.JsonB /// {maxSteps, maxSources}
+  stepsUsed Int @default(0) @map("steps_used") /// 쓴 단계 수 (검색·읽기)
+  researchState Json? @map("research_state") @db.JsonB /// {summary, gaps[], unsupportedClaims[], searchedQueries[]}
+  sources Json @default("[]") @db.JsonB /// 모은 출처 [{id, title, url, snippet, readText?}]
+  audit Json? @db.JsonB /// 보고서 전 점검 {thesis, outline[], supportedClaims[], contradictions[], missingDimensions[], reportTruncated}
+  report String? /// 보고서 (마크다운)
+  charts Json? @db.JsonB /// 출처의 숫자로 만든 차트 [{title, type, unit, xLabel, series:[{name, points:[{x, y, sourceId}]}]}] (2개까지)
+  notionPageUrl String? @map("notion_page_url") @db.VarChar /// Notion으로 마지막에 내보낸 페이지 주소 (다시 내보내면 새 페이지 주소, 이슈 #521)
+  notionExportedAt DateTime? @map("notion_exported_at") @db.Timestamptz(3) /// 마지막으로 내보낸 시각
+  notionExportedVersion Int? @map("notion_exported_version") /// 마지막으로 내보낸 보고서 판 (판이 없던 보고서면 null)
+  notionExportClaimedAt DateTime? @map("notion_export_claimed_at") @db.Timestamptz(3) /// 내보내기를 잡은 시각 (내보내는 중, 끝나면 지운다)
+  scheduleId Int? @map("schedule_id") /// 반복이 만든 조사면 그 반복 (이슈 #521)
+  failureReason String? @map("failure_reason") @db.VarChar
+  leaseOwner String? @map("lease_owner") @db.VarChar /// 맡은 서버 표시
+  leaseExpiresAt DateTime? @map("lease_expires_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  finishedAt DateTime? @map("finished_at") @db.Timestamptz(3)
+
+  employee Employee @relation("AiResearchRunEmployee", fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  schedule AiResearchSchedule? @relation("AiResearchRunSchedule", fields: [scheduleId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  events AiResearchEvent[] @relation("AiResearchEventRun")
+  reportVersions AiResearchReportVersion[] @relation("AiResearchReportVersionRun")
+  lastRunOfSchedules AiResearchSchedule[] @relation("AiResearchScheduleLastRun")
+
+  @@index([employeeId, createdAt])
+  @@index([status])
+  @@map("ai_research_run")
+}
+
+model AiResearchEvent {
+  id Int @id @default(autoincrement())
+  runId Int @map("run_id")
+  seq Int /// 조사 안의 순번 (1부터)
+  type String @db.VarChar /// plan.ready·step.started·search.done·source.added·page.read·state.updated·audit.ready·report.ready·failed·cancelled·budget.exhausted·charts.ready·revision.requested·revision.ready·report.retry
+  payload Json @default("{}") @db.JsonB /// 짧은 내용
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  run AiResearchRun @relation("AiResearchEventRun", fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([runId, seq])
+  @@map("ai_research_event")
+}
+
+/// 심층 조사 보고서의 판 (이슈 #418, 문서에 없는 기능). 보고서를 말로 고칠 때마다 남긴다. 지우거나 고치지 않는다
+model AiResearchReportVersion {
+  id Int @id @default(autoincrement())
+  runId Int @map("run_id")
+  version Int /// 판 번호 (1부터). 1판은 처음 고칠 때의 보고서
+  instruction String? /// 이 판을 만든 고치기 부탁. 1판·더 조사하기로 나온 판은 null
+  search Boolean @default(false) /// 고칠 때 더 검색했는지
+  report String /// 그 판의 보고서
+  charts Json @default("[]") @db.JsonB /// 그 판의 차트
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  run AiResearchRun @relation("AiResearchReportVersionRun", fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([runId, version])
+  @@map("ai_research_report_version")
+}
+
+/// 심층 조사 반복 실행 (이슈 #521, 문서에 없는 기능). 완료한 조사를 매일·매주 고른 요일의 정한 시각(Asia/Seoul)에 같은 질문·계획으로 새 조사로 다시 한다
+model AiResearchSchedule {
+  id Int @id @default(autoincrement())
+  /// 반복을 건 조사 (질문·계획·예산·먼저 알아본 것을 복사한다). Prisma 관계(1:1)로 두지 않는다: relationMode=prisma에서 1:1 관계가 있으면 조사 여러 행을 한 번에 바꿀 때 Prisma 7이 실패한다(Expected zero or one element)
+  runId Int @unique @map("run_id")
+  employeeId Int @map("employee_id") /// 반복을 건 사원. 켜진 반복은 사원당 5개까지
+  frequency String @db.VarChar /// DAILY·WEEKLY (CHECK, 공통 코드 아님)
+  weekdays Int[] @default([]) /// WEEKLY의 요일 1=월 … 7=일. DAILY는 빈 배열
+  runTime String @map("run_time") @db.VarChar /// 실행 시각 HH:MM (Asia/Seoul)
+  enabled Boolean @default(true) /// 켜져 있는지
+  nextRunAt DateTime? @map("next_run_at") @db.Timestamptz(3) /// 다음 차례 시각 (켜져 있을 때만)
+  lastRunAt DateTime? @map("last_run_at") @db.Timestamptz(3) /// 마지막으로 차례가 온 시각
+  lastRunId Int? @map("last_run_id") /// 마지막으로 만든 조사
+  lastSkipReason String? @map("last_skip_reason") @db.VarChar /// 마지막 차례를 건너뛴 이유
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  employee Employee @relation("AiResearchScheduleEmployee", fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  lastRun AiResearchRun? @relation("AiResearchScheduleLastRun", fields: [lastRunId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  runs AiResearchRun[] @relation("AiResearchRunSchedule")
+
+  @@index([employeeId, enabled])
+  @@index([enabled, nextRunAt])
+  @@map("ai_research_schedule")
+}
+
+/// 철강맨AI 패널 대화 (이슈 #399, 문서에 없는 기능). 본인만 보고 지운다
+model AiChatThread {
+  id Int @id @default(autoincrement())
+  employeeId Int @map("employee_id") /// 대화한 사원 (본인만 본다)
+  title String @db.VarChar /// 첫 질문 앞 40자
+  meetingMinutesId Int? @map("meeting_minutes_id") /// 회의 질문 대화면 그 회의록. 사원·회의록마다 하나
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3) /// 마지막으로 묻고 답한 시각 (목록 순서)
+
+  employee Employee @relation("AiChatThreadEmployee", fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  meetingMinutes MeetingMinutes? @relation("AiChatThreadMeetingMinutes", fields: [meetingMinutesId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  messages AiChatMessage[] @relation("AiChatMessageThread")
+
+  @@unique([employeeId, meetingMinutesId])
+  @@index([employeeId, updatedAt])
+  @@index([meetingMinutesId])
+  @@map("ai_chat_thread")
+}
+
+model AiChatMessage {
+  id Int @id @default(autoincrement())
+  threadId Int @map("thread_id")
+  seq Int /// 대화 안의 순번 (1부터)
+  role String @db.VarChar /// USER·ASSISTANT (CHECK, 공통 코드 아님)
+  content String /// 질문 글 또는 답 글
+  sources Json @default("[]") @db.JsonB /// 답의 출처 [{kind, id, label}]
+  webSources Json? @map("web_sources") @db.JsonB /// 답의 웹 출처 [{title, url}]
+  actionCards Json? @map("action_cards") @db.JsonB /// 답의 실행 카드 [{card, status, result?}]
+  meta Json? @db.JsonB /// 질문: {reasoning?, webSearch?, browser?, imageCount?} 답: {reasoning?, reasoningApplied?}
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  thread AiChatThread @relation("AiChatMessageThread", fields: [threadId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([threadId, seq])
+  @@map("ai_chat_message")
+}
+
+/// 철강맨AI 실행 카드 실행 기록 (이슈 #479). 같은 사원이 같은 카드를 한 번만 실행하게 (employee_id, card_id)로 잡는다
+model AiActionCardRun {
+  id Int @id @default(autoincrement())
+  cardId String @map("card_id") @db.VarChar /// 카드 번호(UUID), notion:nonce 또는 chat:답 id:카드 key
+  employeeId Int @map("employee_id") /// 실행한 사원
+  cardKind String @map("card_kind") @db.VarChar /// 카드 종류 (공통 코드 아님)
+  runStatus String @map("run_status") @db.VarChar /// RUNNING·DONE (CHECK)
+  result Json? @db.JsonB /// 실행 결과 {registered} (DONE일 때)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  employee Employee @relation("AiActionCardRunEmployee", fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([employeeId, cardId])
+  @@map("ai_action_card_run")
 }

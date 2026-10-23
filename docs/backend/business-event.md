@@ -36,6 +36,13 @@
 
 **조회**: 시간순(`created_at` 오름차순), 동률은 이벤트 id 순([04] BP-LOG-01). LOT 타임라인은 `business_event_lot`으로 조인한다. 3개 이상 조인이 되면 TypedSQL로 둔다([05] 8장).
 
+**조회 구현 메모** (API-238 `GET business-events`, 로그인만, 응답 shared `BusinessEventView`의 `PageResult`)
+
+- 조건: `salesOrderId`(수주 타임라인), `lotId`(LOT 타임라인, `business_event_lot`), `businessEventType`, `actorType`(USER·SYSTEM), `targetType`(ERD 테이블명), `from`·`to`(`YYYY-MM-DD`, 서울 날짜로 시작·끝 포함), `sort`(`asc` 기본 = 이력 재현, `desc` = 최신순, 작업 로그 전체·대시보드 최근 로그용), `page`·`size`(기본 20, 최대 100). `actorType`·`targetType`·`sort`는 작업 로그 화면 필터·최신순 목록을 위해 더했다(문서 권장 조건 밖, 2026-10-07 확인).
+- 정렬: 발생 시각 → 이벤트 id(같은 방향). 없는 날짜(2월 30일)·시작일 > 종료일은 COM-004.
+- 응답: 번호, 유형·표시명(`BUSINESS_EVENT_TYPE_LABEL`), 주체 구분·사원 id·사원번호·이름(SYSTEM이면 null), 대상 테이블·id, 수주 id·번호, 변경 전·후(jsonb 그대로), 사유(코드와 문장을 합친 원문), AI 경유, 초안·메시지 id, 초안이 Agent 대응 후보인지(`isAgentCandidate`, 메시지 없는 초안의 payload에 `agent`가 있으면 true. 화면은 메시지 초안 상세 대신 `/agent`로 잇는다, #509), 원본 메시지의 채팅방 id(`chatRoomId`, 화면이 메신저의 그 메시지로 이동할 때 쓴다. BP-LOG-01 원본 메시지 연결, 2026-10-14), 발생 시각, LOT(id·번호·유형). 대상 번호(예: 대상 수주의 번호)는 테이블마다 따로 읽어야 해서 넣지 않았다(화면이 변경 전·후로 보여 준다).
+- 조인이 `business_event_lot` 하나라 TypedSQL 없이 Prisma로 이벤트 페이지를 읽고, 사원·수주·메시지(채팅방 id)·LOT은 id로 따로 읽는다.
+
 **기록 규칙(모든 모듈)**
 
 ```ts
@@ -55,19 +62,27 @@ await this.businessEventRecorder.record(tx, {
 - 사유는 [04] 9.3 제안 코드(STOCK_FIRST, FIFO_RECOMMENDATION, ORDER_SHORTAGE, ORDER_CANCELLED, QUALITY_FAILURE, SURPLUS_CONVERSION, ALLOCATION_CHANGE, DRAFT_CONFIRMED)와 사람이 읽을 문장을 함께 쓴다.
 - Message → ERP로 생긴 기록은 `actionDraftId`·`messageId`를 채운다(REQ-LOG-001 "원본 메시지·Action Draft 연결"). `isAiAssisted`는 AI 초안 확정일 때만 true(REQ-AST-010, P2).
 
-**이벤트 유형 ↔ 기록 모듈**([06] BUSINESS_EVENT_TYPE 29개)
+**이벤트 유형 ↔ 기록 모듈**([06] BUSINESS_EVENT_TYPE, REQ-LOG-002 31개 + 문서 밖 값)
 
 | 유형 | 기록 모듈 | target | salesOrderId | lotIds |
 | --- | --- | --- | --- | --- |
 | SALES_ORDER_CREATED·CANCELLED | sales-order | `sales_order` | ● | |
-| PRODUCTION_PLAN_CREATED·CANCELLED, REPRODUCTION_PLAN_CREATED, SURPLUS_CONVERTED | production | `production_plan` | 연결 시 ● | |
+| PRODUCTION_PLAN_CREATED·CANCELLED, HEAT_PLAN_CONFIRMED, REPRODUCTION_PLAN_CREATED, SURPLUS_CONVERTED | production | `production_plan` | 연결 시 ● | |
 | PRODUCTION_STARTED, PRODUCTION_RESULT_REGISTERED | production | `production_result` | 연결 시 ● | 투입·산출 LOT |
 | INSPECTION_REGISTERED, DISPOSITION_SET | quality | `quality_inspection` / `lot` | 연결 시 ● | 대상 LOT |
 | RESERVATION_CREATED·CONVERTED·RELEASED | inventory | `reservation` | ● | 자동 예약·출고 시 LOT |
 | ALLOCATION_RECOMMENDED·CONFIRMED·CHANGED·RELEASED | inventory | `allocation` 등 | 있으면 ● | 배정 LOT |
 | PURCHASE_REQUISITION_CREATED·APPROVED·REJECTED, PURCHASE_ORDER_CREATED, GOODS_RECEIPT_CONFIRMED | purchasing | 각 테이블 | 계획이 수주에 연결되면 | 입고 원료 LOT |
-| SHIPMENT_REQUEST_CREATED, GOODS_ISSUE_CONFIRMED, MILL_SHEET_ISSUED | shipment | 각 테이블 | ● | 출고 LOT |
+| SHIPMENT_REQUEST_CREATED·CANCELLED, GOODS_ISSUE_CONFIRMED, MILL_SHEET_ISSUED | shipment | 각 테이블 | ● | 출고 LOT |
 | DRAFT_CREATED·CONFIRMED·REJECTED·EXECUTED | message-action | `action_draft` | | |
+| MEETING_MINUTES_CONFIRMED (문서 밖) | meeting-minutes | `meeting_minutes` | | |
+| SCHEDULE_EVENT_CREATED (문서 밖, 이슈 #434) | ai-assistant (일정 실행 카드) | `schedule_event` | | |
+| TASK_CREATED (문서 밖, 이슈 #457) | ai-assistant (업무 실행 카드) | `task` | | |
+| CASE_REGISTERED (문서 밖, 이슈 #464) | past-case | `past_case` | | 관련 LOT |
+| CASE_DELETED (이슈 #496) | past-case (하드 삭제, 변경 전에 지운 내용) | `past_case` | | 관련 LOT |
+| AGENT_RISK_DETECTED (이슈 #496) | factory-agent (주체 SYSTEM) | 후보 `action_draft` / 알림형 `sales_order_item`·`steel_grade` | 수주에 연결되면 ● | |
+
+철강맨 부르기로 말로 승인한 실행 카드(이슈 #457)는 기록기가 사유 끝에 `철강맨 말로 승인`을 붙인다(`runAsVoiceApproved`, 같은 트랜잭션). 화면의 작업 로그에는 사유로 보인다.
 
 자동 예약은 RESERVATION_CREATED + SYSTEM, 불합격 판정은 INSPECTION_REGISTERED의 판정 결과로 구분한다([06]).
 
@@ -92,6 +107,7 @@ await this.businessEventRecorder.record(tx, {
 - 같은 수주의 이벤트가 시간순·id순으로 나온다(REQ-LOG-003).
 - `lotId` 필터가 `business_event_lot`으로 동작한다.
 - recorder: 본 거래가 롤백되면 이벤트도 남지 않는다, `before`·`after`에 `passwordHash`가 없다.
+- 채번: 앞 거래가 커밋하기 전에 뒤 거래가 기록해도 두 거래 모두 저장되고 번호가 이어진다(`business-event-number.spec.ts`).
 - [04] 14.1-10: 수주 타임라인, 메시지 구매요청 초안·요청자 확정·부서장 승인 로그 확인.
 
 실행: `npm test -w @fantasteel/server -- business-event`(묶음 DB `fs_log`).
@@ -100,9 +116,9 @@ await this.businessEventRecorder.record(tx, {
 
 | 항목 | 내용 | 근거 |
 | --- | --- | --- |
-| 이벤트 번호 경합 | 모든 업무 tx가 기록할 때 `EV-YYMMDD-`의 "최댓값 + 1"을 받는다(카운터 테이블 없음). 동시에 두 tx가 기록하면 같은 번호 → unique 위반(P2002) → **본 거래 전체가 COM-001로 실패**한다. 업무 tx가 많을수록 자주 생긴다 | `common/numbering/numbering.service.ts`, [ERD] Project Note(번호 테이블 없음) |
+| 이벤트 번호 경합 | **해결(2026-10-14):** 모든 업무 tx가 기록할 때 `EV-YYMMDD-`의 "최댓값 + 1"을 받는다(카운터 테이블 없음). 예전에는 동시에 두 tx가 기록하면 같은 번호 → unique 위반(P2002) → 본 거래 전체가 COM-001로 실패했다. 지금은 최댓값을 읽기 전에 그 앞부분을 트랜잭션 끝까지 잠가(`lockNumberPrefix.sql`, advisory lock) 뒤 거래가 앞 거래의 커밋을 기다린 뒤 다음 번호를 받는다. 다른 업무 번호·LOT 번호도 같다 | `common/numbering/numbering.service.ts`, [ERD] Project Note(번호 테이블 없음), `business-event-number.spec.ts` |
 | 하루 999건 한도 | EV 순번은 3자리(NNN)라 하루 1,000번째 이벤트에서 채번 함수가 Error를 던져 COM-999가 된다. 실적 시뮬레이션·시연 시드가 하루에 많은 이벤트를 만들 수 있다 | [04] 9.1, `number-format.ts` `seq` |
-| `lotId` 필터 | [CSV]·12.2는 `salesOrderId`만 적었다 | [04] 12.2, REQ-LOG-003 |
-| 빠진 이벤트 유형 | 구매요청 재요청, 출하요청 취소, 검사 측정값 수정, 히트 편성 확정에 맞는 유형이 없다. 추가하려면 REQ-LOG-002 → [06] 순서로 등록 | [06] BUSINESS_EVENT_TYPE, [CSV] 재요청 비고 |
+| `lotId` 필터 | [CSV]·12.2는 `salesOrderId`만 적었다. **구현:** REQ-LOG-003 "LOT 단위"를 위해 넣었다(4장 조회 구현 메모) | [04] 12.2, REQ-LOG-003 |
+| 빠진 이벤트 유형 | 구매요청 재요청, 검사 측정값 수정에 맞는 유형이 없다(출하요청 취소·히트 편성 확정은 2026-10-14 추가). 추가하려면 REQ-LOG-002 → [06] 순서로 등록 | [06] BUSINESS_EVENT_TYPE, [CSV] 재요청 비고 |
 | 여러 수주를 묶은 이벤트 | `sales_order_id`가 하나라 출하요청 이벤트를 수주별로 나눠 기록해야 한다(shipment.md 8장) | [ERD] |
 | 조회 범위 | 작업 로그가 전 역할에 열려 있다. 권한 밖 데이터(예: 구매 금액이 생기면)를 거를지 | [CSV] 권한 |

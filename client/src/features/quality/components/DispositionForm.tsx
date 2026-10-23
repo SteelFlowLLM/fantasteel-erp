@@ -2,9 +2,8 @@
 
 // 불합격 상태 지정 (REQ-QC-004, TRM-079): 보류 / 격하 / 폐기 + 사유. 상태와 사유만 기록하고 후속 처리는 하지 않는다.
 import { useState } from 'react';
-import { InputError } from '@/api/client';
+import { InputError } from '@/api/errors';
 import type { RejectedLotListRow } from '@/api/dispositions';
-import { Banner } from '@/components/Banner';
 import { Button } from '@/components/Button';
 import { Card, CardBody, CardHead } from '@/components/Card';
 import { Field } from '@/components/Field';
@@ -27,6 +26,7 @@ const HELP: Record<DispositionStatus, string> = {
 const MAX_REASON = 500;
 
 export function DispositionForm({ row, canEdit }: { row: RejectedLotListRow; canEdit: boolean }) {
+  const setAt = row.dispositionAt;
   const [choice, setChoice] = useState<DispositionStatus | null>(row.dispositionStatus);
   const [reason, setReason] = useState('');
   const save = useSetDisposition(() => setReason(''));
@@ -34,7 +34,7 @@ export function DispositionForm({ row, canEdit }: { row: RejectedLotListRow; can
   const canSubmit = canEdit && choice !== null && reason.trim().length > 0 && !save.isPending;
 
   return (
-    <Card className="flex-none">
+    <Card className="flex-none" petKey="card:rejectedLots.disposition">
       <CardHead
         title="불합격 상태 지정"
         meta={
@@ -50,16 +50,17 @@ export function DispositionForm({ row, canEdit }: { row: RejectedLotListRow; can
         }}
       >
         <CardBody>
+          {/* 지정 전에는 카드 머리의 "현재 미지정"이 같은 말이라 따로 줄을 두지 않는다 */}
           {row.dispositionStatus ? (
-            <div className="flex flex-col gap-0.5 text-cap text-ink-3">
-              <span>지정 {fmtDateTime(row.dispositionAt)}</span>
+            <div className="flex flex-col gap-0.5 text-cap text-ink-3" data-pet-term="지정 · 사유">
+              {/* 시각을 모르면(작업 로그도 없으면) "준비 중" 대신 줄을 뺀다 */}
+              {setAt ? <span>지정 {fmtDateTime(setAt)}</span> : null}
               <span className="text-xs text-ink-2">사유: {row.dispositionReason ?? '—'}</span>
             </div>
-          ) : (
-            <span className="text-cap text-ink-3">아직 불합격 상태를 지정하지 않았어요</span>
-          )}
+          ) : null}
 
-          <div role="radiogroup" aria-label="불합격 상태" className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-2">
+          {/* 세 가지를 한 줄에 나란히: 폭에 따라 칸 수가 바뀌면 폐기만 다음 줄에 혼자 떨어졌다 */}
+          <div role="radiogroup" aria-label="불합격 상태" className="grid grid-cols-3 gap-2">
             {CHOICES.map((status) => (
               <label
                 key={status}
@@ -70,7 +71,8 @@ export function DispositionForm({ row, canEdit }: { row: RejectedLotListRow; can
                 )}
               >
                 <input type="radio" name="disposition" value={status} checked={choice === status} disabled={!canEdit} onChange={() => setChoice(status)} className="mt-0.5" />
-                <span className="flex flex-col gap-1">
+                {/* items-start: 배지가 칸 폭만큼 늘어나 막대처럼 보이지 않게 글자 폭만 차지한다 */}
+                <span className="flex min-w-0 flex-col items-start gap-1">
                   <DispositionBadge status={status} />
                   <span className="text-cap text-ink-3">{HELP[status]}</span>
                 </span>
@@ -79,7 +81,7 @@ export function DispositionForm({ row, canEdit }: { row: RejectedLotListRow; can
           </div>
           {fieldErrors.dispositionStatus ? <span className="text-cap text-danger">{fieldErrors.dispositionStatus}</span> : null}
 
-          <Field label="사유" required htmlFor="disposition-reason" error={fieldErrors.dispositionReason} hint={`${reason.length}/${MAX_REASON}자 · 사유를 적어야 지정할 수 있어요`}>
+          <Field label={<span data-pet-term="사유">사유</span>} required htmlFor="disposition-reason" error={fieldErrors.dispositionReason} hint={`${reason.length}/${MAX_REASON}자 · 사유를 적어야 지정할 수 있어요`}>
             <Textarea
               id="disposition-reason"
               rows={3}
@@ -99,9 +101,8 @@ export function DispositionForm({ row, canEdit }: { row: RejectedLotListRow; can
             </Button>
           </div>
 
-          <Banner className="text-xs leading-[17px]">
-            불합격 상태와 사유만 기록해요. 격하 재판정·재작업·폐기 재고 처리는 하지 않아요. 불합격 LOT은 이미 예약·배정·출고 대상에서 빠져 있어요. 지정·변경 내역은 작업 로그에 남아요.
-          </Banner>
+          {/* 예약·배정·출고에서 빠진다는 말은 왼쪽 목록 안내에 있어 여기서는 한 줄로 줄인다 */}
+          <p className="m-0 text-cap text-ink-3">상태와 사유만 기록해요 · 재판정·재작업·폐기 처리는 하지 않아요 · 기록은 작업 로그에 남아요</p>
         </CardBody>
       </form>
     </Card>

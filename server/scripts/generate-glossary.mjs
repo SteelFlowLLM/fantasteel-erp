@@ -1,0 +1,252 @@
+// 용어 사전(docs/notion/03-용어-사전.md) 표와 업무 프로세스 정의서(04) 6.0 '한눈에 보기' 표를 읽어 AI 어시스턴트 업무 지식(REQ-AST-003)으로 쓸 파일을 만든다.
+// 서버가 실행 중에 docs/를 읽지 않게(배포 폴더에는 docs/가 없다) 공통 코드처럼 미리 만들어 커밋한다.
+// 업무 매뉴얼 초안(docs/manual/업무-매뉴얼-초안.md)도 읽어 화면 절차 답변(REQ-AST-003)의 근거 파일을 만든다.
+// KS 규격 정리(docs/notion/07-KS-규격-정리.md)는 절마다 읽어 심층 조사의 사내 지식 출처로 쓴다.
+// 네 문서 중 하나가 바뀌면 다시 실행한다: npm run glossary -w @fantasteel/server
+import { readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const docPath = join(root, '..', 'docs', 'notion', '03-용어-사전.md');
+const outPath = join(root, 'src', 'modules', 'ai-assistant', 'knowledge', 'glossary.generated.ts');
+
+const HEADER = ['용어 ID', '구분', '한글명', '영문명', '약어', '변수명', 'DB명', '정의', '업무 규칙', '근거', '관련 용어', '동의어(사용 금지)', '비고'];
+
+const doc = readFileSync(docPath, 'utf8').replace(/\r\n/g, '\n');
+const terms = [];
+let section = null;
+for (const line of doc.split('\n')) {
+  const heading = line.match(/^## \d+\. (.+)$/);
+  if (heading) {
+    section = heading[1].trim();
+    continue;
+  }
+  if (line.startsWith('| 용어 ID')) {
+    const header = cellsOf(line);
+    if (header.join('|') !== HEADER.join('|')) throw new Error(`표 머리가 다름 (${section}): ${line}`);
+    continue;
+  }
+  if (!/^\| TRM-\d{3} \|/.test(line)) continue;
+  const cells = cellsOf(line);
+  if (cells.length !== HEADER.length) throw new Error(`칸 수가 ${cells.length}개 (${HEADER.length}개여야 함): ${line}`);
+  const [id, kind, name, englishName, abbreviation, variableName, , definition, businessRule, , relatedTerms, forbiddenSynonyms] = cells;
+  terms.push({
+    id,
+    section,
+    kind,
+    name,
+    englishName: valueOf(englishName),
+    abbreviation: valueOf(abbreviation),
+    variableName: valueOf(variableName),
+    definition,
+    businessRule: valueOf(businessRule),
+    relatedTerms: listOf(relatedTerms),
+    forbiddenSynonyms: listOf(forbiddenSynonyms),
+  });
+}
+if (!terms.length) throw new Error('용어를 하나도 읽지 못함');
+const ids = new Set(terms.map((t) => t.id));
+if (ids.size !== terms.length) throw new Error('용어 ID가 겹침');
+
+const out = [
+  '// 이 파일은 scripts/generate-glossary.mjs가 용어 사전(docs/notion/03-용어-사전.md)에서 만든다. 손으로 고치지 않는다.',
+  '// 바꾸는 순서: 용어 사전 수정 → npm run glossary -w @fantasteel/server',
+  "import type { GlossaryTerm } from './glossary.types';",
+  '',
+  `export const GLOSSARY_TERMS: readonly GlossaryTerm[] = ${JSON.stringify(terms, null, 2)};`,
+  '',
+];
+writeFileSync(outPath, out.join('\n'), 'utf8');
+process.stdout.write(`용어 ${terms.length}개 → ${outPath}\n`);
+
+const processDocPath = join(root, '..', 'docs', 'notion', '04-업무-프로세스-정의서.md');
+const processOutPath = join(root, 'src', 'modules', 'ai-assistant', 'knowledge', 'process.generated.ts');
+const PROCESS_HEADER = ['업무 ID', '업무', '주체', '핵심 흐름', '결과물'];
+const processDoc = readFileSync(processDocPath, 'utf8').replace(/\r\n/g, '\n');
+const steps = [];
+let inOverview = false;
+for (const line of processDoc.split('\n')) {
+  if (line.startsWith('### 6.0 ')) inOverview = true;
+  else if (inOverview && line.startsWith('###')) break;
+  if (!inOverview) continue;
+  if (line.startsWith('| 업무 ID')) {
+    const header = cellsOf(line);
+    if (header.join('|') !== PROCESS_HEADER.join('|')) throw new Error(`6.0 표 머리가 다름: ${line}`);
+    continue;
+  }
+  if (!/^\| BP-[A-Z]+-\d{2} \|/.test(line)) continue;
+  const cells = cellsOf(line);
+  if (cells.length !== PROCESS_HEADER.length) throw new Error(`칸 수가 ${cells.length}개 (${PROCESS_HEADER.length}개여야 함): ${line}`);
+  const [id, name, actor, flow, output] = cells;
+  steps.push({ id, name, actor, flow, output });
+}
+if (!steps.length) throw new Error('업무 프로세스를 하나도 읽지 못함');
+
+// 6장 업무별 '정상 흐름' 줄. 없는 업무(수주 취소·LOT 추적 등)는 null. 구현 제안인 'P1 정상 흐름 (구현 제안)'은 읽지 않는다
+const normalFlows = new Map();
+let currentId = null;
+for (const line of processDoc.split('\n')) {
+  const heading = line.match(/^### (BP-[A-Z]+-\d{2}) /);
+  if (heading) currentId = heading[1];
+  const flow = line.match(/^\*\*정상 흐름\*\*: (.+)$/);
+  if (currentId && flow) normalFlows.set(currentId, cleanFlow(flow[1]));
+}
+for (const step of steps) step.normalFlow = normalFlows.get(step.id) ?? null;
+if (new Set(steps.map((s) => s.id)).size !== steps.length) throw new Error('업무 ID가 겹침');
+
+writeFileSync(
+  processOutPath,
+  [
+    '// 이 파일은 scripts/generate-glossary.mjs가 업무 프로세스 정의서(docs/notion/04-업무-프로세스-정의서.md) 6.0 표에서 만든다. 손으로 고치지 않는다.',
+    '// 바꾸는 순서: 업무 프로세스 정의서 수정 → npm run glossary -w @fantasteel/server',
+    "import type { ProcessStep } from './process.types';",
+    '',
+    `export const PROCESS_STEPS: readonly ProcessStep[] = ${JSON.stringify(steps, null, 2)};`,
+    '',
+  ].join('\n'),
+  'utf8',
+);
+process.stdout.write(`업무 프로세스 ${steps.length}개 → ${processOutPath}\n`);
+
+const manualDocPath = join(root, '..', 'docs', 'manual', '업무-매뉴얼-초안.md');
+const manualOutPath = join(root, 'src', 'modules', 'ai-assistant', 'knowledge', 'manual.generated.ts');
+const manualDoc = readFileSync(manualDocPath, 'utf8').replace(/\r\n/g, '\n');
+const processIds = new Set(steps.map((s) => s.id));
+const guides = [];
+let guide = null;
+for (const line of manualDoc.split('\n')) {
+  const heading = line.match(/^## \d+\. (.+) \((BP-[A-Z]+-\d{2})\)$/);
+  if (heading) {
+    guide = { id: heading[2].replace(/^BP-/, 'MAN-'), processId: heading[2], name: heading[1].replace(/\s*[—-]\s*/g, '·'), lines: [] };
+    guides.push(guide);
+    continue;
+  }
+  if (line.startsWith('## ') || line === '---') {
+    guide = null;
+    continue;
+  }
+  if (guide) guide.lines.push(line);
+}
+if (!guides.length) throw new Error('업무 매뉴얼을 하나도 읽지 못함');
+const manualGuides = guides.map(({ id, processId, name, lines }) => {
+  if (!processIds.has(processId)) throw new Error(`매뉴얼 업무 ID가 업무 프로세스 표에 없음: ${processId}`);
+  return { id, processId, name, text: manualText(lines) };
+});
+if (new Set(manualGuides.map((g) => g.id)).size !== manualGuides.length) throw new Error('매뉴얼 ID가 겹침');
+writeFileSync(
+  manualOutPath,
+  [
+    '// 이 파일은 scripts/generate-glossary.mjs가 업무 매뉴얼 초안(docs/manual/업무-매뉴얼-초안.md)에서 만든다. 손으로 고치지 않는다.',
+    '// 바꾸는 순서: 매뉴얼 수정 → npm run glossary -w @fantasteel/server',
+    "import type { ManualGuide } from './manual.types';",
+    '',
+    `export const MANUAL_GUIDES: readonly ManualGuide[] = ${JSON.stringify(manualGuides, null, 2)};`,
+    '',
+  ].join('\n'),
+  'utf8',
+);
+process.stdout.write(`업무 매뉴얼 ${manualGuides.length}개 → ${manualOutPath}\n`);
+
+// KS 규격 정리(07)를 '## ' 절마다 하나씩 읽어 심층 조사의 사내 지식 출처로 쓴다 (이슈 #484). 그림(mermaid)·문서 사이 링크·aside 태그는 뗀다
+const ksDocPath = join(root, '..', 'docs', 'notion', '07-KS-규격-정리.md');
+const ksOutPath = join(root, 'src', 'modules', 'ai-assistant', 'knowledge', 'ks.generated.ts');
+const ksDoc = readFileSync(ksDocPath, 'utf8').replace(/\r\n/g, '\n');
+const ksSections = [];
+let ksCurrent = null;
+let inFence = false;
+for (const line of ksDoc.split('\n')) {
+  if (line.startsWith('```')) {
+    inFence = !inFence;
+    continue;
+  }
+  if (inFence) continue;
+  const heading = line.match(/^## ([\d-]+)\. (.+)$/);
+  if (heading) {
+    ksCurrent = { id: `KS-${heading[1]}`, title: heading[2].trim(), lines: [] };
+    ksSections.push(ksCurrent);
+    continue;
+  }
+  if (!ksCurrent || /^<\/?aside>$/.test(line.trim()) || /^[📌⚠️ℹ️]+$/u.test(line.trim())) continue;
+  // 다른 Notion 문서로 가는 링크는 글만 남긴다
+  ksCurrent.lines.push(line.replace(/\[([^\]]+)\]\((?!https?:)[^)]*\)/g, '$1'));
+}
+const ksEntries = ksSections
+  .map((section) => ({ id: section.id, title: section.title, text: section.lines.join('\n').replace(/\n{3,}/g, '\n\n').trim() }))
+  .filter((section) => section.text !== '');
+if (ksEntries.length < 5) throw new Error(`KS 규격 절이 너무 적음 (${ksEntries.length}개)`);
+writeFileSync(
+  ksOutPath,
+  [
+    '// 이 파일은 scripts/generate-glossary.mjs가 KS 규격 정리(docs/notion/07-KS-규격-정리.md)에서 만든다. 손으로 고치지 않는다.',
+    '// 바꾸는 순서: KS 문서 수정 → npm run glossary -w @fantasteel/server',
+    "import type { KsSection } from './ks.types';",
+    '',
+    `export const KS_SECTIONS: readonly KsSection[] = ${JSON.stringify(ksEntries, null, 2)};`,
+    '',
+  ].join('\n'),
+  'utf8',
+);
+process.stdout.write(`KS 규격 ${ksEntries.length}절 → ${ksOutPath}\n`);
+
+/** 매뉴얼 한 업무의 본문을 모델에 넘길 글로: 표는 한 줄씩, 근거 파일·검수 메모(> 줄)·마크다운 꾸밈은 뗀다 */
+function manualText(lines) {
+  const out = [];
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line || line.startsWith('>') || line.startsWith('근거 파일')) continue;
+    if (line.startsWith('|')) {
+      const cells = cellsOf(line);
+      if (cells.every((c) => /^-+$/.test(c)) || ['항목', '보이는 것', '코드'].includes(cells[0])) continue;
+      out.push(cells.length === 2 ? `${cells[0]}: ${cells[1]}` : cells.join(' / '));
+      continue;
+    }
+    out.push(raw.replace(/\s+$/, ''));
+  }
+  return out
+    .join('\n')
+    .replace(/\*\*|`/g, '')
+    .replace(/ 🟡[^\n]*/g, '')
+    .replace(/\n{2,}/g, '\n')
+    .trim();
+}
+
+function cellsOf(line) {
+  return line.split('|').slice(1, -1).map((c) => c.trim());
+}
+
+/** '-'·빈 칸은 값 없음. 변수명 칸의 `item` / `itemCode`는 `를 뗀다 */
+function valueOf(cell) {
+  const value = cell.replace(/`/g, '').trim();
+  return value === '' || value === '-' ? null : value;
+}
+
+/** 쉼표로 나누되 괄호 안 쉼표는 나누지 않는다 (예: HOLD(불합격 상태의 값 '보류'로만 사용, 별도 개념 아님)) */
+function listOf(cell) {
+  const value = valueOf(cell);
+  if (value === null) return [];
+  const items = [];
+  let depth = 0;
+  let current = '';
+  for (const ch of value) {
+    if (ch === '(') depth += 1;
+    if (ch === ')') depth = Math.max(0, depth - 1);
+    if (ch === ',' && depth === 0) {
+      items.push(current);
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  items.push(current);
+  return items.map((v) => v.trim()).filter((v) => v && v !== '-');
+}
+
+/** 답에 쓸 문장이라 코드 표기(`…`)와 요구사항 번호 괄호는 뗀다 */
+function cleanFlow(text) {
+  return text
+    .replace(/`/g, '')
+    .replace(/\s*\(REQ-[^)]*\)/g, '')
+    .replace(/\.$/, '')
+    .trim();
+}

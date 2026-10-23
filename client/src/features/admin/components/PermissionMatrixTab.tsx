@@ -1,7 +1,7 @@
 'use client';
 
 // 권한 탭 (REQ-AUTH-003): 역할 6개 × 권한 17개 행렬. 칸 = 사용(USE) / 조회(VIEW) / 없음(행 없음).
-// 역할마다 따로 저장하고, 저장하면 그 역할 사원의 메뉴·버튼이 바로 바뀐다 (이 탭은 조회 무효화, 다른 탭은 BroadcastChannel).
+// 역할마다 따로 저장하고, 저장하면 서버 권한이 바로 바뀌고, 이 탭은 조회를 무효화해 새로 읽는다. 다른 사원·다른 탭의 메뉴·버튼은 그 화면이 다시 읽을 때(새로고침) 바뀐다.
 import { Fragment } from 'react';
 import { PERMISSION, PERMISSION_LABEL, PERMISSION_LEVEL, PERMISSION_LEVEL_LABEL, ROLE_LABEL, type Permission, type PermissionLevel, type RoleCode } from '@/codes';
 import { roleAdminApi } from '@/api/adminOrganization';
@@ -73,7 +73,7 @@ export function PermissionMatrixTab({ canEdit, draft, onDraftChange, highlightRo
     <QueryBoundary query={roles} loadingLabel="역할 권한을 불러오는 중…">
       {(list) => {
         const changedRoles = list.filter((role) => changedCellsOf(levelsOf(role.permissions), draft[role.id]).length > 0);
-        const myRole = list.find((role) => role.id === me.roleId);
+        const myRole = list.find((role) => role.roleCode === me.roleCode);
         const losesOwnManage =
           myRole !== undefined &&
           changedCellsOf(levelsOf(myRole.permissions), draft[myRole.id]).length > 0 &&
@@ -95,7 +95,7 @@ export function PermissionMatrixTab({ canEdit, draft, onDraftChange, highlightRo
                 내 역할({ROLE_LABEL[myRole.roleCode]})의 부서·권한 관리 사용 권한이 빠져요. 저장하면 이 화면에서 권한을 더 바꿀 수 없어요.
               </Banner>
             ) : null}
-            <Card className="flex-none">
+            <Card className="flex-none" petKey="card:organization.permissions">
               <CardHead
                 title="역할별 권한"
                 meta={`역할 ${list.length} × 권한 ${ROWS.reduce((sum, row) => sum + row.permissions.length, 0)}`}
@@ -103,13 +103,17 @@ export function PermissionMatrixTab({ canEdit, draft, onDraftChange, highlightRo
                   <span className="flex items-center gap-3 text-cap text-ink-3">
                     <span className="inline-flex items-center gap-1 text-ok">
                       <Icon name="check" size="sm" />
-                      <span className="text-ink-3">{PERMISSION_LEVEL_LABEL[PERMISSION_LEVEL.USE]} = 입력·변경·확정</span>
+                      <span className="text-ink-3" data-pet-term={PERMISSION_LEVEL_LABEL[PERMISSION_LEVEL.USE]}>
+                        {PERMISSION_LEVEL_LABEL[PERMISSION_LEVEL.USE]} = 입력·변경·확정
+                      </span>
                     </span>
                     <span className="inline-flex items-center gap-1 text-run">
                       <Icon name="eye" size="sm" />
-                      <span className="text-ink-3">{PERMISSION_LEVEL_LABEL[PERMISSION_LEVEL.VIEW]} = 보기만</span>
+                      <span className="text-ink-3" data-pet-term={PERMISSION_LEVEL_LABEL[PERMISSION_LEVEL.VIEW]}>
+                        {PERMISSION_LEVEL_LABEL[PERMISSION_LEVEL.VIEW]} = 보기만
+                      </span>
                     </span>
-                    <span className="inline-flex items-center gap-1">
+                    <span className="inline-flex items-center gap-1" data-pet-term="저장 전 변경">
                       <span className="size-3 rounded-xs bg-wait-bg shadow-[inset_0_0_0_1px_var(--color-wait)]" />
                       저장 전 변경
                     </span>
@@ -125,9 +129,12 @@ export function PermissionMatrixTab({ canEdit, draft, onDraftChange, highlightRo
                       {list.map((role) => {
                         const counts = countLevels(levelsOf(role.permissions));
                         return (
-                          <Th key={role.id} align="center" className={cn('min-w-24', role.roleCode === highlightRole && 'bg-brand-tint')}>
-                            <span className="flex flex-col items-center py-1 leading-4">
-                              <b className="text-xs font-semibold text-ink">{ROLE_LABEL[role.roleCode]}</b>
+                          // 머리글 글자에 '사용 N · 조회 M'이 붙어도 펫은 역할 이름으로 설명·열 이름을 잡는다
+                          <Th key={role.id} align="center" data-pet-term={ROLE_LABEL[role.roleCode]} className={cn('min-w-24', role.roleCode === highlightRole && 'bg-brand-tint')}>
+                            <span className="flex flex-col items-center py-1 leading-snug">
+                              <b className="text-xs font-semibold text-ink" data-pet-term={ROLE_LABEL[role.roleCode]}>
+                                {ROLE_LABEL[role.roleCode]}
+                              </b>
                               <span className="text-2xs text-ink-3">{levelCountText(counts)}</span>
                             </span>
                           </Th>
@@ -139,7 +146,7 @@ export function PermissionMatrixTab({ canEdit, draft, onDraftChange, highlightRo
                     {ROWS.map((group) => (
                       <Fragment key={group.area}>
                         {group.permissions.map((permission, index) => (
-                          <tr key={permission}>
+                          <tr key={permission} data-pet-item="permission" data-pet-item-title={PERMISSION_LABEL[permission]}>
                             {index === 0 ? (
                               <Td rowSpan={group.permissions.length} className="align-top pt-2 text-xs font-semibold text-ink-2">
                                 {group.area}
@@ -158,6 +165,7 @@ export function PermissionMatrixTab({ canEdit, draft, onDraftChange, highlightRo
                                     disabled={!canEdit || savingRoleId === role.id}
                                     title={changed ? `저장된 값은 ${levelLabelOf(saved[permission] ?? null)}이에요` : undefined}
                                     aria-label={`${ROLE_LABEL[role.roleCode]} · ${PERMISSION_LABEL[permission]}: ${label}`}
+                                    data-pet-term={label}
                                     onClick={() => toggle(role, permission)}
                                     className={cn(
                                       'inline-flex h-6 min-w-14 items-center justify-center gap-1 rounded-xs px-1.5 text-xs font-medium enabled:hover:bg-surface-3 disabled:cursor-default',

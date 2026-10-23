@@ -21,7 +21,7 @@ import { MillSheetLink, SalesOrderLink, ShipmentRequestLink, ShipmentRequestStat
 import { qtyUnitOf } from '@/features/shipment/lib/shipmentForm';
 import { useCanUse } from '@/hooks/usePermission';
 import { useShipmentRequestList } from '@/hooks/useShipmentRequests';
-import { fmtMDdow, fmtMDHM, fmtTon } from '@/lib/format';
+import { fmtActorAt, fmtMDdow, fmtTon } from '@/lib/format';
 import { permissionNeedText } from '@/lib/permissions';
 
 const STATUSES = Object.values(SHIPMENT_REQUEST_STATUS);
@@ -92,12 +92,13 @@ function ShipmentRequestTable({ rows }: { rows: ShipmentListRow[] }) {
 
   return (
     <>
-      <div className="flex flex-wrap items-center gap-2">
-        <Chip on={status === null} onClick={() => setStatus(null)}>
+      {/* self-start: 줄 너비를 필터 칸만큼으로 줄여 펫 강조 테두리가 오른쪽 빈 곳까지 늘어나지 않게 한다 */}
+      <div data-pet-target="card:shipmentRequests.filter" className="flex flex-wrap items-center gap-2 self-start">
+        <Chip data-pet-term="전체" on={status === null} onClick={() => setStatus(null)}>
           전체 <b>{rows.length}</b>
         </Chip>
         {STATUSES.map((s) => (
-          <Chip key={s} on={status === s} onClick={() => setStatus(s)}>
+          <Chip key={s} data-pet-term={SHIPMENT_REQUEST_STATUS_LABEL[s]} on={status === s} onClick={() => setStatus(s)}>
             {SHIPMENT_REQUEST_STATUS_LABEL[s]} <b>{rows.filter((r) => r.shipmentRequestStatus === s).length}</b>
           </Chip>
         ))}
@@ -110,7 +111,9 @@ function ShipmentRequestTable({ rows }: { rows: ShipmentListRow[] }) {
             </option>
           ))}
         </Select>
-        <span className="text-xs text-ink-3">출하 요청일</span>
+        <span data-pet-term="출하 요청일" className="text-xs text-ink-3">
+          출하 요청일
+        </span>
         <DateInput value={from} onChange={setFrom} ariaLabel="출하 요청일 시작" className="w-[130px]" />
         <span className="text-ink-3">~</span>
         <DateInput value={to} onChange={setTo} ariaLabel="출하 요청일 끝" className="w-[130px]" />
@@ -123,7 +126,7 @@ function ShipmentRequestTable({ rows }: { rows: ShipmentListRow[] }) {
           aria-label="검색"
         />
       </div>
-      <Card>
+      <Card petKey="card:shipmentRequests.list">
         <CardHead title="출하요청 목록" meta={`${filtered.length}/${rows.length}건 · 최신순`} />
         {rows.length === 0 ? (
           <EmptyNote>아직 등록된 출하요청이 없어요.</EmptyNote>
@@ -151,7 +154,13 @@ function ShipmentRequestTable({ rows }: { rows: ShipmentListRow[] }) {
                 {filtered.map((r) => {
                   const unit = qtyUnitOf(r.itemTypes);
                   return (
-                    <tr key={r.id} className="cursor-pointer" onClick={() => router.push(`/shipment-requests/${r.id}`)}>
+                    <tr
+                      key={r.id}
+                      data-pet-item="shipmentRequest"
+                      data-pet-item-title={r.shipmentRequestNo}
+                      className="cursor-pointer"
+                      onClick={() => router.push(`/shipment-requests/${r.id}`)}
+                    >
                       <Td className="font-semibold">
                         <ShipmentRequestLink id={r.id} no={r.shipmentRequestNo} />
                       </Td>
@@ -175,7 +184,7 @@ function ShipmentRequestTable({ rows }: { rows: ShipmentListRow[] }) {
                       <Td align="right">{fmtTon(r.totalWeightTon)}</Td>
                       <Td align="right">{r.shipmentRequestStatus === 'CANCELLED' ? '-' : `${r.totalAllocatedQty} / ${r.totalRequestQty}`}</Td>
                       <Td className="text-xs text-ink-2">
-                        {r.requesterName ?? '-'} · {fmtMDHM(r.createdAt)}
+                        {fmtActorAt(r.requesterName, r.createdAt)}
                       </Td>
                       <Td>
                         <NextStep row={r} />

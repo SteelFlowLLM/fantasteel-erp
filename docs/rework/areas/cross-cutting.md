@@ -22,7 +22,7 @@ create: (input: CustomerInput) =>
   - `use`: 하나라도 USE가 있어야 한다. `view`: 하나라도 VIEW 이상이어야 한다(조회 API를 막을 때). 없으면 `ApiError('COM-002', '기준정보 관리 사용 권한이 필요해요')`.
   - 규칙 없이 `requireActor(tx.tables)`만 부르면 "로그인한 사용 중 사원"만 확인한다(업무·메신저처럼 권한 코드가 없는 기능).
 - `requireDepartmentHead(tables)` — 부서장이 아니면 COM-002 (구매요청 승인 등, REQ-AUTH-004).
-- 요청 사원은 이 탭의 계정 선택(`lib/sessionEmployee.ts`의 sessionStorage 키)에서 읽는다. 테스트에서는 `setActingEmployeeForTest(id)`(아래 6장 `actAs`)로 바꾼다.
+- 요청 사원은 이 탭의 계정 선택(`lib/sessionEmployee.ts`의 sessionStorage 키)에서 읽는다. 테스트에서는 `setActingEmployeeNoForTest(employeeNo)`(아래 6장 `actAs`)로 사원번호를 바꾼다.
 - 권한이 없어 던진 오류는 `mockMutation`의 트랜잭션을 통째로 취소한다(아무것도 저장되지 않음).
 
 ## 2. 오류 — `client/src/api/client.ts`, `client/src/api/validation.ts`
@@ -67,9 +67,9 @@ create: (input: CustomerInput) =>
 
 ## 6. 테스트 — `client/vitest.config.ts` → `client/src/test/setup.ts`, `client/src/test/actors.ts`
 
-- 모든 테스트 전에: 응답 지연 0(`setMockLatencyForTest(0)`), 가짜 DB를 시드로 되돌림(`resetToSeed()`), 첨부 저장소 비움, 요청 사원 초기화. api 함수를 그대로 `await`해서 시험한다.
-- `actAs(SEED_EMPLOYEE_NO.admin)` — 그 사원으로 요청(시드 사원번호 상수: admin·salesHead·sales·purchaseHead·purchase·productionHead·steelmakingHead·steelmaking·qualityHead·quality·logisticsHead·logistics). `employeeIdOf(no)`, `departmentIdOf(code)`도 있다.
-- 오류 확인 예: `await expect(customerApi.create(input)).rejects.toMatchObject({ code: 'COM-002' })`, 입력 오류는 `rejects.toBeInstanceOf(InputError)` + `fieldErrors`. 예시는 `api/actor.test.ts`, `api/validation.test.ts`.
+- 모든 테스트 전에 요청 사원을 비운다(`test/setup.ts`). 2026-10-13부터 화면 테스트는 가짜 DB 모드로 돌지 않는다: api 함수는 가짜 서버 응답(`useFakeServer`)으로, 화면 그리기는 고정 데이터(`features/<영역>/testing/`, `test/sessionUsers.ts`)로 시험한다.
+- `actAs(SEED_EMPLOYEE_NO.admin)` — 그 사원으로 요청(시드 사원번호 상수: admin·salesHead·sales·purchaseHead·purchase·productionHead·steelmakingHead·steelmaking·qualityHead·quality·logisticsHead·logistics). (2026-10-13 `employeeIdOf`·`departmentIdOf`는 가짜 DB를 읽어 지웠다.)
+- 오류 확인 예: 서버 어댑터 테스트에서 `useFakeServer`가 `fail(403, 'COM-002', …)`을 돌려주게 하고 `rejects.toMatchObject({ code: 'COM-002' })`, 입력 오류는 `rejects.toBeInstanceOf(InputError)` + `fieldErrors`. 예시는 `api/server/*.test.ts`, `api/validation.test.ts`.
 
 ## 7. 영역 작업자가 알아 둘 것
 

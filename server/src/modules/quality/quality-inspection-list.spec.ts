@@ -13,10 +13,14 @@ const heatLot = (overrides: Partial<QualityInspectionListLot> = {}): QualityInsp
   id: 1,
   lotNo: 'H260101-BOF1-01',
   lotType: 'HEAT',
+  lotStatus: 'AVAILABLE',
+  producedDate: null,
+  productionResult: { productionPlan: { id: 5, productionPlanNo: 'PP-2610-0001' } },
   steelGrade: grade,
   item: null,
   qualityInspection: null,
   lotRelationsAsChildLot: [],
+  lotRelationsAsParentLot: [],
   ...overrides,
 });
 
@@ -24,9 +28,13 @@ const coilLot = (heatResult: string | null): QualityInspectionListLot => ({
   id: 3,
   lotNo: 'CS1',
   lotType: 'COIL',
+  lotStatus: 'SHIPPED',
+  producedDate: new Date('2026-10-03T00:00:00.000Z'),
+  productionResult: null,
   steelGrade: null,
-  item: { thicknessMm: new Prisma.Decimal('9'), steelGrade: grade },
+  item: { id: 40, itemCode: 'CL-SM355A-9x1500', itemName: '열연코일 SM355A 9x1500', thicknessMm: new Prisma.Decimal('9'), steelGrade: grade },
   qualityInspection: null,
+  lotRelationsAsParentLot: [],
   lotRelationsAsChildLot: [
     {
       parentLot: {
@@ -66,7 +74,7 @@ describe('검사 목록 행 만들기', () => {
   const latest = pickLatestStandards(standards);
 
   it('검사 행이 없는 히트는 지금 적용될 최신 기준을 보여 주고 판정·검사일은 비운다', () => {
-    const row = toQualityInspectionListItem(heatLot(), latest);
+    const row = toQualityInspectionListItem(heatLot(), latest, false);
     expect(row).toMatchObject({
       qualityInspectionId: null,
       processType: 'STEELMAKING',
@@ -92,13 +100,14 @@ describe('검사 목록 행 만들기', () => {
         },
       }),
       latest,
+      false,
     );
     expect(row).toMatchObject({ qualityInspectionId: 7, inspectionStandardId: 10, versionNo: 1, inspectionResult: 'PASS' });
     expect(row.inspectedAt).toBe('2026-10-02T01:00:00.000Z');
   });
 
   it('코일은 슬래브를 거쳐 상위 히트와 그 판정을 찾고, 두께는 규격 두께 소수 2자리', () => {
-    const row = toQualityInspectionListItem(coilLot('FAIL'), latest);
+    const row = toQualityInspectionListItem(coilLot('FAIL'), latest, false);
     expect(row).toMatchObject({
       processType: 'HOT_ROLLING',
       thicknessMm: '9.00',
@@ -109,12 +118,37 @@ describe('검사 목록 행 만들기', () => {
     });
   });
 
+  it('LOT 상태·규격·생산완료일·생산계획을 같이 준다. 히트는 규격·생산완료일이 없고, 계획 없는 실적이면 계획은 null', () => {
+    expect(toQualityInspectionListItem(heatLot(), latest, false)).toMatchObject({
+      lotStatus: 'AVAILABLE',
+      itemId: null,
+      itemCode: null,
+      producedDate: null,
+      productionPlanId: 5,
+      productionPlanNo: 'PP-2610-0001',
+    });
+    expect(toQualityInspectionListItem(coilLot('PASS'), latest, false)).toMatchObject({
+      lotStatus: 'SHIPPED',
+      itemId: 40,
+      itemCode: 'CL-SM355A-9x1500',
+      itemName: '열연코일 SM355A 9x1500',
+      producedDate: '2026-10-03',
+      productionPlanId: null,
+      productionPlanNo: null,
+    });
+  });
+
+  it('밀시트 잠금 여부를 그대로 싣는다 (목록 자물쇠 표시)', () => {
+    expect(toQualityInspectionListItem(coilLot('PASS'), latest, true).isLocked).toBe(true);
+    expect(toQualityInspectionListItem(heatLot(), latest, false).isLocked).toBe(false);
+  });
+
   it('상위 히트에 검사 행이 없으면 히트 판정은 null', () => {
-    expect(toQualityInspectionListItem(coilLot(null), latest).heatInspectionResult).toBeNull();
+    expect(toQualityInspectionListItem(coilLot(null), latest, false).heatInspectionResult).toBeNull();
   });
 
   it('그 공정·강종의 기준이 없으면 기준은 null', () => {
-    const row = toQualityInspectionListItem(heatLot({ steelGrade: { id: 99, steelGradeCode: 'SM355C' } }), latest);
+    const row = toQualityInspectionListItem(heatLot({ steelGrade: { id: 99, steelGradeCode: 'SM355C' } }), latest, false);
     expect(row).toMatchObject({ inspectionStandardId: null, inspectionStandardCode: null, versionNo: null });
   });
 });

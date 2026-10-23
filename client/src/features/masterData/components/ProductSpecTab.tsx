@@ -1,11 +1,10 @@
 'use client';
 
 // 제품 규격 (REQ-MST-003): 강종 × 두께 × 폭 × 길이, 1매 이론중량(소수 3자리), 규격 코드 SL-/CL-강종-두께x폭x길이.
-// 같은 조합은 화면에서 먼저 막고, 쓰인 규격은 치수·이론중량을 잠근다(MST-002). 쓰이지 않은 규격만 지운다.
-import { useMemo, useState } from 'react';
+// 같은 조합은 화면에서 먼저 막고, 쓰인 규격의 치수·이론중량 수정은 서버가 거부한다(MST-002). 삭제는 쓰는 곳이 없을 때만 서버가 허용한다(API-275).
+import { useMemo, useState, type ReactNode } from 'react';
 import { ERROR_MESSAGE, ITEM_TYPE_LABEL, PRODUCT_QTY_UNIT, formatSpecCode, type ProductItemType } from '@/codes';
 import { masterDataApi, type MasterProductSpecView } from '@/api/masterData';
-import { Badge } from '@/components/Badge';
 import { Banner } from '@/components/Banner';
 import { Button } from '@/components/Button';
 import { Card, CardHead } from '@/components/Card';
@@ -16,7 +15,7 @@ import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
 import { Segmented } from '@/components/Tabs';
-import { ButtonGroupField, CODE_LINK, MASTER_LOCK_TEXT, ModalFooter, RowActions, TableFoot, formatYieldPercent, type MasterTabKey } from '@/features/masterData/components/MasterParts';
+import { ButtonGroupField, CODE_LINK, MASTER_LOCK_TEXT, ModalFooter, RowActions, TableFoot, formatYieldPercent, useMasterDelete, type MasterTabKey } from '@/features/masterData/components/MasterParts';
 import { useAction } from '@/hooks/useAction';
 import { useMasterDataFieldErrors } from '@/hooks/useMasterDataForm';
 import { useMasterProductSpecs, useMasterSteelGrades, useMasterYards } from '@/hooks/useMasterData';
@@ -24,10 +23,10 @@ import { fmtDims, fmtTon } from '@/lib/format';
 import { calcTheoreticalWeightTon, compareDecimal } from '@/lib/weight';
 
 type TypeFilter = 'ALL' | ProductItemType;
-const TYPE_FILTERS: readonly { key: TypeFilter; label: string }[] = [
-  { key: 'ALL', label: '전체' },
-  { key: 'SLAB', label: ITEM_TYPE_LABEL.SLAB },
-  { key: 'COIL', label: ITEM_TYPE_LABEL.COIL },
+const TYPE_FILTERS: readonly { key: TypeFilter; label: ReactNode }[] = [
+  { key: 'ALL', label: <span data-pet-term="전체">전체</span> },
+  { key: 'SLAB', label: <span data-pet-term={ITEM_TYPE_LABEL.SLAB}>{ITEM_TYPE_LABEL.SLAB}</span> },
+  { key: 'COIL', label: <span data-pet-term={ITEM_TYPE_LABEL.COIL}>{ITEM_TYPE_LABEL.COIL}</span> },
 ];
 
 export function ProductSpecTab({ canEdit, onGoTab }: { canEdit: boolean; onGoTab: (tab: MasterTabKey) => void }) {
@@ -36,16 +35,17 @@ export function ProductSpecTab({ canEdit, onGoTab }: { canEdit: boolean; onGoTab
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('ALL');
   const [gradeFilter, setGradeFilter] = useState('');
   const [editing, setEditing] = useState<MasterProductSpecView | 'new' | null>(null);
+  const deletion = useMasterDelete();
 
   return (
-    <Card>
+    <Card petKey="card:masterData.specs">
       <CardHead
         title="제품 규격"
         meta={specs.data ? `${specs.data.length}개` : undefined}
         actions={
           <>
             <Segmented ariaLabel="품목 유형" items={TYPE_FILTERS} active={typeFilter} onChange={setTypeFilter} />
-            <Select aria-label="강종" value={gradeFilter} onChange={(e) => setGradeFilter(e.target.value)} className="w-32">
+            <Select aria-label="강종" data-pet-term="강종" value={gradeFilter} onChange={(e) => setGradeFilter(e.target.value)} className="w-32">
               <option value="">강종 전체</option>
               {(grades.data ?? []).map((g) => (
                 <option key={g.id} value={g.id}>
@@ -76,13 +76,12 @@ export function ProductSpecTab({ canEdit, onGoTab }: { canEdit: boolean; onGoTab
                       <Th>기본 야드</Th>
                       <Th>대응 규격</Th>
                       <Th align="right">열연 계획 수율</Th>
-                      <Th>사용 이력</Th>
                       <Th aria-label="수정·삭제" />
                     </tr>
                   </thead>
                   <tbody>
                     {shown.map((spec) => (
-                      <tr key={spec.id}>
+                      <tr key={spec.id} data-pet-item="productSpec" data-pet-item-title={spec.itemCode}>
                         <Td className="font-mono text-mono">{spec.itemCode}</Td>
                         <Td>{ITEM_TYPE_LABEL[spec.itemType]}</Td>
                         <Td>{spec.steelGradeCode}</Td>
@@ -99,20 +98,11 @@ export function ProductSpecTab({ canEdit, onGoTab }: { canEdit: boolean; onGoTab
                           )}
                         </Td>
                         <Td align="right">{formatYieldPercent(spec.hotRollingPlannedYieldRate)}</Td>
-                        <Td>
-                          {spec.isUsed ? (
-                            <Badge tone="run" title={`${spec.usageText ?? ''}에 쓰였어요`}>
-                              사용됨
-                            </Badge>
-                          ) : (
-                            <Badge tone="neutral">미사용</Badge>
-                          )}
-                        </Td>
                         <Td align="right">
                           <RowActions
                             canEdit={canEdit}
                             onEdit={() => setEditing(spec)}
-                            remove={{ what: `규격 ${spec.itemCode}`, run: () => masterDataApi.deleteProductSpec(spec.id), success: '규격을 삭제했어요', blockedReason: spec.referenceText }}
+                            onDelete={() => deletion.open({ id: spec.id, name: spec.itemCode, object: '규격을', remove: masterDataApi.deleteItem })}
                           />
                         </Td>
                       </tr>
@@ -126,6 +116,7 @@ export function ProductSpecTab({ canEdit, onGoTab }: { canEdit: boolean; onGoTab
                 치수·이론중량을 바꿀 수 없어요(다른 치수는 새 규격으로 추가) · 쓰이지 않고 매핑도 없는 규격만 지울 수 있어요
               </TableFoot>
               {editing ? <ProductSpecModal spec={editing === 'new' ? null : editing} specs={rows} onClose={() => setEditing(null)} /> : null}
+              {deletion.dialog}
             </>
           );
         }}
@@ -177,7 +168,8 @@ function ProductSpecModal({ spec, specs, onClose }: { spec: MasterProductSpecVie
     [grade, itemType, lengthMm, spec?.id, specs, thicknessMm, weight, widthMm],
   );
 
-  const options = { onSuccess: onClose, onError: fieldErrors.takeFrom };
+  // 다른 사람이 먼저 고쳐 막히면(COM-001) 조회를 다시 읽고 옛 값으로 열린 창을 닫는다
+  const options = { onSuccess: onClose, onError: fieldErrors.takeFrom, refreshOnStale: true, onStale: onClose };
   const create = useAction(masterDataApi.createProductSpec, { ...options, success: '규격을 추가했어요' });
   const update = useAction(masterDataApi.updateProductSpec, { ...options, success: '규격을 저장했어요' });
   const pending = create.isPending || update.isPending;

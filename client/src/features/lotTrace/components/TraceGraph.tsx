@@ -10,6 +10,7 @@ import { Tag } from '@/components/Tag';
 import { InspectionBadge, LotStatusBadge, LotTypeIcon, ShipmentStatusBadge, fmtPeriod } from '@/features/lotTrace/components/TraceBits';
 import { HEAD_H, NODE_H, NODE_W, isAlloyNode, layoutTrace, type GraphEdge } from '@/features/lotTrace/lib/traceLayout';
 import { cn } from '@/lib/cn';
+import { appZoom } from '@/lib/fontSize';
 import { fmtDate, fmtNum, fmtTon } from '@/lib/format';
 
 /** 'lot:12' | 'ship:3' */
@@ -57,19 +58,25 @@ export function TraceGraph({ trace, selected, onSelect }: { trace: Pick<LotTrace
     const box = canvasRef.current?.parentElement;
     const start = canvasRef.current?.querySelector<HTMLElement>('[data-start="true"]');
     if (!box || !start) return;
+    // 화면 확대 중이면 rect는 확대된 좌표라 clientLeft·scrollLeft와 단위를 맞춘다
+    const zoom = appZoom();
     const b = box.getBoundingClientRect();
     const r = start.getBoundingClientRect();
-    const left = b.left + box.clientLeft;
+    const left = b.left / zoom + box.clientLeft;
     const right = left + box.clientWidth;
-    if (r.left >= left && r.right <= right) return;
-    box.scrollLeft += (r.left + r.right) / 2 - (left + right) / 2;
+    const startLeft = r.left / zoom;
+    const startRight = r.right / zoom;
+    if (startLeft >= left && startRight <= right) return;
+    box.scrollLeft += (startLeft + startRight) / 2 - (left + right) / 2;
   }, [startKey, layout.width]);
 
   return (
     <div ref={canvasRef} className="relative flex-none" style={{ width: layout.width, height: layout.height }}>
       {layout.heads.map((h) => (
         <div key={h.column} className="absolute top-0 flex items-baseline gap-1.5 text-xs" style={{ left: h.x, width: NODE_W, height: HEAD_H - 8 }}>
-          <b className="text-[12.5px] font-semibold">{h.title}</b>
+          <b data-pet-term={h.title} className="text-sm font-semibold">
+            {h.title}
+          </b>
           <span className="text-cap text-ink-3">{h.count}</span>
         </div>
       ))}
@@ -97,21 +104,25 @@ export function TraceGraph({ trace, selected, onSelect }: { trace: Pick<LotTrace
       {layout.periodLabels.map((p) => (
         <div
           key={p.key}
+          data-pet-term={LOT_RELATION_EVIDENCE_LABEL.PERIOD_BASED}
           className="absolute z-[2] flex flex-col gap-px rounded-xs border border-dashed border-[#6e829a] bg-surface px-1.5 py-1 text-2xs text-ink-2"
           style={{ left: p.x, top: p.y, width: p.w }}
           title="원료가 이 기간에 용선에 쓰였을 수 있다는 뜻이에요. 실제 투입량이 아니에요"
         >
           <b className="font-semibold text-brand">{LOT_RELATION_EVIDENCE_LABEL.PERIOD_BASED}</b>
           <span className="tabular-nums">{fmtPeriod(p.periodStartedAt, p.periodEndedAt)}</span>
+          {p.inputTon ? <span className="tabular-nums">원료 차감 {fmtTon(p.inputTon)}</span> : null}
         </div>
       ))}
       {layout.edgeLabels.map((l) => (
         <div
           key={l.key}
-          className="pointer-events-none absolute z-[2] flex -translate-x-1/2 -translate-y-1/2 flex-col items-center rounded-[9px] bg-surface px-1.5 py-px text-[10px] leading-[13px] whitespace-nowrap text-ink-2 shadow-[inset_0_0_0_1px_var(--color-line-strong)]"
+          className="pointer-events-none absolute z-[2] flex -translate-x-1/2 -translate-y-1/2 flex-col items-center rounded-[9px] bg-surface px-1.5 py-px text-2xs whitespace-nowrap text-ink-2 shadow-[inset_0_0_0_1px_var(--color-line-strong)]"
           style={{ left: l.x, top: l.y }}
         >
-          <span>{LOT_RELATION_EVIDENCE_LABEL.ACTUAL_INPUT}</span>
+          <span>
+            {l.inputKind} {LOT_RELATION_EVIDENCE_LABEL.ACTUAL_INPUT}
+          </span>
           {l.inputTon ? <span className="tabular-nums">{fmtTon(l.inputTon)}</span> : null}
         </div>
       ))}
@@ -125,6 +136,8 @@ export function TraceGraph({ trace, selected, onSelect }: { trace: Pick<LotTrace
               key={n.key}
               type="button"
               aria-pressed={on}
+              data-pet-item="shipmentRequest"
+              data-pet-item-title={s.shipmentRequestNo}
               onClick={() => onSelect(n.key)}
               style={style}
               className={cn(NODE_BASE, on ? 'border-run bg-[#f6f9ff] shadow-[0_0_0_2px_var(--color-run)]' : 'border-line')}
@@ -137,8 +150,10 @@ export function TraceGraph({ trace, selected, onSelect }: { trace: Pick<LotTrace
                 </span>
               </span>
               <span className="truncate font-mono text-mono font-semibold">{s.shipmentRequestNo}</span>
-              <span className="truncate text-cap text-ink-3">{s.customerName}</span>
-              <span className="truncate text-cap text-ink-3">
+              <span data-pet-field="고객사" className="truncate text-cap text-ink-3">
+                {s.customerName}
+              </span>
+              <span data-pet-field="수주 · 배정 LOT" className="truncate text-cap text-ink-3">
                 {s.salesOrders.map((so) => so.salesOrderNo).join(', ')} · LOT {s.lotIds.length}
                 {s.issuedAt ? ` · ${fmtDate(s.issuedAt)}` : ''}
                 {s.millSheets.length ? ` · 밀시트 ${s.millSheets.length}` : ''}
@@ -155,6 +170,8 @@ export function TraceGraph({ trace, selected, onSelect }: { trace: Pick<LotTrace
             type="button"
             aria-pressed={on}
             data-start={lot.isStart ? 'true' : undefined}
+            data-pet-item="lot"
+            data-pet-item-title={lot.lotNo}
             onClick={() => onSelect(n.key)}
             style={style}
             className={cn(

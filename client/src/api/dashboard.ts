@@ -1,49 +1,34 @@
 // 대시보드 위젯 조회 (REQ-DSH-001·002, BP-DSH-01 "권한 내 집계").
-// - 숫자는 모두 core 읽기 모델(@/mock/services: 수주 충족 현황·재고·검사·MRP·구매·여재·작업 로그)과 테이블 행에서 가져와 묶기만 한다.
+// - 숫자는 서버 대시보드 API와 다른 화면의 서버 목록(api/server/dashboard.ts 등)을 묶기만 한다.
 //   업무 계산식(가용·검사합격·납기 위험·순소요)을 다시 만들지 않는다. 묶는 방법은 features/dashboard/lib/widgetMath.ts.
-// - 위젯마다 그 데이터를 보여 주는 화면과 같은 조회 권한을 요구한다(requireActor view → 없으면 COM-002, 화면은 잠금 표시).
+// - 위젯마다 그 데이터를 보여 주는 화면과 같은 조회 권한을 요구한다(로그인 사원 /auth/me 권한 → 없으면 COM-002, 화면은 잠금 표시).
 // - 위젯 키는 화면 상수다 (공통 코드 그룹이 아니다).
-import { requireActor, type Actor } from '@/api/actor';
-import { mockQuery } from '@/api/client';
+import type { AgentCandidateView, AgentRiskType, AuthUser } from '@fantasteel/shared';
+import { ApiError } from '@/api/errors';
+import { serverRequest } from '@/api/http';
+import type { PurchaseOrderView, RequisitionView } from '@/api/purchasing';
+import { serverAgentCandidateApi } from '@/api/server/agentCandidates';
+import { serverBusinessEventApi } from '@/api/server/businessEvents';
+import { serverDashboardApi, serverDashboardSourceApi } from '@/api/server/dashboard';
+import { serverMrpRequirements } from '@/api/server/mrp';
+import { serverPurchaseOrderApi } from '@/api/server/purchaseOrders';
+import { serverPurchaseRequisitionApi } from '@/api/server/purchaseRequisitions';
 import {
   PERMISSION,
-  PROCESS_TYPE,
   PURCHASE_REQUISITION_STATUS,
-  SALES_ORDER_ITEM_STATUS,
   type ActorType,
+  type DraftStatus,
   type Permission,
   type ProcessType,
   type ProductItemType,
   type PurchaseRequisitionStatus,
   type RawMaterialType,
-  type SalesOrderItemStatus,
 } from '@/codes';
-import { ageDays, bucketByDate, countRatio, isWithin, ratioText, trendWindow, weightedPlannedYield } from '@/features/dashboard/lib/widgetMath';
-import { decSum } from '@/lib/decimal';
-import { canView } from '@/lib/permissions';
-import { addDays, daysBetween } from '@/lib/salesOrderStatus';
+import { trendWindow } from '@/features/dashboard/lib/widgetMath';
+import { decCmp, decSum } from '@/lib/decimal';
+import { canView, permissionNeedText } from '@/lib/permissions';
+import { addDays } from '@/lib/salesOrderStatus';
 import { toSeoulDateString } from '@/lib/seoulDate';
-import { calcWeightTon, sumTon } from '@/lib/weight';
-import type { LotRow, MockTables } from '@/mock/schema';
-import {
-  computeMrp,
-  findById,
-  hotRollingYieldOf,
-  inspectionQueue,
-  listPurchaseOrders,
-  listPurchaseRequisitions,
-  listSalesOrders,
-  productInventory,
-  productionSettingOf,
-  productItemTypeOf,
-  routingYieldOf,
-  salesOrderDetail,
-  surplusSlabs,
-  timelineEventOf,
-  theoreticalWeightOf,
-} from '@/mock/services';
-
-type Tables = Readonly<MockTables>;
 
 // ── 위젯 키·권한 ─────────────────────────────────────────
 
@@ -67,7 +52,7 @@ export const DASHBOARD_WIDGET_KEYS = [
 export type DashboardWidgetKey = (typeof DASHBOARD_WIDGET_KEYS)[number];
 
 /** P2(2등급 AI) 위젯: 데이터 없이 '준비 중' 디자인만 (BP-DSH-01 "P2 미구현 시 Agent 영역은 비활성") */
-export type SoonWidgetKey = 'AGENT_RISK' | 'AI_USAGE';
+export type SoonWidgetKey = 'AI_USAGE';
 export type DataWidgetKey = Exclude<DashboardWidgetKey, SoonWidgetKey>;
 
 const SALES_ORDER_VIEW = [PERMISSION.SALES_ORDER_CREATE, PERMISSION.SALES_ORDER_CANCEL] as const;
@@ -77,13 +62,15 @@ const SALES_ORDER_VIEW = [PERMISSION.SALES_ORDER_CREATE, PERMISSION.SALES_ORDER_
  * 그 데이터를 보여 주는 화면의 여는 조건(features/shell/screens.ts)과 같게 둔다.
  */
 export const DASHBOARD_WIDGET_VIEW: Record<DataWidgetKey, readonly Permission[]> = {
-  /** 단계마다 따로 확인한다 (PROCESS_FLOW_STAGE_VIEW) */
+  /** 모든 사원이 6단계 건수를 모두 본다. 단계를 눌러 화면으로 가는 것만 그 화면을 열 권한이 있을 때 (2026-10-07 사용자 결정) */
   PROCESS_FLOW: [],
   ORDER_FULFILLMENT: SALES_ORDER_VIEW,
   /** 작업 로그 화면은 모든 사원이 연다 */
   RECENT_EVENTS: [],
   /** 재고 화면은 모든 사원이 연다 */
   PRODUCT_STOCK: [],
+  /** 대응 후보 목록은 서버가 후보 업무의 조회 권한으로 걸러 준다. Agent 화면은 모든 사원이 연다 */
+  AGENT_RISK: [],
   PROCESS_YIELD: [PERMISSION.PRODUCTION_RESULT_CONFIRM],
   RAW_MATERIAL_BALANCE: [PERMISSION.PURCHASE_REQUISITION_CREATE],
   REJECT_RATE: [PERMISSION.INSPECTION_REGISTER],
@@ -95,33 +82,23 @@ export const DASHBOARD_WIDGET_VIEW: Record<DataWidgetKey, readonly Permission[]>
   PRODUCTION_VOLUME: [PERMISSION.PRODUCTION_RESULT_CONFIRM],
 };
 
-export type ProcessFlowStageKey = 'salesOrders' | 'productionPlans' | 'inspections' | 'inventories' | 'shipmentRequests' | 'goodsIssues';
-
-/** 공정 흐름 현황의 단계별 조회 권한 (빈 배열 = 모든 사원). 권한이 없는 단계는 숫자 대신 잠금으로 보인다. */
-export const PROCESS_FLOW_STAGE_VIEW: Record<ProcessFlowStageKey, readonly Permission[]> = {
-  salesOrders: SALES_ORDER_VIEW,
-  productionPlans: [PERMISSION.PRODUCTION_PLAN_CONFIRM],
-  inspections: [PERMISSION.INSPECTION_REGISTER],
-  inventories: [],
-  shipmentRequests: [PERMISSION.SHIPMENT_REQUEST_MANAGE],
-  goodsIssues: [PERMISSION.GOODS_ISSUE_CONFIRM],
-};
-
 /** 추이 위젯(강종별 불합격률·출하 실적·생산량)의 기간: 오늘 포함 최근 30일 (가정값, docs/rework/areas/dashboard.md) */
 export const DASHBOARD_TREND_DAYS = 30;
 /** 원료 잔량 대비 소요: 필요일이 오늘부터 30일 안인 계획까지 (지난 필요일 포함, 가정값) */
 export const DASHBOARD_MRP_HORIZON_DAYS = 30;
 /** 최근 작업 로그 줄 수 */
 export const DASHBOARD_RECENT_EVENT_LIMIT = 20;
+/** 위젯을 다시 읽는 간격: 다른 사원이 바꾼 내용을 따라가도록 30초 (가정값, docs/rework/areas/dashboard.md) */
+export const DASHBOARD_REFRESH_MS = 30_000;
 
 const MRP_EARLIEST = '0001-01-01';
 
-const allowed = (actor: Actor, permissions: readonly Permission[]): boolean => permissions.length === 0 || canView(actor, ...permissions);
-
-/** 위젯 권한 확인: 로그인 사원 + 그 위젯의 조회 권한 (없으면 COM-002) */
-function requireWidgetActor(tables: Tables, key: DataWidgetKey): Actor {
+/** 위젯 권한: 서버 로그인 사원(/auth/me)의 역할 권한으로 본다. 서버에서 새로 만든 사원·바꾼 역할 권한도 그대로 맞는다 */
+async function requireServerWidgetUser(key: DataWidgetKey): Promise<AuthUser> {
+  const me = await serverRequest<AuthUser>('GET', '/auth/me');
   const view = DASHBOARD_WIDGET_VIEW[key];
-  return requireActor(tables, view.length > 0 ? { view } : {});
+  if (view.length > 0 && !canView(me, ...view)) throw new ApiError('COM-002', permissionNeedText(view, 'VIEW'));
+  return me;
 }
 
 export interface DashboardQueryOptions {
@@ -130,18 +107,12 @@ export interface DashboardQueryOptions {
 }
 
 const todayOf = (options: DashboardQueryOptions = {}): string => options.today ?? toSeoulDateString(new Date());
-const seoulDate = (iso: string): string => toSeoulDateString(new Date(iso));
-/** 진행 중 수주·수주 품목 상태 (진행중·부분출하) */
-const OPEN_SALES_ORDER_STATUSES: ReadonlySet<SalesOrderItemStatus> = new Set<SalesOrderItemStatus>([
-  SALES_ORDER_ITEM_STATUS.OPEN,
-  SALES_ORDER_ITEM_STATUS.PARTIALLY_SHIPPED,
-]);
 
 // ── 공정 흐름 현황 ───────────────────────────────────────
 
 export interface ProcessFlowData {
   today: string;
-  /** 진행 중 수주 (진행중·부분출하) — 권한이 없으면 null */
+  /** 진행 중 수주 (진행중·부분출하). 서버 타입과 같이 null을 허용하지만 지금은 늘 채운다 */
   salesOrders: { openCount: number; dueRiskCount: number } | null;
   productionPlans: { plannedCount: number; inProgressCount: number } | null;
   /** 판정 대기 LOT (히트·슬래브·코일) */
@@ -151,50 +122,6 @@ export interface ProcessFlowData {
   shipmentRequests: { requestedCount: number; allocatedCount: number } | null;
   /** 오늘 출고 확정 */
   goodsIssues: { issuedRequestCount: number; issuedLotCount: number } | null;
-}
-
-function readProcessFlow(tables: Tables, options: DashboardQueryOptions): ProcessFlowData {
-  const actor = requireWidgetActor(tables, 'PROCESS_FLOW');
-  const today = todayOf(options);
-  const can = (key: ProcessFlowStageKey) => allowed(actor, PROCESS_FLOW_STAGE_VIEW[key]);
-  const inventory = productInventory(tables);
-  const availableOf = (type: ProductItemType) => inventory.filter((r) => r.itemType === type).reduce((s, r) => s + r.availableQty, 0);
-
-  let salesOrders: ProcessFlowData['salesOrders'] = null;
-  if (can('salesOrders')) {
-    const open = listSalesOrders(tables, { today }).filter((so) => OPEN_SALES_ORDER_STATUSES.has(so.status));
-    salesOrders = { openCount: open.length, dueRiskCount: open.filter((so) => so.isDueRisk).length };
-  }
-  let inspections: ProcessFlowData['inspections'] = null;
-  if (can('inspections')) {
-    const pending = inspectionQueue(tables).filter((r) => r.inspectionResult === 'PENDING');
-    const countOf = (type: LotRow['lotType']) => pending.filter((r) => r.lotType === type).length;
-    inspections = { pendingCount: pending.length, heatCount: countOf('HEAT'), slabCount: countOf('SLAB'), coilCount: countOf('COIL') };
-  }
-  return {
-    today,
-    salesOrders,
-    productionPlans: can('productionPlans')
-      ? {
-          plannedCount: tables.productionPlan.filter((p) => p.productionPlanStatus === 'PLANNED').length,
-          inProgressCount: tables.productionPlan.filter((p) => p.productionPlanStatus === 'IN_PROGRESS').length,
-        }
-      : null,
-    inspections,
-    inventories: { slabAvailableQty: availableOf('SLAB'), coilAvailableQty: availableOf('COIL') },
-    shipmentRequests: can('shipmentRequests')
-      ? {
-          requestedCount: tables.shipmentRequest.filter((r) => r.shipmentRequestStatus === 'REQUESTED').length,
-          allocatedCount: tables.shipmentRequest.filter((r) => r.shipmentRequestStatus === 'ALLOCATED').length,
-        }
-      : null,
-    goodsIssues: can('goodsIssues')
-      ? {
-          issuedRequestCount: tables.shipmentRequest.filter((r) => r.issuedAt !== null && seoulDate(r.issuedAt) === today).length,
-          issuedLotCount: tables.lot.filter((l) => l.shippedAt !== null && seoulDate(l.shippedAt) === today).length,
-        }
-      : null,
-  };
 }
 
 // ── 수주 충족 현황 ───────────────────────────────────────
@@ -236,47 +163,6 @@ export interface OrderFulfillmentData {
   salesOrders: FulfillmentSalesOrderRow[];
 }
 
-function readOrderFulfillment(tables: Tables, options: DashboardQueryOptions): OrderFulfillmentData {
-  requireWidgetActor(tables, 'ORDER_FULFILLMENT');
-  const today = todayOf(options);
-  const open = listSalesOrders(tables, { today })
-    .filter((so) => OPEN_SALES_ORDER_STATUSES.has(so.status))
-    .sort((a, b) => (a.earliestDueDate ?? '9999').localeCompare(b.earliestDueDate ?? '9999') || a.id - b.id);
-  return {
-    today,
-    deliveryRiskDays: productionSettingOf(tables).deliveryRiskDays,
-    salesOrders: open.map((so) => {
-      const detail = salesOrderDetail(tables, so.id, { today });
-      return {
-        salesOrderId: so.id,
-        salesOrderNo: so.salesOrderNo,
-        customerName: so.customerName,
-        earliestDueDate: so.earliestDueDate,
-        isDueRisk: so.isDueRisk,
-        items: detail.items
-          .filter((i) => i.salesOrderItemStatus !== 'CANCELLED')
-          .map((i) => ({
-            salesOrderItemId: i.salesOrderItemId,
-            lineNo: i.lineNo,
-            itemCode: i.itemCode,
-            itemType: i.itemType,
-            orderedQty: i.orderedQty,
-            orderedTon: i.orderedTon,
-            inProductionQty: i.inProductionQty,
-            passedQty: i.securedQty,
-            reservedQty: i.activeReservedQty,
-            unshippedQty: i.shortage.unshippedQty,
-            shippedQty: i.shippedQty,
-            shippedRatio: i.measures.shipped.ratio,
-            dueDate: i.dueDate,
-            daysToDue: daysBetween(today, i.dueDate),
-            isDueRisk: i.isDueRisk,
-          })),
-      };
-    }),
-  };
-}
-
 // ── 최근 작업 로그 ───────────────────────────────────────
 
 export interface RecentEventRow {
@@ -295,28 +181,6 @@ export interface RecentEventRow {
 export interface RecentEventsData {
   totalCount: number;
   items: RecentEventRow[];
-}
-
-function readRecentEvents(tables: Tables): RecentEventsData {
-  requireWidgetActor(tables, 'RECENT_EVENTS');
-  const latest = [...tables.businessEvent].sort((a, b) => b.occurredAt.localeCompare(a.occurredAt) || b.id - a.id).slice(0, DASHBOARD_RECENT_EVENT_LIMIT);
-  return {
-    totalCount: tables.businessEvent.length,
-    items: latest.map((row) => {
-      const event = timelineEventOf(tables, row);
-      return {
-        id: event.id,
-        eventNo: event.eventNo,
-        occurredAt: event.occurredAt,
-        actorType: event.actorType,
-        actorName: event.actorName,
-        businessEventTypeLabel: event.businessEventTypeLabel,
-        targetNo: event.targetNo,
-        reasonText: event.reasonText,
-        isAiAssisted: row.isAiAssisted,
-      };
-    }),
-  };
 }
 
 // ── 제품 재고 ───────────────────────────────────────────
@@ -350,40 +214,6 @@ export interface ProductStockData {
   items: ProductStockRow[];
 }
 
-function readProductStock(tables: Tables): ProductStockData {
-  requireWidgetActor(tables, 'PRODUCT_STOCK');
-  const rows = productInventory(tables);
-  const totals = (['SLAB', 'COIL'] as const).map((itemType): ProductStockTotal => {
-    const ofType = rows.filter((r) => r.itemType === itemType);
-    return {
-      itemType,
-      onHandQty: ofType.reduce((s, r) => s + r.onHandQty, 0),
-      passedQty: ofType.reduce((s, r) => s + r.passedQty, 0),
-      reservedQty: ofType.reduce((s, r) => s + r.reservedQty, 0),
-      availableQty: ofType.reduce((s, r) => s + r.availableQty, 0),
-      onHandTon: sumTon(ofType.map((r) => r.onHandTon)),
-      availableTon: sumTon(ofType.map((r) => r.availableTon)),
-    };
-  });
-  return {
-    totals,
-    items: rows
-      .filter((r) => r.onHandQty > 0)
-      .map((r) => ({
-        itemId: r.itemId,
-        itemCode: r.itemCode,
-        itemType: r.itemType,
-        steelGradeCode: r.steelGradeCode,
-        onHandQty: r.onHandQty,
-        passedQty: r.passedQty,
-        reservedQty: r.reservedQty,
-        availableQty: r.availableQty,
-        onHandTon: r.onHandTon,
-        availableTon: r.availableTon,
-      })),
-  };
-}
-
 // ── 공정별 수율 ─────────────────────────────────────────
 
 export interface ProcessYieldRow {
@@ -402,38 +232,6 @@ export interface ProcessYieldRow {
 
 export interface ProcessYieldData {
   processes: ProcessYieldRow[];
-}
-
-function readProcessYield(tables: Tables): ProcessYieldData {
-  requireWidgetActor(tables, 'PROCESS_YIELD');
-  const processes = Object.values(PROCESS_TYPE).map((processType): ProcessYieldRow => {
-    const results = tables.productionResult.filter((r) => r.processType === processType && r.completedAt !== null && r.inputTon !== null && r.outputTon !== null);
-    const inputTon = decSum(results.map((r) => r.inputTon ?? '0'));
-    const outputTon = decSum(results.map((r) => r.outputTon ?? '0'));
-    if (processType === 'IRONMAKING') {
-      return { processType, resultCount: results.length, inputTon, outputTon, actualYieldRate: null, plannedYieldRate: null, qtyAttainmentRate: null };
-    }
-    const plannedYieldRate = weightedPlannedYield(
-      results.map((r) => {
-        const plan = findById(tables, 'productionPlan', r.productionPlanId);
-        const item = findById(tables, 'item', plan?.itemId);
-        const rate = !item ? null : processType === 'HOT_ROLLING' ? hotRollingYieldOf(tables, item) : routingYieldOf(tables, productItemTypeOf(item), processType);
-        return { inputTon: r.inputTon ?? '0', plannedYieldRate: rate };
-      }),
-    );
-    const outputQty = results.reduce((s, r) => s + (r.outputQty ?? 0), 0);
-    const lossQty = results.reduce((s, r) => s + (r.lossQty ?? 0), 0);
-    return {
-      processType,
-      resultCount: results.length,
-      inputTon,
-      outputTon,
-      actualYieldRate: ratioText(outputTon, inputTon),
-      plannedYieldRate,
-      qtyAttainmentRate: processType === 'CONTINUOUS_CASTING' ? ratioText(outputQty, outputQty + lossQty) : null,
-    };
-  });
-  return { processes };
 }
 
 // ── 원료 잔량 대비 소요 ─────────────────────────────────
@@ -460,10 +258,11 @@ export interface RawMaterialBalanceData {
   materials: RawMaterialBalanceRow[];
 }
 
-function readRawMaterialBalance(tables: Tables, options: DashboardQueryOptions): RawMaterialBalanceData {
-  requireWidgetActor(tables, 'RAW_MATERIAL_BALANCE');
-  const to = addDays(todayOf(options), DASHBOARD_MRP_HORIZON_DAYS);
-  const mrp = computeMrp(tables, { from: MRP_EARLIEST, to });
+/** 원료 잔량 대비 소요: 서버 MRP(GET mrp/requirements)를 같은 기간으로 읽는다 */
+async function readRawMaterialBalanceFromServer(): Promise<RawMaterialBalanceData> {
+  await requireServerWidgetUser('RAW_MATERIAL_BALANCE');
+  const to = addDays(todayOf(), DASHBOARD_MRP_HORIZON_DAYS);
+  const mrp = await serverMrpRequirements({ from: MRP_EARLIEST, to });
   return {
     to,
     planCount: mrp.plans.length,
@@ -472,11 +271,11 @@ function readRawMaterialBalance(tables: Tables, options: DashboardQueryOptions):
       itemCode: m.itemCode,
       itemName: m.itemName,
       rawMaterialType: m.rawMaterialType,
-      onHandTon: m.onHandTon,
+      onHandTon: m.remainingTon,
       scheduledReceiptTon: m.scheduledReceiptTon,
-      coveredScheduledTon: m.coveredScheduledTon,
-      grossTon: m.grossTon,
-      netTon: m.netTon,
+      coveredScheduledTon: m.usedScheduledReceiptTon,
+      grossTon: m.requiredTon,
+      netTon: m.netRequirementTon,
       firstShortageDate: m.firstShortageDate,
     })),
   };
@@ -506,34 +305,6 @@ export interface RejectRateData {
   grades: RejectRateRow[];
 }
 
-function readRejectRate(tables: Tables, options: DashboardQueryOptions): RejectRateData {
-  requireWidgetActor(tables, 'REJECT_RATE');
-  const window = trendWindow(todayOf(options), DASHBOARD_TREND_DAYS);
-  const judged = tables.qualityInspection
-    .filter((q) => (q.inspectionResult === 'PASS' || q.inspectionResult === 'FAIL') && q.inspectedAt !== null && isWithin(seoulDate(q.inspectedAt), window))
-    .map((q) => ({ inspection: q, lot: findById(tables, 'lot', q.lotId) }));
-  const cell = (rows: typeof judged): RejectRateCell => {
-    const failedCount = rows.filter((r) => r.inspection.inspectionResult === 'FAIL').length;
-    return { inspectedCount: rows.length, failedCount, rejectRate: countRatio(failedCount, rows.length) };
-  };
-  return {
-    from: window.from,
-    to: window.to,
-    days: DASHBOARD_TREND_DAYS,
-    grades: [...tables.steelGrade]
-      .sort((a, b) => a.id - b.id)
-      .map((grade) => {
-        const ofGrade = judged.filter((r) => r.lot?.steelGradeId === grade.id);
-        return {
-          steelGradeId: grade.id,
-          steelGradeCode: grade.steelGradeCode,
-          ...cell(ofGrade),
-          byProcess: INSPECTED_PROCESSES.map((processType) => ({ processType, ...cell(ofGrade.filter((r) => r.inspection.processType === processType)) })),
-        };
-      }),
-  };
-}
-
 // ── 납기 위험 수주 ───────────────────────────────────────
 
 export interface DeliveryRiskRow {
@@ -561,46 +332,14 @@ export interface DeliveryRiskData {
   items: DeliveryRiskRow[];
 }
 
-function readDeliveryRisk(tables: Tables, options: DashboardQueryOptions): DeliveryRiskData {
-  requireWidgetActor(tables, 'DELIVERY_RISK');
-  const today = todayOf(options);
-  const rows: DeliveryRiskRow[] = [];
-  let openItemCount = 0;
-  for (const so of listSalesOrders(tables, { today }).filter((s) => OPEN_SALES_ORDER_STATUSES.has(s.status))) {
-    for (const item of salesOrderDetail(tables, so.id, { today }).items) {
-      if (!OPEN_SALES_ORDER_STATUSES.has(item.salesOrderItemStatus)) continue;
-      openItemCount += 1;
-      if (!item.isDueRisk) continue;
-      const daysToDue = daysBetween(today, item.dueDate);
-      rows.push({
-        salesOrderId: so.id,
-        salesOrderNo: so.salesOrderNo,
-        customerName: so.customerName,
-        salesOrderItemId: item.salesOrderItemId,
-        lineNo: item.lineNo,
-        itemCode: item.itemCode,
-        itemType: item.itemType,
-        orderedQty: item.orderedQty,
-        shippedQty: item.shippedQty,
-        unshippedQty: item.shortage.unshippedQty,
-        unshippedTon: calcWeightTon(item.shortage.unshippedQty, item.theoreticalWeightTon),
-        dueDate: item.dueDate,
-        daysToDue,
-        isOverdue: daysToDue < 0,
-      });
-    }
-  }
-  rows.sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.salesOrderNo.localeCompare(b.salesOrderNo) || a.lineNo - b.lineNo);
-  return { today, deliveryRiskDays: productionSettingOf(tables).deliveryRiskDays, openItemCount, items: rows };
-}
-
 // ── 구매 진행 ───────────────────────────────────────────
 
 export interface OpenPurchaseOrderRow {
   purchaseOrderId: number;
   purchaseOrderNo: string;
   supplierName: string;
-  dueDate: string | null;
+  /** 남은 품목 중 가장 이른 입고 예정일 (발주 단위 납기는 ERD에 없다) */
+  expectedReceiptDate: string | null;
   /** 입고예정 (미입고량 합계) */
   scheduledReceiptTon: string;
   lineCount: number;
@@ -613,32 +352,35 @@ export interface PurchaseProgressData {
   openPurchaseOrders: { count: number; scheduledReceiptTon: string; purchaseOrders: OpenPurchaseOrderRow[] } | null;
 }
 
-function readPurchaseProgress(tables: Tables): PurchaseProgressData {
-  const actor = requireWidgetActor(tables, 'PURCHASE_PROGRESS');
-  let requisitionsByStatus: PurchaseProgressData['requisitionsByStatus'] = null;
-  if (canView(actor, PERMISSION.PURCHASE_REQUISITION_CREATE)) {
-    const requisitions = listPurchaseRequisitions(tables);
-    requisitionsByStatus = Object.values(PURCHASE_REQUISITION_STATUS).map((status) => ({
-      status,
-      count: requisitions.filter((r) => r.purchaseRequisitionStatus === status).length,
-    }));
-  }
-  let openPurchaseOrders: PurchaseProgressData['openPurchaseOrders'] = null;
-  if (canView(actor, PERMISSION.PURCHASE_ORDER_CONFIRM)) {
-    const open = listPurchaseOrders(tables)
-      .filter((po) => po.purchaseOrderStatus !== 'RECEIVED')
-      .map((po) => ({
-        purchaseOrderId: po.id,
-        purchaseOrderNo: po.purchaseOrderNo,
-        supplierName: po.supplierName,
-        dueDate: po.dueDate,
-        scheduledReceiptTon: decSum(po.items.map((i) => i.scheduledReceiptTon)),
-        lineCount: po.items.length,
-      }))
-      .sort((a, b) => (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999') || a.purchaseOrderNo.localeCompare(b.purchaseOrderNo));
-    openPurchaseOrders = { count: open.length, scheduledReceiptTon: decSum(open.map((po) => po.scheduledReceiptTon)), purchaseOrders: open };
-  }
-  return { requisitionsByStatus, openPurchaseOrders };
+/** 구매요청·발주 목록 → 구매 진행 위젯. 조회 권한이 없는 쪽은 null */
+function purchaseProgressOf(requisitions: readonly RequisitionView[] | null, purchaseOrders: readonly PurchaseOrderView[] | null): PurchaseProgressData {
+  const requisitionsByStatus = requisitions
+    ? Object.values(PURCHASE_REQUISITION_STATUS).map((status) => ({ status, count: requisitions.filter((r) => r.purchaseRequisitionStatus === status).length }))
+    : null;
+  if (!purchaseOrders) return { requisitionsByStatus, openPurchaseOrders: null };
+  const open = purchaseOrders
+    // 발주 취소·잔량 마감한 발주는 더 들어올 양이 없다
+    .filter((po) => po.purchaseOrderStatus === 'CONFIRMED' || po.purchaseOrderStatus === 'PARTIALLY_RECEIVED')
+    .map((po) => ({
+      purchaseOrderId: po.id,
+      purchaseOrderNo: po.purchaseOrderNo,
+      supplierName: po.supplierName,
+      expectedReceiptDate: po.items.filter((i) => decCmp(i.remainingTon, 0) > 0).map((i) => i.expectedReceiptDate).filter((d): d is string => d !== null).sort()[0] ?? null,
+      scheduledReceiptTon: decSum(po.items.map((i) => i.remainingTon)),
+      lineCount: po.items.length,
+    }))
+    .sort((a, b) => (a.expectedReceiptDate ?? '9999').localeCompare(b.expectedReceiptDate ?? '9999') || a.purchaseOrderNo.localeCompare(b.purchaseOrderNo));
+  return { requisitionsByStatus, openPurchaseOrders: { count: open.length, scheduledReceiptTon: decSum(open.map((po) => po.scheduledReceiptTon)), purchaseOrders: open } };
+}
+
+/** 구매 진행: 권한은 로그인 사원(/auth/me)으로 보고, 목록은 서버에서 읽는다 */
+async function readPurchaseProgressFromServer(): Promise<PurchaseProgressData> {
+  const me = await requireServerWidgetUser('PURCHASE_PROGRESS');
+  const [requisitions, purchaseOrders] = await Promise.all([
+    canView(me, PERMISSION.PURCHASE_REQUISITION_CREATE) ? serverPurchaseRequisitionApi.list() : null,
+    canView(me, PERMISSION.PURCHASE_ORDER_CONFIRM) ? serverPurchaseOrderApi.list() : null,
+  ]);
+  return purchaseProgressOf(requisitions, purchaseOrders);
 }
 
 // ── 출하 실적 · 생산량 (하루 단위) ────────────────────────
@@ -672,49 +414,6 @@ export interface ProductionVolumeData {
   series: DailyProductPoint[];
 }
 
-/** 제품 LOT(슬래브·코일)을 날짜별로 센다. 톤 = 매수 × 1매 이론중량 */
-function dailyProductSeries(tables: Tables, lots: readonly LotRow[], dateOf: (lot: LotRow) => string, window: ReturnType<typeof trendWindow>): DailyProductPoint[] {
-  const tonOf = (lot: LotRow) => {
-    const item = findById(tables, 'item', lot.itemId);
-    return item ? theoreticalWeightOf(item) : '0';
-  };
-  return [...bucketByDate(lots, dateOf, window)].map(([date, rows]) => ({
-    date,
-    slabQty: rows.filter((l) => l.lotType === 'SLAB').length,
-    coilQty: rows.filter((l) => l.lotType === 'COIL').length,
-    ton: sumTon(rows.map(tonOf)),
-  }));
-}
-
-const totalsOf = (series: readonly DailyProductPoint[]) => ({
-  totalSlabQty: series.reduce((s, p) => s + p.slabQty, 0),
-  totalCoilQty: series.reduce((s, p) => s + p.coilQty, 0),
-  totalTon: sumTon(series.map((p) => p.ton)),
-});
-
-function readShipmentResult(tables: Tables, options: DashboardQueryOptions): ShipmentResultData {
-  requireWidgetActor(tables, 'SHIPMENT_RESULT');
-  const window = trendWindow(todayOf(options), DASHBOARD_TREND_DAYS);
-  const shipped = tables.lot.filter((l) => (l.lotType === 'SLAB' || l.lotType === 'COIL') && l.shippedAt !== null);
-  const series = dailyProductSeries(tables, shipped, (l) => seoulDate(l.shippedAt ?? ''), window);
-  return {
-    from: window.from,
-    to: window.to,
-    days: DASHBOARD_TREND_DAYS,
-    issuedRequestCount: tables.shipmentRequest.filter((r) => r.issuedAt !== null && isWithin(seoulDate(r.issuedAt), window)).length,
-    ...totalsOf(series),
-    series,
-  };
-}
-
-function readProductionVolume(tables: Tables, options: DashboardQueryOptions): ProductionVolumeData {
-  requireWidgetActor(tables, 'PRODUCTION_VOLUME');
-  const window = trendWindow(todayOf(options), DASHBOARD_TREND_DAYS);
-  const products = tables.lot.filter((l) => l.lotType === 'SLAB' || l.lotType === 'COIL');
-  const series = dailyProductSeries(tables, products, (l) => l.producedDate, window);
-  return { from: window.from, to: window.to, days: DASHBOARD_TREND_DAYS, ...totalsOf(series), series };
-}
-
 // ── 여재 보유 기간 ───────────────────────────────────────
 
 export interface SurplusAgeRow {
@@ -738,39 +437,30 @@ export interface SurplusAgeData {
   items: SurplusAgeRow[];
 }
 
-function readSurplusAge(tables: Tables, options: DashboardQueryOptions): SurplusAgeData {
-  requireWidgetActor(tables, 'SURPLUS_AGE');
-  const today = todayOf(options);
-  // 재고 화면 여재 탭과 같은 core 읽기 모델(surplusSlabs: 여재 매수·여재 슬래브)을 그대로 쓴다 → 두 화면의 여재 숫자가 같다
-  const items = surplusSlabs(tables)
-    .filter((row) => row.surplusQty > 0)
-    .map((row): SurplusAgeRow => {
-      const sinceDates = row.lots.map((l) => (l.surplusAt !== null ? seoulDate(l.surplusAt) : l.producedDate)).sort();
-      const oldestSinceDate = sinceDates[0] ?? today;
-      const item = findById(tables, 'item', row.itemId);
-      return {
-        itemId: row.itemId,
-        itemCode: row.itemCode,
-        steelGradeCode: row.steelGradeCode,
-        surplusQty: row.surplusQty,
-        surplusTon: item ? calcWeightTon(row.surplusQty, theoreticalWeightOf(item)) : '0.000',
-        oldestSinceDate,
-        maxAgeDays: ageDays(oldestSinceDate, today),
-      };
-    })
-    .sort((a, b) => b.maxAgeDays - a.maxAgeDays || a.itemCode.localeCompare(b.itemCode));
+// ── 묶음 ────────────────────────────────────────────────
+
+/** Agent 위험 감지 위젯 (REQ-AGT-005·006): 확정 대기 후보 수와 위험 유형별 건수, 최근 후보 */
+export interface AgentRiskData {
+  openCount: number;
+  byRisk: { riskType: AgentRiskType; count: number }[];
+  items: { id: number; riskType: AgentRiskType; summary: string; draftStatus: DraftStatus }[];
+}
+
+const AGENT_RISK_ITEM_LIMIT = 3;
+
+/** 서버가 준 대응 후보(권한으로 걸러진 목록, 최근 것 먼저)를 위젯 모양으로 줄인다. 확정 전·확정했지만 실행 전 후보만 센다 */
+export function agentRiskDataOf(candidates: readonly AgentCandidateView[]): AgentRiskData {
+  const open = candidates.filter((c) => c.draftStatus === 'AI_GENERATED' || c.draftStatus === 'WAITING_APPROVAL' || c.draftStatus === 'APPROVED');
+  const riskTypes = [...new Set(open.map((c) => c.riskType))];
   return {
-    today,
-    totalQty: items.reduce((s, r) => s + r.surplusQty, 0),
-    totalTon: sumTon(items.map((r) => r.surplusTon)),
-    maxAgeDays: items.length > 0 ? Math.max(...items.map((r) => r.maxAgeDays)) : null,
-    items,
+    openCount: open.length,
+    byRisk: riskTypes.map((riskType) => ({ riskType, count: open.filter((c) => c.riskType === riskType).length })),
+    items: open.slice(0, AGENT_RISK_ITEM_LIMIT).map((c) => ({ id: c.id, riskType: c.riskType, summary: c.summary, draftStatus: c.draftStatus })),
   };
 }
 
-// ── 묶음 ────────────────────────────────────────────────
-
 export interface DashboardWidgetDataMap {
+  AGENT_RISK: AgentRiskData;
   PROCESS_FLOW: ProcessFlowData;
   ORDER_FULFILLMENT: OrderFulfillmentData;
   RECENT_EVENTS: RecentEventsData;
@@ -785,33 +475,38 @@ export interface DashboardWidgetDataMap {
   PRODUCTION_VOLUME: ProductionVolumeData;
 }
 
-type WidgetReaders = { [K in DataWidgetKey]: (tables: Tables, options: DashboardQueryOptions) => DashboardWidgetDataMap[K] };
-
-const READERS: WidgetReaders = {
-  PROCESS_FLOW: readProcessFlow,
-  ORDER_FULFILLMENT: readOrderFulfillment,
-  RECENT_EVENTS: readRecentEvents,
-  PRODUCT_STOCK: readProductStock,
-  PROCESS_YIELD: readProcessYield,
-  RAW_MATERIAL_BALANCE: readRawMaterialBalance,
-  REJECT_RATE: readRejectRate,
-  DELIVERY_RISK: readDeliveryRisk,
-  PURCHASE_PROGRESS: readPurchaseProgress,
-  SHIPMENT_RESULT: readShipmentResult,
-  SURPLUS_AGE: readSurplusAge,
-  PRODUCTION_VOLUME: readProductionVolume,
-};
-
 export const dashboardKeys = {
   all: ['dashboard'] as const,
   widget: (key: DataWidgetKey, employeeId: number) => ['dashboard', 'widgets', key, employeeId] as const,
 };
 
+/** 화면이 서버 API를 모아 묶는 위젯: 권한은 서버 로그인 사원으로 본다 */
+function fromServer<T>(key: DataWidgetKey, read: () => Promise<T>): () => Promise<T> {
+  return async () => {
+    await requireServerWidgetUser(key);
+    return read();
+  };
+}
+const serverTrendWindow = () => trendWindow(todayOf(), DASHBOARD_TREND_DAYS);
+
+/** 위젯마다 서버를 읽는 함수 (AI_USAGE는 P2라 데이터가 없다) */
+const SERVER_READERS: { [K in DataWidgetKey]: () => Promise<DashboardWidgetDataMap[K]> } = {
+  PROCESS_FLOW: serverDashboardApi.processFlow,
+  ORDER_FULFILLMENT: serverDashboardApi.orderFulfillment,
+  PRODUCT_STOCK: serverDashboardApi.productStock,
+  AGENT_RISK: async () => agentRiskDataOf(await serverAgentCandidateApi.list()),
+  RAW_MATERIAL_BALANCE: readRawMaterialBalanceFromServer,
+  PURCHASE_PROGRESS: readPurchaseProgressFromServer,
+  RECENT_EVENTS: () => serverBusinessEventApi.recentEvents(DASHBOARD_RECENT_EVENT_LIMIT),
+  DELIVERY_RISK: fromServer('DELIVERY_RISK', serverDashboardSourceApi.deliveryRisk),
+  REJECT_RATE: fromServer('REJECT_RATE', () => serverDashboardSourceApi.rejectRate(serverTrendWindow())),
+  SHIPMENT_RESULT: serverDashboardApi.shipmentResult,
+  PROCESS_YIELD: serverDashboardApi.processYield,
+  SURPLUS_AGE: serverDashboardApi.surplusAge,
+  PRODUCTION_VOLUME: fromServer('PRODUCTION_VOLUME', () => serverDashboardSourceApi.productionVolume(serverTrendWindow())),
+};
+
 export const dashboardApi = {
   /** 위젯 하나의 데이터 (권한이 없으면 COM-002) */
-  widget: <K extends DataWidgetKey>(key: K, options: DashboardQueryOptions = {}): Promise<DashboardWidgetDataMap[K]> =>
-    mockQuery((tables) => {
-      const reader: WidgetReaders[K] = READERS[key];
-      return reader(tables, options);
-    }),
+  widget: <K extends DataWidgetKey>(key: K): Promise<DashboardWidgetDataMap[K]> => SERVER_READERS[key](),
 };

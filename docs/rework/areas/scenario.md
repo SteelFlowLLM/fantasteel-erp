@@ -9,7 +9,7 @@
 
 | 파일 | 내용 |
 |---|---|
-| `client/src/api/scenario/scenarioKit.ts` | 도우미: `EMP`(시드 사원 12명 + 제선 윤성호·열연 한승우), `as(역할)`, `at(시각)`, `useScenarioClock()`, `inspectViaApi`(품질 담당이 기준 안 대표값으로 검사), `stockRawMaterialsViaApi`(구매요청 → 부서장 승인 → 발주 → 전량 입고, 모두 api), `expectClean` |
+| `client/src/api/scenario/scenarioKit.ts` | 도우미: `EMP`(시드 사원 12명 + 제선 윤성호·열연 한승우), `as(역할)`, `at(시각)`, `useScenarioClock()`, `inspectViaApi`(품질 담당이 기준 안 대표값으로 검사), `stockRawMaterials`(구매요청 → 부서장 승인 → 발주 → 전량 입고, core 서비스), `asPurchaseCore`(지금 사원으로 구매 core 서비스 호출)·`mockMrp`(core MRP를 서버 응답 모양으로): 구매 화면 api는 서버만 불러서 가짜 DB 시나리오는 core를 부른다, `expectClean` |
 | `client/src/api/scenario/demo141.test.ts` | 14.1 1~10단계를 한 흐름으로 (1개 시험) |
 | `client/src/api/scenario/demo142.test.ts` | 14.2 혼합·열연(1) / 취소(2) / 메신저(3) |
 | `client/src/api/scenario/checks143.test.ts` | 14.3 P1 줄 가운데 14.1·14.2 흐름 밖의 것 7개 |

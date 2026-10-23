@@ -11,49 +11,51 @@ import { fmtDate, fmtDateTime } from '@/lib/format';
 
 export function ShipmentSummary({ shipment }: { shipment: TraceShipment }) {
   return (
-    <KvList
-      items={[
-        { label: '출하요청', value: <LinkId href={`/shipment-requests/${shipment.shipmentRequestId}`}>{shipment.shipmentRequestNo}</LinkId> },
-        { label: '고객사', value: shipment.customerName },
-        {
-          label: '수주',
-          value: shipment.salesOrders.length ? (
-            <span className="inline-flex flex-wrap gap-2">
-              {shipment.salesOrders.map((so) => (
-                <LinkId key={so.salesOrderId} href={`/sales-orders/${so.salesOrderId}`}>
-                  {so.salesOrderNo}
-                </LinkId>
-              ))}
-            </span>
-          ) : (
-            '-'
-          ),
-        },
-        { label: '출하 요청일', value: <span className="tabular-nums">{fmtDate(shipment.requestedShipDate)}</span> },
-        { label: '출고 일시', value: <span className="tabular-nums">{shipment.issuedAt ? fmtDateTime(shipment.issuedAt) : '출고 전'}</span> },
-        {
-          label: '밀시트',
-          value: shipment.millSheets.length ? (
-            <span className="inline-flex flex-wrap gap-2">
-              {shipment.millSheets.map((m) => (
-                <LinkId key={m.id} href={`/mill-sheets?id=${m.id}`}>
-                  {m.millSheetNo}
-                </LinkId>
-              ))}
-            </span>
-          ) : (
-            <span className="text-ink-3">발행 전</span>
-          ),
-        },
-      ]}
-    />
+    <div data-pet-item="shipmentRequest" data-pet-item-title={shipment.shipmentRequestNo}>
+      <KvList
+        items={[
+          { label: '출하요청', value: <LinkId href={`/shipment-requests/${shipment.shipmentRequestId}`}>{shipment.shipmentRequestNo}</LinkId> },
+          { label: '고객사', value: shipment.customerName },
+          {
+            label: '수주',
+            value: shipment.salesOrders.length ? (
+              <span className="inline-flex flex-wrap gap-2">
+                {shipment.salesOrders.map((so) => (
+                  <LinkId key={so.salesOrderId} href={`/sales-orders/${so.salesOrderId}`}>
+                    {so.salesOrderNo}
+                  </LinkId>
+                ))}
+              </span>
+            ) : (
+              '-'
+            ),
+          },
+          { label: '출하 요청일', value: <span className="tabular-nums">{fmtDate(shipment.requestedShipDate)}</span> },
+          { label: '출고 일시', value: <span className="tabular-nums">{shipment.issuedAt ? fmtDateTime(shipment.issuedAt) : '출고 전'}</span> },
+          {
+            label: '밀시트',
+            value: shipment.millSheets.length ? (
+              <span className="inline-flex flex-wrap gap-2">
+                {shipment.millSheets.map((m) => (
+                  <LinkId key={m.id} href={`/mill-sheets?id=${m.id}`}>
+                    {m.millSheetNo}
+                  </LinkId>
+                ))}
+              </span>
+            ) : (
+              <span className="text-ink-3">발행 전</span>
+            ),
+          },
+        ]}
+      />
+    </div>
   );
 }
 
 export function ShipmentPanel({ shipment, nodes, onSelectLot }: { shipment: TraceShipment; nodes: readonly TraceLotNode[]; onSelectLot: (lotId: number) => void }) {
   const lots = shipment.lotIds.map((id) => nodes.find((n) => n.id === id)).filter((n): n is TraceLotNode => n !== undefined);
   return (
-    <Card className="min-h-0 flex-[1_1_auto]">
+    <Card className="min-h-0 flex-[1_1_auto]" petKey="card:lotTrace.shipment">
       <CardHead title="출하요청 상세" actions={<ShipmentStatusBadge status={shipment.shipmentRequestStatus} />} />
       <div className="flex min-h-0 flex-col gap-3.5 overflow-auto px-4 py-3">
         <ShipmentSummary shipment={shipment} />
@@ -61,7 +63,7 @@ export function ShipmentPanel({ shipment, nodes, onSelectLot }: { shipment: Trac
           {lots.length ? (
             <ul className="m-0 flex max-h-[220px] list-none flex-col gap-1.5 overflow-auto p-0">
               {lots.map((lot) => (
-                <li key={lot.id} className="flex items-center gap-2 text-xs">
+                <li key={lot.id} data-pet-item="lot" data-pet-item-title={lot.lotNo} className="flex items-center gap-2 text-xs">
                   <button type="button" className="border-0 bg-transparent p-0 font-mono text-mono text-run hover:underline" onClick={() => onSelectLot(lot.id)}>
                     {lot.lotNo}
                   </button>

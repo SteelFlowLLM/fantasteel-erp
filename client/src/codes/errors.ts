@@ -4,7 +4,7 @@
 export const ERROR_MESSAGE = {
   'SO-001': '등록되지 않은 규격입니다',
   'SO-002': '수량은 1 이상의 정수로 입력해 주세요',
-  'SO-003': '출고된 매수가 있는 수주는 취소할 수 없습니다',
+  'SO-003': '전량 출고된 수주는 취소할 수 없습니다',
   'SO-004': '진행 중인 출하요청을 먼저 취소해 주세요',
   'MST-001': '수율·배합·규격 매핑·검사 기준 누락',
   'MST-002': '사용된 규격은 치수·이론중량을 수정할 수 없습니다',
@@ -15,6 +15,10 @@ export const ERROR_MESSAGE = {
   'PUR-001': '승인권자(부서장) 미지정',
   'PUR-002': '승인 전 발주 불가',
   'PUR-003': '발주 미입고량 초과',
+  'PUR-004': '입고가 있는 발주는 취소할 수 없습니다',
+  'PUR-005': '일부 입고된 발주만 잔량 마감할 수 있습니다',
+  'PUR-006': '사용한 원료 LOT의 입고는 취소할 수 없습니다',
+  'PUR-007': '취소·마감된 발주입니다',
   'ACT-001': '초안 필수값 미확정',
   'SHP-001': '밀시트 PDF 생성 실패(스냅샷은 있음)',
   'SHP-002': '출하 가능 매수를 넘었습니다',
@@ -25,5 +29,4 @@ export const ERROR_MESSAGE = {
 } as const;
 
 export type ErrorCode = keyof typeof ERROR_MESSAGE;
-export const ERROR_CODES = Object.keys(ERROR_MESSAGE) as ErrorCode[];
 export const isErrorCode = (value: string): value is ErrorCode => value in ERROR_MESSAGE;

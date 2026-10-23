@@ -1,0 +1,195 @@
+# 철강맨 메신저 이모티콘
+
+메신저에서 보내는 움직이는 이모티콘입니다 (18번 8종 + 19번 29종 + 20번 31종 + 21번 6종 + 22번 42종 + 25번 2종 + 7차 9종 + 8차 6종 = 133종, 문서에 없는 추가 기능). 카카오 이모티콘처럼 동작을 크게 하고 짧은 글자를 얹되, 그림과 대사는 철강 공장·결재 업무에 맞춰 새로 만들었습니다. 묶음 세 개가 고르기 창의 탭입니다.
+
+### 철강맨 업무 (`steelman-work`, 41종)
+
+| 키 (`message.emoticon_key`) | 글자 | 동작 |
+|---|---|---|
+| `steelman-ok` | 확인! | 안전모 챙에 손을 붙여 경례 + 반짝 |
+| `steelman-yes` | 넵넵 | 빠르게 두 번 끄덕 |
+| `steelman-thanks` | 감사합니다 | 꾸벅, 안전모가 살짝 미끄러짐 |
+| `steelman-sorry` | 죄송합니다 | 납작 엎드리고 땀 |
+| `steelman-approve` | 결재 완료 | 도장을 쾅 찍고 도장 자국 |
+| `steelman-best` | 최고 | 엄지 척 + 용광로 불꽃 |
+| `steelman-gasp` | 헉! | 크레인 갈고리가 툭 떨어짐 |
+| `steelman-off` | 퇴근! | 손 흔들고 안전모를 벗어 들고 달리기 |
+| `steelman-checking` | 확인 중 | 턱 괴고 생각하며 돋보기로 밀시트 훑기 |
+| `steelman-review` | 검토 / 부탁드려요 | 결재판을 내밀고 꾸벅 |
+| `steelman-reject` | 반려 | 도장 쾅 + 빨간 X 자국, 시큰둥한 얼굴 |
+| `steelman-done` | 완료! | 만세 점프 + 초록 체크 |
+| `steelman-urgent` | 긴급 | 머리 위 경광등이 번쩍, 제자리에서 동동 |
+| `steelman-wait` | 잠시만요 | 손바닥을 내밀며 멈춤 |
+| `steelman-fighting` | 화이팅 | 망치 든 주먹을 두 번 번쩍 + 불꽃 |
+| `steelman-well-done` | 수고 / 하셨습니다 | 깊이 꾸벅 + 하트 |
+| `steelman-hot-rolling` | 열연 중 | 달아오른 몸으로 롤러 위를 달림 (열간 압연 = 열심히 일하는 중) |
+| `steelman-strike` | 쇠뿔도 / 단김에 | 모루 위 달군 쇠를 망치로 땅땅 |
+| `steelman-neat` | 알잘딱깔센 | 흩어진 서류가 날아와 딱 쌓임 |
+| `steelman-decline` | 죄송하지만 / 어렵겠습니다 | 꾸벅 + 작은 X, 땀 (정중한 거절) |
+| `steelman-safety-first` | 안전제일 | 안전모에 손을 얹고 초록 십자 반짝 |
+| `steelman-point-check` | 확인 좋아! | 팔을 쭉 뻗어 가리키며 반짝 (지적확인) |
+| `steelman-pass` | 합격! | 돋보기로 살피고 초록 도장 자국 + 점프 |
+| `steelman-fail` | 불합격 | 돋보기로 살피다 빨간 X, 축 처짐 |
+| `steelman-on-time` | 납기 준수! | 달력에 동그라미 + 점프 |
+| `steelman-lunch` | 점심 식사 | 밥그릇 들고 냠냠 (상태 알림) |
+| `steelman-away` | 자리 비움 | 걸어 나가고 빈 의자만 (상태 알림) |
+| `steelman-meeting` | 회의 중 | 결재판 끼고 종종걸음 (상태 알림) |
+| `steelman-outside` | 외근 중 | 서류 가방 들고 바쁘게 (상태 알림) |
+| `steelman-nep` | 넵! | 차렷 자세로 힘차게 + 반짝 ('네' 변형) |
+| `steelman-inspected` | 점검 완료 | 체크리스트에 체크 척척척 |
+| `steelman-tbm` | TBM 갑니다 | 결재판 끼고 종종걸음 (작업 전 짧은 회의) |
+| `steelman-near-miss` | 아차! | 굴러오는 코일을 폴짝 피하고 땀 (아차사고) |
+| `steelman-tapping` | 출선! | 쇳물이 콸콸 흘러나오고 불꽃 |
+| `steelman-praise` | 칭찬해요 | 트로피를 번쩍 들어 올림 |
+| `steelman-shipped` | 출고 확정! | 상자에 도장 쾅 → 초록 체크 |
+| `steelman-goal` | 월 목표 달성 | 막대그래프가 쑥쑥 오르고 점프 |
+| `steelman-shipping` | 출하 중 | 코일 실은 수레를 밀고 감 |
+| `steelman-overtime` | 야근 중 | 달 뜬 밤, 스탠드 아래서 꾸벅 |
+| `steelman-back` | 돌아왔어요 | 종종걸음으로 들어와 손 흔들기 + 초록 접속 점 (상태 알림) |
+| `steelman-here` | 자리에 있어요 | 의자 옆에서 손 들고 초록 접속 점이 깜빡 (상태 알림) |
+
+### 철강맨 일상 (`steelman-daily`, 80종)
+
+| 키 | 글자 | 동작 |
+|---|---|---|
+| `steelman-panic` | 멘붕 | 눈이 빙글, 안전모가 튕겨 올라 돌다가 삐뚤게 내려앉음 |
+| `steelman-lol` | ㅋㅋㅋ | ^^ 눈으로 좌우로 들썩 + 웃음 눈물 |
+| `steelman-love` | 사랑해요 | 하트 눈으로 손 흔들기 + 하트 퐁퐁 |
+| `steelman-hungry` | 배고파 | 빈 도시락 들고 흐물, 꼬르륵 |
+| `steelman-coffee` | 커피 수혈 | 아이스 라테를 쭉 → 번개 충전 |
+| `steelman-monday` | 월요일… | 먹구름 비를 맞으며 점점 늘어짐 |
+| `steelman-friday` | 불금! | 좌우로 뒤집으며 춤 + 음표 |
+| `steelman-sleepy` | 졸려요 | 코일에 기대 앉아 꾸벅꾸벅 |
+| `steelman-cry` | ㅠㅠ | 눈물 분수 |
+| `steelman-angry` | 부글부글 | 얼굴이 빨개지며 머리에서 김 |
+| `steelman-wow` | 대박 | 놀라고 뒤에서 불꽃놀이 |
+| `steelman-morning` | 굿모닝 | 해가 떠오르고 기지개 |
+| `steelman-yummy` | 군침 싹 | 철판 삼겹살을 보고 눈이 반짝, 침 한 방울 |
+| `steelman-cold-no` | 냉정하게 / 거절 | 팔을 X로, 파랗게 식으며 눈송이 (냉간 압연 말장난) |
+| `steelman-rolled` | 압연 당함 | 롤이 내려와 종잇장처럼 납작 |
+| `steelman-quench` | 담금질 중 | 달군 몸을 물통에 쏙 → 치익 김 → 개운 |
+| `steelman-wall` | 철벽 방어 | 철판 벽이 올라오고 눈만 빼꼼 |
+| `steelman-steel-mind` | 강철 멘탈 | 은빛 몸에 화살이 팅 하고 튕겨 나감 |
+| `steelman-melting` | 멘탈 / 녹는 중 | 아래부터 쇳물처럼 녹아 퍼짐 |
+| `steelman-shaka` | 좋다 | 얼굴 옆에서 🤙 손짓 + 씨익 (2026년 '좋다' 밈) |
+| `steelman-yar` | 야르! | 만세 점프 + 노란 불티 |
+| `steelman-hallelujah` | 할렐야루 | 후광과 빛줄기 속에서 둥실 |
+| `steelman-sense` | 감다살 | 별 눈 + 엄지 척 + 반짝 |
+| `steelman-no-sense` | 감다뒤 | 고개를 천천히 갸웃 + 물음표 |
+| `steelman-unbroken` | 중꺾마 | 머리 위로 든 휜 철판이 팅 하고 펴짐 |
+| `steelman-even-better` | 오히려 좋아 | 비를 맞으면서도 엄지 척 |
+| `steelman-iced` | 얼죽아 | 눈보라 속에서 덜덜 떨며 아이스 커피 |
+| `steelman-ominous` | 불길하다… | 먹구름이 몰려오고 음표가 커짐 |
+| `steelman-inner-voice` | 넵! | 겉은 웃는 얼굴, 생각 풍선 속은 ㅠㅠ (겉과 속) |
+| `steelman-lazy-reply` | ㅇㅇ | 누워서 폰 들고 대충 답장 |
+| `steelman-nep-nep` | 넵넵넵넵 | 무한 끄덕 → 빙글 (넵병) |
+| `steelman-office-ghost` | 사무실 / 지박령 | 다리 없는 창백한 유령이 둥둥 |
+| `steelman-lunch-menu` | 점심 뭐 먹지 | 생각하는 머리 위로 밥·면·김밥이 돌아감 |
+| `steelman-huh` | 예? | 눈이 동그래지며 고개를 내밀고 큰 물음표가 쿵 (요즘 말투 밈, 아래 같음) |
+| `steelman-um` | 엄… | 눈만 좌우로 굴리며 멈칫 + 땀 |
+| `steelman-no-no` | 아뇨아뇨아뇨 | 손을 빠르게 휘저으며 도리도리 |
+| `steelman-gg` | 줴줴이야 | 두 손을 입에 모으고 외치며 하얀 깃발 (GG) |
+| `steelman-t-one` | 티~원 | 이름을 늘여 부르듯 몸이 옆으로 쭉 늘어남 + 마이크 |
+| `steelman-yoi` | 요오오~이 | 한 팔 번쩍 들고 점프 |
+| `steelman-nep-soulless` | 넵… | 눈이 점이 되고 몸이 회색으로 바래짐 (영혼 없는 대답) |
+| `steelman-nee` | 네에~ | 몸이 옆으로 쭉 늘어짐 |
+| `steelman-neng` | 넹 | 볼 빨개지며 고개 갸웃 |
+| `steelman-okay` | ㅇㅋ | 큰 글자가 쿵 떨어지고 구석에 작은 철강맨 (글자만 크게) |
+| `steelman-gogo` | ㄱㄱ | 〃 |
+| `steelman-heol` | 헐 | 〃 |
+| `steelman-kingbat` | 킹받네 | 얼굴이 찌그러지며 부들부들, 빨개짐 |
+| `steelman-out-of-mind` | 정신 나감 | 눈이 빙글, 안전모가 혼자 빙글빙글 |
+| `steelman-rusty` | 녹슬었다 | 몸이 갈색으로 녹슬며 축 처짐 |
+| `steelman-error` | 오류 | 화면 깨지듯 지지직 (X 눈) |
+| `steelman-cheers` | 짠! | 음료 잔을 부딪침 |
+| `steelman-high-five` | 하이파이브 | 반대쪽에서 손이 들어와 짝 |
+| `steelman-payday` | 월급날 | 돈봉투를 안고 빙글빙글 |
+| `steelman-leave-on-time` | 칼퇴 각 | 6시 시계 아래 가방 들고 대기 → 잔상만 남기고 사라짐 |
+| `steelman-weekend-gone` | 주말 순삭 | 달력이 휙휙 넘어가고 멍 |
+| `steelman-envy` | 부럽다 | 철판 벽 뒤에서 반만 보며 별 눈 |
+| `steelman-eh` | 엥? | 고개를 크게 갸웃 + 물음표 |
+| `steelman-stop-it` | 그만해 | 손바닥 내밀며 천천히 도리도리 |
+| `steelman-reality-check` | 현타 | 창밖을 멍하니, 회색으로 |
+| `steelman-fuss` | 요들갑 | 팔다리 파닥파닥 + 느낌표 3개 |
+| `steelman-serious` | 진지 모드 | 안경을 쓰면 렌즈가 번쩍 |
+| `steelman-bobflix` | 밥플릭스 | 밥그릇 옆에 폰 세워 두고 냠냠 |
+| `steelman-flex` | 플렉스 | 선글라스 쓰고 돈봉투 흔들기 |
+| `steelman-clap` | 박수 | 짝짝짝 |
+| `steelman-coil-dog` | 코일이 멍! | 조연 '코일이'(코일 강아지)가 굴러와 꼬리 살랑 |
+| `steelman-slab-cat` | 냥이 기지개 | 조연 '슬래브 냥이'가 납작하게 쭉 기지개 |
+| `steelman-lucky-vicky` | 럭키비키 | 네잎클로버가 팔랑 떨어져 손에 쏙 → 별 눈으로 만세 (7차 요즘 말투 밈, 아래 같음) |
+| `steelman-are-you-t` | 너 T야? | 실눈 뜨고 고개를 쓱 내밀면 파란 T 표가 퐁 |
+| `steelman-form` | 폼 미쳤다 | 선글라스 쓴 은빛 몸에 광택이 쓱 지나가고 뒤에서 불꽃 |
+| `steelman-workout` | 오운완 | 아령을 머리 위로 번쩍번쩍 → 초록 체크 (오늘 운동 완료) |
+| `steelman-self-made` | 스불재 | 서류를 한 장 더 올렸다가 무너진 더미에 깔림 (스스로 불러온 재앙) |
+| `steelman-forced-hype` | 억텐 | 활짝 웃으며 박수치는데 땀이 늘고, 한순간 영혼이 빠졌다 돌아옴 (억지 텐션) |
+| `steelman-azas` | 아자스! | 한 손 번쩍 + 가볍게 꾸벅꾸벅 + 엄지 (가벼운 '고마워') |
+| `steelman-agree` | ㅇㅈ | 큰 글자가 쿵 떨어지고 구석에 작은 철강맨 (글자만 크게, 인정) |
+| `steelman-real` | ㄹㅇ | 〃 (레알) |
+| `steelman-take-the-l` | L을 가져가 | L자 앵글(ㄱ형강)이 떨어져 손에 쏙 → 무게에 살짝 눌렸다가 웃으며 받아들임 (8차 2026년 하반기 밈, 아래 같음. 패배 인정) |
+| `steelman-before-work` | 일하기 전 / 제 모습이고요 | 별 눈으로 반짝이다 광택이 지나간 뒤, 회색으로 바래 납작해지고 땀·졸음 (일 전후 비교) |
+| `steelman-geoje-yaho` | 거제 야호! | 두 손을 입에 모아 외치고 만세 점프 |
+| `steelman-quit-joke` | 퇴사할게여 | 사직서 봉투를 신나게 흔들다 눈치 보며 슬쩍 내리고 머쓱하게 웃음 (장난으로 하는 말) |
+| `steelman-carefree` | 책없쾌 | 남의 강아지(조연 코일이)를 하트 눈으로 실컷 예뻐하고 손 흔들어 보냄 (책임 없는 쾌락) |
+| `steelman-like-you` | 니가 좋아~ | 마이크 들고 눈 감고 좌우로 흔들며 립싱크 → 하트 눈 + 하트 |
+
+요즘 말투 밈 6종(21번)은 말 자체의 재미만 쓰고, 그 말투를 쓰는 사람을 놀리는 그림은 넣지 않았습니다. 같은 말투로 묶이는 '야모슨'은 뜻을 확인하지 못해 뺐습니다(혐오 커뮤니티 말투에서 왔다는 글도 있음). 7차 9종도 같은 기준으로 골랐습니다(출처가 분명하고 누구를 깎아내리지 않는 말만). 8차 6종(2026년 6~10월 유행어)도 같은 기준이고, 연예인·방송에서 나온 말은 사람 모습을 그리지 않고 말과 동작의 특징만 철강맨으로 옮겼습니다. 퇴사할게여·니가 좋아는 장난으로 쓰는 말이라는 게 보이게 그렸습니다(사직서를 슬쩍 집어넣음, 노래 립싱크).
+
+### 철강맨 행사 (`steelman-event`, 12종)
+
+| 키 | 글자 | 동작 |
+|---|---|---|
+| `steelman-new-year` | 새해 복 / 많이 받으세요 | 한복(분홍 저고리·고름, 파란 바지) 입고 절 + 그해 띠(2027 양) + 복주머니 + 작은 불꽃놀이. 띠는 `set_event.py`의 `ZODIAC`을 해마다 바꿈 |
+| `steelman-seollal` | 즐거운 / 설 보내세요 | 떡국 한 그릇 + 김 |
+| `steelman-chuseok` | 즐거운 / 추석 보내세요 | 보름달 + 송편 한 접시 |
+| `steelman-year-end` | 올해도 / 수고했어요 | 안전모에 눈이 쌓인 채 꾸벅 |
+| `steelman-birthday` | 생일 / 축하해요 | 촛불 케이크 + 꽃가루 |
+| `steelman-welcome` | 환영합니다 | 꽃가루가 빵빵 터지고 손 흔들기 |
+| `steelman-promotion` | 승진 / 축하드려요 | 안전모에 줄무늬가 하나 더 + 꽃가루 |
+| `steelman-christmas` | 메리 성탄! | 산타 모자 안전모 + 눈 |
+| `steelman-hot` | 더워요 | 해 아래서 녹아내림 |
+| `steelman-cold` | 추워요 | 파랗게 얼고 안전모에 고드름 |
+| `steelman-vacation` | 휴가 갑니다! | 밀짚모자에 캐리어, 손 흔들기 |
+| `steelman-congrats` | 축하해요 | 폭죽 빵 + 꽃가루 |
+
+키·이름·묶음 목록은 `shared/src/messenger.ts`의 `MESSAGE_EMOTICONS`·`MESSAGE_EMOTICON_SETS`입니다. 이모티콘을 더하면 묶음 정의(`scripts/set_*.py`)와 그 목록을 함께 고칩니다. 묶음을 새로 만들면 `gen_emoticon.py`의 `SETS`와 `export_emoticon.sh`의 묶음 목록에도 더합니다. DB는 바꾸지 않습니다.
+
+## 규격
+
+- 캔버스 64×64px, 투명 배경. 캐릭터는 48px 칸을 (8, 15)에 놓고, 위쪽에 글자(네이비 1px 외곽선)를 얹습니다. 글자가 길면 두 줄로 쓰고 캐릭터를 2칸 내립니다.
+- 글자 글꼴은 한글 도트 글꼴 [Galmuri](https://github.com/quiple/galmuri)(OFL-1.1, `fonts/`)이고, 도트가 깨끗하게 나오는 크기에서만 씁니다(24번, 2026-10-10). 한 줄은 Galmuri11 Bold 12px, 폭(60px)을 넘으면 Galmuri11 Condensed 12px → Galmuri9 10px. 두 줄은 Galmuri9 10px, 넘으면 Galmuri7 8px. 큰 글자(ㅇㅋ·ㄱㄱ·헐)는 Galmuri14 15px에 외곽선을 둘러 정확히 2배로 키움(Galmuri11 Bold는 '헐'처럼 획이 촘촘한 글자가 뭉개짐).
+- 화면은 2배(128px)로 `image-rendering: pixelated`로 보여 줍니다. 크기는 48(글자 없음)·64·128(64를 Scale2x) 시안을 비교해서 64로 정했습니다(2026-10-08).
+- 캐릭터: 노션 「디자인」 페이지의 펫 철강맨 신형 작업복 시트(`source/steelman_pet_sheet.png`, 칸 48px, 동작 17줄). 몸은 시트 프레임을 쓰고, 시트에 없는 것은 프레임을 바꿔 만들었습니다: 고개 숙이기·들썩임(머리만 옮김), 납작해지기·늘어나기(위·옆), 눈·입 바꾸기(하트·빙글·ㅠ·눈 굴리기 등 14가지), 색 바꾸기(빨개짐·파래짐·달아오름·은빛·쇳물), 안전모 벗기기.
+- 새로 그린 소품: 도장·도장 자국(체크/X), 크레인 갈고리, 엄지, 불꽃, 땀·눈물, 속도선·먼지, 돋보기·밀시트, 결재판, 경광등, 체크, 손바닥, 망치, 하트, 돈봉투, 시계, 체크리스트, 안경·선글라스, 밀짚모자·캐리어, 산타 모자, 고드름, 출고 상자, 스탠드, 폭죽, 음료 잔, 창문, 수레, 막대그래프, 쇳물 줄기, 조연 코일이·슬래브 냥이, 도시락, 아이스 라테, 번개, 먹구름·비, 음표, 코일, 김·화남 표시, 해, 철판 삼겹살, 눈송이, X 팔, 압연 롤, 물통, 철판 벽, 화살, 모루·달군 쇠, 큰 물음표, 하얀 깃발, 마이크, 외침 표시, 입에 모은 손, 네잎클로버, T 표, 아령, 강철 광택 띠, L자 앵글, 사직서 봉투.
+
+## 파일
+
+| 파일 | 내용 |
+|---|---|
+| `steelman_work_64.aseprite`, `steelman_daily_64.aseprite`, `steelman_event_64.aseprite` | 원본 (묶음마다 하나). 태그 = 이모티콘 이름, 레이어 = 뒤효과 · 캐릭터 · 앞효과 · 글자. 프레임마다 재생 시간 |
+| `gif/<키>.gif` | 움직임 (원본 크기) |
+| `png/<키>.png` | 멈춘 그림 = 가장 오래 머무는 프레임 ('동작 줄이기'를 켠 사람에게 보임) |
+| `sheet/` | 묶음별 스프라이트 시트(한 줄에 이모티콘 하나) + 프레임 위치·재생 시간·태그 json |
+| `source/steelman_pet_sheet.png` | 바탕 캐릭터 시트 |
+| `fonts/` | 글자 글꼴 Galmuri11 Bold·Condensed, Galmuri9, Galmuri7, Galmuri14 (2.40.3, OFL-1.1 라이선스 `OFL.md`·`OFL-ko.md`). 글꼴을 고쳐 다시 배포하지 않고 그림을 만드는 데만 씀 |
+| `scripts/` | 다시 만들기: `emoticon_lib.py`(공통 그리기), `set_work.py`·`set_daily.py`·`set_event.py`(묶음 정의), `gen_emoticon.py`(묶음 → .aseprite), `export_emoticon.sh`(전부) |
+
+화면은 `client/public/emoticons/<키>.gif`·`.png` 사본을 씁니다.
+
+## 다시 만들기
+
+```bash
+./docs/character/steelman-emoticon/scripts/export_emoticon.sh
+```
+
+`gen_emoticon.py`가 묶음마다 프레임을 레이어 PNG로 만들고 Aseprite Lua로 `.aseprite`를 만든 뒤, Aseprite CLI로 GIF·시트를 내보내고 `client/public/emoticons/`로 복사합니다. 그림을 고치면서 볼 때는 `python3 scripts/gen_emoticon.py source/steelman_pet_sheet.png --review work 검토.png`로 프레임을 한 장에 펼쳐 봅니다. 필요한 것: Aseprite(Steam판 경로 기본, `ASEPRITE`로 바꿀 수 있음), python3, Pillow. 글자 글꼴은 저장소의 `fonts/`(Galmuri)를 쓰므로 OS와 관계없이 같은 그림이 나옵니다.
+
+7차 9종·8차 6종의 GIF·PNG는 Aseprite가 없는 PC에서 같은 프레임을 Pillow로 내보낸 것입니다(픽셀·재생 시간은 스크립트 결과와 같음). `steelman_daily_64.aseprite`와 `sheet/steelman_daily_64.*`에는 아직 없으니, Aseprite가 있는 PC에서 `export_emoticon.sh`를 한 번 돌리면 모두 맞춰집니다.
+
+Aseprite에서 `.aseprite`를 직접 고쳤다면 스크립트를 다시 돌리지 말고(덮어씀) Aseprite에서 GIF·PNG를 내보내 `gif/`·`png/`와 `client/public/emoticons/`에 넣습니다.
+
+## 아쉬운 점
+
+- 시트에 없는 표정·자세(빙글 눈, 눈물, 녹아내림 등)는 스크립트로 바꾼 것이라 시트 원본보다 단순합니다.
+- 확인!의 경례는 시트에 경례 자세가 없어 손 흔들기의 손을 안전모 챙 높이로 옮긴 것입니다(22번).
+- Galmuri9·7은 굵게가 없어 두 줄 글자는 한 줄 글자보다 가늘고, 아주 긴 두 줄(새해·추석)은 8px까지 작아집니다.

@@ -1,0 +1,48 @@
+// AI 패널 맥락 (REQ-AST-007): 위젯에서 열면 맥락을 들고 열리고, 상단 버튼으로 열거나 닫으면 맥락을 지운다.
+import { beforeEach, describe, expect, it } from 'vitest';
+import { useShellStore } from '@/stores/useShellStore';
+
+const context = { label: '강종별 불합격률 · SM355A · 최근 30일', question: 'SM355A 최근 30일 불합격 원인 알려줘' };
+
+beforeEach(() => useShellStore.setState({ aiPanelOpen: false, aiContext: null, aiPanelExpanded: false }));
+
+describe('AI 패널 맥락', () => {
+  it('맥락을 들고 열면 패널이 열리고 맥락이 남는다', () => {
+    useShellStore.getState().openAiPanel(context);
+    expect(useShellStore.getState()).toMatchObject({ aiPanelOpen: true, aiContext: context });
+  });
+
+  it('닫으면 맥락을 지운다', () => {
+    useShellStore.getState().openAiPanel(context);
+    useShellStore.getState().closeAiPanel();
+    expect(useShellStore.getState()).toMatchObject({ aiPanelOpen: false, aiContext: null });
+  });
+
+  it('상단 버튼(토글)으로 열면 맥락 없이 연다', () => {
+    useShellStore.getState().openAiPanel(context);
+    useShellStore.getState().closeAiPanel();
+    useShellStore.getState().toggleAiPanel();
+    expect(useShellStore.getState()).toMatchObject({ aiPanelOpen: true, aiContext: null });
+  });
+});
+
+describe('AI 패널 크게 펼치기 (REQ-AST-001)', () => {
+  it('펼쳤다 줄일 수 있고, 닫으면 다음에는 작게 열린다', () => {
+    useShellStore.getState().toggleAiPanel();
+    useShellStore.getState().toggleAiPanelExpanded();
+    expect(useShellStore.getState().aiPanelExpanded).toBe(true);
+    useShellStore.getState().closeAiPanel();
+    useShellStore.getState().toggleAiPanel();
+    expect(useShellStore.getState()).toMatchObject({ aiPanelOpen: true, aiPanelExpanded: false });
+  });
+});
+
+describe('AI 패널 보고서 칩 (이슈 #384)', () => {
+  it('보고서로 묻기는 패널을 열고 칩을 붙이며, ×로 지울 수 있다', () => {
+    useShellStore.setState({ aiResearchRef: null });
+    useShellStore.getState().askAboutResearch({ id: 5, title: '열연 코일 조사' });
+    expect(useShellStore.getState()).toMatchObject({ aiPanelOpen: true, aiResearchRef: { id: 5, title: '열연 코일 조사' } });
+    useShellStore.getState().setAiResearchRef(null);
+    expect(useShellStore.getState().aiResearchRef).toBeNull();
+  });
+});

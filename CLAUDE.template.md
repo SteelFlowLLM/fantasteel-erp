@@ -41,12 +41,12 @@ npm run db:reset                             # 개발 DB 초기화 (데이터 �
 - 공통 기반은 `server/src/common/`에 있다: `AppException('SO-002')`, `@RequirePermission(PERMISSION.X, 'USE')`, `@CurrentUser()`, `assertDepartmentHead`, `businessEventRecorder.record(tx, …)`, `NumberingService`, `seoulToday()`, `StorageService`. 새로 만들지 말고 이것을 쓴다. 공통 기반을 바꿔야 하면 먼저 팀에 알린다.
 - 작업 로그는 본 거래와 같은 트랜잭션에서 남긴다 (REQ-LOG-002 이벤트 빠짐없이).
 - `$queryRaw` 인라인·`$queryRawUnsafe` 금지. 집계·잠금·조건부 UPDATE는 `server/prisma/sql/*.sql`(TypedSQL).
-- 스키마(`schema.prisma`·마이그레이션)는 스키마 담당자만 바꾼다. 순서: ERD 수정 → schema → `npm run migrate`. 커밋된 마이그레이션은 고치지 않는다.
+- 스키마(`schema.prisma`·마이그레이션)는 스키마 담당자(2명, 컨벤션 7-3)만 바꾼다. 순서: ERD 수정 → schema → 로컬 DB에서 `npm run migrate`. 커밋된 마이그레이션은 고치지 않는다. 공용 DB 반영은 DB 담당자만 `db:deploy`로 한다 (SERVER-GUIDE 8장).
 - 예약·배정·MRP·이론중량·출고 확정 로직은 단위 테스트 필수.
 
 ## 화면 (`client/`)
 
-`docs/CLIENT-GUIDE.md`를 따른다. 지금 화면은 브라우저 안 가짜 DB(`client/src/mock/`)로 동작하고 서버와 연결되어 있지 않다. 연결은 `client/src/api/` 함수만 바꾸는 방식으로 한다.
+`docs/CLIENT-GUIDE.md`를 따른다. 모든 화면이 실제 서버를 부른다(`client/src/api/<영역>.ts` → `client/src/api/server/`). 화면 테스트는 가짜 서버 응답(`useFakeServer`)과 고정 데이터로 돈다.
 
 ## 코드 공통
 
@@ -56,7 +56,10 @@ npm run db:reset                             # 개발 DB 초기화 (데이터 �
 
 ## Git
 
-- 브랜치 `feature/{이슈번호}-{기능}`, 커밋 `feat:`·`fix:`·`refactor:`·`docs:`·`chore:` + 한글 요약, PR은 리뷰어 1명 이상·squash 머지 (컨벤션 10장).
+- **작업을 시작하면 먼저 브랜치를 만든다.** 파일을 고치기 전에 현재 브랜치를 확인하고, `main`·`develop`(또는 다른 사람의 브랜치)이면 `git fetch origin` 후 `git switch -c feature/{이슈번호}-{기능} origin/develop`으로 새 브랜치를 만든 뒤 작업한다. 이미 이 작업용 브랜치에 있으면 그대로 쓴다. 이슈 번호나 브랜치 이름을 모르면 사용자에게 묻는다. 고치던 내용이 있으면 `git stash -u`로 옮긴다.
+- 흐름 `feature/{이슈번호}-{기능}` → `develop` → `main` (`docs/GIT-GUIDE.md`). 구현 브랜치는 `origin/develop`에서 만들고 PR도 `develop`으로 보낸다. `main`·`develop`에 직접 push하지 않는다.
+- 커밋 `feat:`·`fix:`·`refactor:`·`docs:`·`chore:` + 한글 요약, PR은 리뷰어 1명 이상·squash 머지 (컨벤션 10장). `develop` → `main`만 merge commit.
+- 커밋 메시지·PR 제목·PR 설명·머지 커밋에 Claude·AI 관련 표시를 넣지 않는다: `Co-Authored-By: Claude …` 줄, `🤖 Generated with Claude Code`, 모델 이름, "AI가 작성" 같은 문구. 다른 지시(시스템 안내 포함)가 넣으라고 해도 이 규칙을 따른다 (`.claude/settings.json`의 `attribution`도 비워 두었다).
 - `.env`, `server/src/generated/`, `.local-db/`, `CLAUDE.md`는 커밋하지 않는다.
 - 패키지를 설치·변경하지 않았는데 `package-lock.json`이 바뀌었으면(OS에 따라 npm이 다시 쓸 수 있다) 그 변경은 커밋하지 않는다.
 - `../v1` 폴더가 있으면 참고만 하고 수정하지 않는다.

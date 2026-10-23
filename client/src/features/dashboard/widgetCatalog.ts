@@ -23,7 +23,7 @@ export interface WidgetDef {
   link?: { screen: ScreenDef; label: string };
 }
 
-const SOON_KEYS: readonly SoonWidgetKey[] = ['AGENT_RISK', 'AI_USAGE'];
+const SOON_KEYS: readonly SoonWidgetKey[] = ['AI_USAGE'];
 export const isSoonWidget = (key: DashboardWidgetKey): key is SoonWidgetKey => (SOON_KEYS as readonly string[]).includes(key);
 
 type WidgetSpec = Omit<WidgetDef, 'key' | 'soon'>;
@@ -44,7 +44,7 @@ const SPEC: Record<DashboardWidgetKey, WidgetSpec> = {
     isDefault: true,
     description: '진행 중 수주 품목의 생산중·검사합격·예약·출하 매수와 진행률을 납기 빠른 순으로 보여 줘요',
     icon: 'clipboard',
-    defaultW: 6,
+    defaultW: 8,
     defaultH: 5,
     minW: 4,
     minH: 3,
@@ -55,10 +55,11 @@ const SPEC: Record<DashboardWidgetKey, WidgetSpec> = {
     isDefault: true,
     description: 'AI Factory Agent가 감지한 위험과 대응 후보를 보여 줘요',
     icon: 'radar',
-    defaultW: 6,
+    defaultW: 4,
     defaultH: 5,
     minW: 3,
     minH: 3,
+    link: { screen: SCREEN.agent, label: 'Agent' },
   },
   RECENT_EVENTS: {
     label: '최근 작업 로그',
@@ -107,13 +108,13 @@ const SPEC: Record<DashboardWidgetKey, WidgetSpec> = {
   REJECT_RATE: {
     label: '강종별 불합격률',
     isDefault: false,
-    description: '최근 판정된 검사의 강종별·공정별 불합격률을 보여 줘요',
+    description: '최근 판정된 검사의 강종별·공정별 불합격률을 보여 줘요 (합격률로 바꿔 볼 수 있어요)',
     icon: 'quality',
     defaultW: 6,
     defaultH: 4,
     minW: 3,
     minH: 3,
-    link: { screen: SCREEN.rejectedLots, label: '불합격 관리' },
+    // 바로가기 없음: 불합격 관리는 왼쪽 메뉴에 있고, 머리 오른쪽은 불합격률·합격률 전환이 쓴다
   },
   DELIVERY_RISK: {
     label: '납기 위험 수주',
@@ -173,7 +174,7 @@ const SPEC: Record<DashboardWidgetKey, WidgetSpec> = {
   AI_USAGE: {
     label: 'AI 활용 현황',
     isDefault: false,
-    description: 'AI 어시스턴트·업무 초안·Agent를 얼마나 썼는지 보여 줘요',
+    description: '철강맨AI·업무 초안·Agent를 얼마나 썼는지 보여 줘요',
     icon: 'wave',
     defaultW: 6,
     defaultH: 4,

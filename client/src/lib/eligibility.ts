@@ -27,8 +27,3 @@ export function productEligibility(lot: EligibilityLot, heat: EligibilityHeat | 
   if (lot.isPassed === null || !heat || heat.isPassed === null) return 'PENDING';
   return 'ELIGIBLE';
 }
-
-/** 불합격 관리 대상인지 (제품 불합격 또는 상위 히트 불합격). 소진·출고 여부와 관계없이 품질만 본다. */
-export function isQualityExcluded(lot: Pick<EligibilityLot, 'isPassed'>, heat: EligibilityHeat | null | undefined): boolean {
-  return lot.isPassed === false || heat?.isPassed === false;
-}

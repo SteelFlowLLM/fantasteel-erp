@@ -1,42 +1,74 @@
 // 열연 투입 배정·열연 실적 API (REQ-PRD-004, REQ-INV-006·008·009, BP-INV-01, 14.2).
-// - 코일 계획 → 대응 슬래브 규격·필요 매수. FIFO 추천(생산완료일 → LOT 번호)은 저장하지 않고 확정 때 작업 로그로 남긴다(core).
+// - 코일 계획 → 대응 슬래브 규격·필요 매수. FIFO 추천(생산완료일 → LOT 번호)은 저장하지 않고 확정 때 작업 로그로 남긴다(서버).
 // - 판매 ACTIVE 예약 몫은 침범하지 않는다(예약 가용 안에서만). '귀속' 단계는 없다.
 // - 배정 확정·변경·해제 = HOT_ROLLING_ALLOCATE 사용 권한. 열연 실적(슬래브 소비 → 코일) = PRODUCTION_RESULT_CONFIRM 사용 권한.
-import { PERMISSION, type LotStatus, type ProductionPlanStatus } from '@/codes';
-import { mockMutation, mockQuery } from '@/api/client';
-import { requireActor } from '@/api/actor';
-import { lotQualityOf, type LotQuality } from '@/api/production';
-import { sortFifo } from '@/lib/fifo';
-import type { MockTables } from '@/mock/schema';
-import {
-  changeAllocation,
-  confirmRollingAllocations,
-  findById,
-  heatOf,
-  inputError,
-  mustGet,
-  productionResultViewsOf,
-  registerHotRolling,
-  releaseAllocation,
-  rollingPlanView,
-  rollingRecommendation,
-  unallocatedEligibleLotsOf,
-  userActor,
-  type ProductionResultView,
-  type RollingAllocationView,
-  type RollingPlanView,
-} from '@/mock/services';
+// 서버를 부른다 (api/server/production.ts).
+import { type LotStatus, type ProductionPlanStatus } from '@/codes';
+import { serverRollingApi } from '@/api/server/production';
+import { type LotQuality, type ProductionResultView } from '@/api/production';
 
-type Tables = Readonly<MockTables>;
+export interface RollingLotView {
+  lotId: number;
+  lotNo: string;
+  producedDate: string;
+  heatNo: string | null;
+  sourcePlanNo: string | null;
+  surplusAt: string | null;
+}
+
+export interface RollingAllocationView extends RollingLotView {
+  allocationId: number;
+  confirmedAt: string;
+  confirmedEmployeeName: string | null;
+}
+
+/** 슬래브 규격의 예약 풀 (4.2) */
+export interface ReservationPool {
+  itemId: number;
+  /** 미소진 합격 제품 매수 */
+  eligibleQty: number;
+  /** ACTIVE 예약 매수 합계 (= inventory.reserved_qty) */
+  activeReservedQty: number;
+  /** 열연용 CONFIRMED 배정 매수 (적격 슬래브). 판매 예약과 겹치지 않으므로 모두 예약으로 커버되지 않는 배정이다 */
+  hotRollingConfirmedQty: number;
+  /** 출하용 CONFIRMED 배정 매수 (ACTIVE 예약의 일부라 다시 빼지 않는다) */
+  shipmentConfirmedQty: number;
+  /** 예약 가용 = 적격 − ACTIVE 예약 − 열연 배정 (4.2). 불변조건상 0 이상 */
+  availableQty: number;
+}
+
+export interface RollingPlanView {
+  productionPlanId: number;
+  productionPlanNo: string;
+  productionPlanStatus: ProductionPlanStatus;
+  salesOrderNo: string | null;
+  dueDate: string | null;
+  coilItem: { id: number; itemCode: string; itemName: string; theoreticalWeightTon: string };
+  slabItem: { id: number; itemCode: string; itemName: string; theoreticalWeightTon: string };
+  shortageQty: number;
+  /** 이미 만든 코일 = 합격 + 판정 대기 (불합격·히트 불합격 코일은 세지 않는다) */
+  rolledQty: number;
+  /** 불합격(히트 불합격 포함) 코일 — 필요 매수에서 빼지 않는다 */
+  failedCoilQty: number;
+  /** CONFIRMED 열연 배정 */
+  allocatedQty: number;
+  /** 더 배정해야 할 슬래브 = max(0, 부족 − 코일(불합격 제외) − 배정) */
+  neededQty: number;
+  /** 슬래브 규격 풀 (예약 가용 = 판매 예약 몫을 뺀 수) */
+  slabPool: ReservationPool;
+  /** 지금 추천할 수 있는 매수 = min(필요, 예약 가용) */
+  recommendableQty: number;
+  allocations: RollingAllocationView[];
+  /** 수주 연결이 있어야 열연한다 */
+  rollable: boolean;
+  notRollableReason: string | null;
+}
 
 export const rollingKeys = {
   all: ['hot-rolling'] as const,
   plans: () => ['hot-rolling', 'plans'] as const,
   detail: (planId: number) => ['hot-rolling', 'detail', planId] as const,
 };
-
-const ROLLING_VIEW = [PERMISSION.HOT_ROLLING_ALLOCATE] as const;
-const ROLLING_USE = [PERMISSION.HOT_ROLLING_ALLOCATE] as const;
 
 export interface RollingPlanListRow {
   productionPlanId: number;
@@ -97,61 +129,6 @@ export interface RollingDetail {
   coils: RolledCoil[];
 }
 
-function rollingDetailOf(tables: Tables, planId: number): RollingDetail {
-  const plan = rollingPlanView(tables, planId);
-  const recommendation = rollingRecommendation(tables, planId);
-  const recommended = new Set(recommendation.lots.map((l) => l.lotId));
-  const candidates = sortFifo(unallocatedEligibleLotsOf(tables, plan.slabItem.id)).map((lot, index) => ({
-    lotId: lot.id,
-    lotNo: lot.lotNo,
-    producedDate: lot.producedDate,
-    heatNo: heatOf(tables, lot)?.lotNo ?? null,
-    sourcePlanNo: findById(tables, 'productionPlan', lot.productionPlanId)?.productionPlanNo ?? null,
-    isOwnPlan: lot.productionPlanId === planId,
-    surplusAt: lot.surplusAt,
-    yardName: findById(tables, 'yard', lot.yardId)?.yardName ?? null,
-    fifoRank: index + 1,
-    isRecommended: recommended.has(lot.id),
-  }));
-  const rollableAllocationIds = plan.allocations
-    .filter((a) => {
-      const lot = findById(tables, 'lot', a.lotId);
-      return lot !== undefined && lot.lotStatus === 'AVAILABLE' && lotQualityOf(lot, heatOf(tables, lot)) === 'PASS';
-    })
-    .map((a) => a.allocationId);
-  const coils = tables.lot
-    .filter((l) => l.productionPlanId === planId && l.lotType === 'COIL')
-    .sort((a, b) => a.id - b.id)
-    .map((coil) => {
-      const slabRelation = tables.lotRelation.find((r) => r.childLotId === coil.id);
-      return {
-        lotId: coil.id,
-        lotNo: coil.lotNo,
-        slabNo: findById(tables, 'lot', slabRelation?.parentLotId)?.lotNo ?? null,
-        producedDate: coil.producedDate,
-        quality: lotQualityOf(coil, heatOf(tables, coil)),
-        lotStatus: coil.lotStatus,
-        hasConfirmedAllocation: tables.allocation.some((a) => a.lotId === coil.id && a.allocationStatus === 'CONFIRMED'),
-      };
-    });
-  const planRow = mustGet(tables, 'productionPlan', planId, '생산계획');
-  return {
-    plan,
-    salesOrderId: findById(tables, 'salesOrderItem', planRow.salesOrderItemId)?.salesOrderId ?? null,
-    candidates,
-    recommendedLotIds: recommendation.lots.map((l) => l.lotId),
-    rollableAllocationIds,
-    results: productionResultViewsOf(tables, planId).filter((r) => r.processType === 'HOT_ROLLING'),
-    coils,
-  };
-}
-
-/** 이 배정이 열연 배정인지 확인한다 (출하 배정은 출하요청 화면에서 바꾼다) */
-function assertHotRollingAllocation(tables: Tables, allocationId: number): void {
-  const allocation = mustGet(tables, 'allocation', allocationId, '배정');
-  if (allocation.allocationPurpose !== 'HOT_ROLLING') inputError('allocationId', '열연 투입 배정만 이 화면에서 바꿀 수 있어요');
-}
-
 export interface ConfirmRollingInput {
   productionPlanId: number;
   lotIds: number[];
@@ -174,81 +151,21 @@ export interface HotRollingResultInput {
 
 export const rollingApi = {
   /** 코일 계획 목록 (최근 것 먼저). 진행 중(계획·진행중)이 먼저 오도록 화면에서 묶는다. */
-  plans: (): Promise<RollingPlanListRow[]> =>
-    mockQuery((tables) => {
-      requireActor(tables, { view: ROLLING_VIEW });
-      const rows: RollingPlanListRow[] = [];
-      const coilPlans = tables.productionPlan.filter((p) => findById(tables, 'item', p.itemId)?.itemType === 'COIL').sort((a, b) => b.id - a.id);
-      for (const p of coilPlans) {
-        try {
-          const v = rollingPlanView(tables, p.id);
-          rows.push({
-            productionPlanId: v.productionPlanId,
-            productionPlanNo: v.productionPlanNo,
-            productionPlanStatus: v.productionPlanStatus,
-            salesOrderNo: v.salesOrderNo,
-            dueDate: v.dueDate,
-            coilItemCode: v.coilItem.itemCode,
-            slabItemCode: v.slabItem.itemCode,
-            shortageQty: v.shortageQty,
-            rolledQty: v.rolledQty,
-            failedCoilQty: v.failedCoilQty,
-            allocatedQty: v.allocatedQty,
-            neededQty: v.neededQty,
-            rollable: v.rollable,
-          });
-        } catch {
-          // 규격 매핑이 없는 계획은 열연 화면에 나오지 않는다 (MST-001은 기준정보 준비 상태에서 보인다)
-        }
-      }
-      return rows;
-    }),
+  plans: (): Promise<RollingPlanListRow[]> => serverRollingApi.plans(),
 
   /** 코일 계획 하나: 필요 매수·슬래브 풀·FIFO 추천·확정 배정·열연 실적·코일 */
-  detail: (productionPlanId: number): Promise<RollingDetail> =>
-    mockQuery((tables) => {
-      requireActor(tables, { view: ROLLING_VIEW });
-      return rollingDetailOf(tables, productionPlanId);
-    }),
+  detail: (productionPlanId: number): Promise<RollingDetail> => serverRollingApi.detail(productionPlanId),
 
   /** 배정 확정 (HOT_ROLLING CONFIRMED). INV-001 필요·예약 가용 초과 / INV-002 미합격 / INV-003 이미 배정 / INV-004 소진 */
-  confirm: (input: ConfirmRollingInput): Promise<{ allocatedQty: number }> =>
-    mockMutation((tx) => {
-      const actor = requireActor(tx.tables, { use: ROLLING_USE });
-      const rows = confirmRollingAllocations(tx, userActor(actor.employee.id), { productionPlanId: input.productionPlanId, lotIds: input.lotIds });
-      return { allocatedQty: rows.length };
-    }),
+  confirm: (input: ConfirmRollingInput): Promise<{ allocatedQty: number }> => serverRollingApi.confirm(input),
 
   /** 배정 변경: 기존 배정 해제 + 새 LOT 배정을 한 번에, 사유 필수 (BP-INV-01) */
-  change: (input: ChangeRollingInput): Promise<{ allocationId: number }> =>
-    mockMutation((tx) => {
-      const actor = requireActor(tx.tables, { use: ROLLING_USE });
-      assertHotRollingAllocation(tx.tables, input.allocationId);
-      const row = changeAllocation(tx, userActor(actor.employee.id), input);
-      return { allocationId: row.id };
-    }),
+  change: (input: ChangeRollingInput): Promise<{ allocationId: number }> => serverRollingApi.change(input),
 
   /** 배정 해제 (소진된 배정은 INV-004) */
-  release: (input: { allocationId: number; reasonText?: string | null }): Promise<{ allocationId: number }> =>
-    mockMutation((tx) => {
-      const actor = requireActor(tx.tables, { use: ROLLING_USE });
-      assertHotRollingAllocation(tx.tables, input.allocationId);
-      const row = releaseAllocation(tx, userActor(actor.employee.id), { allocationId: input.allocationId, reasonText: input.reasonText?.trim().slice(0, 500) || null });
-      return { allocationId: row.id };
-    }),
+  release: (input: { allocationId: number; reasonText?: string | null }): Promise<{ allocationId: number }> => serverRollingApi.release(input),
 
   /** 열연 실적: 배정 슬래브 소비 → 슬래브 1매 = 코일 1개 `C+슬래브번호`(HT- 제외), 코일 검사 대상 */
-  registerHotRolling: (input: HotRollingResultInput): Promise<{ productionResultId: number; coilNos: string[] }> =>
-    mockMutation((tx) => {
-      const actor = requireActor(tx.tables, { use: [PERMISSION.PRODUCTION_RESULT_CONFIRM] });
-      const { coilLots, resultId } = registerHotRolling(tx, userActor(actor.employee.id), {
-        productionPlanId: input.productionPlanId,
-        allocationIds: input.allocationIds && input.allocationIds.length > 0 ? input.allocationIds : null,
-        startedAt: input.startedAt,
-        completedAt: input.completedAt,
-      });
-      return { productionResultId: resultId, coilNos: coilLots.map((c) => c.lotNo) };
-    }),
+  registerHotRolling: (input: HotRollingResultInput): Promise<{ productionResultId: number; coilNos: string[] }> => serverRollingApi.registerHotRolling(input),
 };
 
-export type { RollingAllocationView, RollingPlanView };

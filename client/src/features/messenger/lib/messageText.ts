@@ -1,6 +1,8 @@
 // 메시지 본문 해석 (REQ-MSG-005 멘션, REQ-MSG-006 ERP 화면 이동). 순수 함수라 api와 화면이 함께 쓴다.
 // - @멘션: 방 멤버 이름 또는 부서 이름 앞에 @를 붙인다. 긴 이름부터 맞춰 겹치는 이름을 구분한다.
 // - ERP 번호: 수주(SO-)·구매요청(PR-)·출하요청(DR-) 번호(업무 프로세스 9.1)가 실제로 있으면 그 상세 화면 링크가 된다.
+// - 작은 이모티콘(23번, 문서에 없는 추가 기능): ':steelman-ok:'처럼 적은 자리에 작은 그림을 그린다 (shared splitInlineEmoticons).
+import { splitInlineEmoticons, type ErpLink, type MessageEmoticonKey } from '@fantasteel/shared';
 
 export interface NamedCandidate {
   name: string;
@@ -26,36 +28,14 @@ export function findMentions<T extends NamedCandidate>(content: string, candidat
   return found;
 }
 
-export type ErpNoKind = 'SALES_ORDER' | 'PURCHASE_REQUISITION' | 'SHIPMENT_REQUEST';
-
-const ERP_NO_PATTERN = /\b(SO-\d{4}-\d{3,}|PR-\d{4}-\d{4,}|DR-\d{4}-\d{4,})\b/g;
-
-const KIND_OF_PREFIX: Record<string, ErpNoKind> = {
-  SO: 'SALES_ORDER',
-  PR: 'PURCHASE_REQUISITION',
-  DR: 'SHIPMENT_REQUEST',
-};
-
-/** 본문의 업무 번호 (같은 번호는 한 번만) */
-export function findErpNos(content: string): { no: string; kind: ErpNoKind }[] {
-  const result: { no: string; kind: ErpNoKind }[] = [];
-  for (const match of content.matchAll(ERP_NO_PATTERN)) {
-    const no = match[1];
-    const kind = KIND_OF_PREFIX[no.slice(0, 2)];
-    if (kind && !result.some((r) => r.no === no)) result.push({ no, kind });
-  }
-  return result;
-}
-
-export interface ErpLink {
-  text: string;
-  href: string;
-}
+// 업무 번호 해석은 서버와 같은 규칙을 쓰려고 shared에 둔다
+export { findErpNos, type ErpLink, type ErpNoKind } from '@fantasteel/shared';
 
 export type TextSegment =
   | { kind: 'text'; text: string }
   | { kind: 'mention'; text: string; isMe: boolean }
-  | { kind: 'link'; text: string; href: string };
+  | { kind: 'link'; text: string; href: string }
+  | { kind: 'emoticon'; text: string; key: MessageEmoticonKey };
 
 export interface SplitOptions {
   /** 멘션으로 칠할 이름 (방 멤버·부서 이름) */
@@ -65,8 +45,15 @@ export interface SplitOptions {
   links: readonly ErpLink[];
 }
 
-/** 본문을 글·멘션·링크 조각으로 나눈다 (화면 표시용) */
+/** 본문을 글·멘션·링크·작은 이모티콘 조각으로 나눈다 (화면 표시용) */
 export function splitMessageText(content: string, options: SplitOptions): TextSegment[] {
+  // 작은 이모티콘 글(':키:')에는 '@'나 업무 번호가 들어가지 않아, 멘션·링크를 먼저 나눈 뒤 글 조각만 다시 나눠도 된다
+  return splitMentionsAndLinks(content, options).flatMap((segment): TextSegment[] =>
+    segment.kind === 'text' ? splitInlineEmoticons(segment.text).map((part) => (part.kind === 'text' ? part : { kind: 'emoticon', text: part.text, key: part.key })) : [segment],
+  );
+}
+
+function splitMentionsAndLinks(content: string, options: SplitOptions): TextSegment[] {
   const names = options.mentionNames.filter(Boolean).map((name) => ({ name }));
   const links = [...options.links].sort((a, b) => b.text.length - a.text.length);
   const segments: TextSegment[] = [];

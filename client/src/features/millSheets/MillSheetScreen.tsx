@@ -1,12 +1,13 @@
 'use client';
 // 밀시트 (REQ-SHP-003·004, BP-SHP-01 문서 보존, 보고서 1 A-9). 목록 | 종이 화면. 선택은 URL ?id=.
-// 'PDF 생성' = 브라우저 인쇄(종이만 찍히는 인쇄 CSS) → 끝나면 pdf_path를 남겨 'PDF 생성됨'으로 보인다.
-// 인쇄를 시작하지 못하면 SHP-001(스냅샷은 있음)로 알리고 같은 스냅샷으로 다시 시도한다 — 출고는 다시 하지 않는다.
+// 'PDF 생성' = 브라우저에서 스냅샷으로 PDF 파일을 만들어 {밀시트 번호}_{고객사}_{발행일}.pdf로 내려받는다 → 끝나면 pdf_path를 남겨 'PDF 생성됨'으로 보인다.
+// 만들지 못하면 SHP-001(스냅샷은 있음)로 알리고 같은 스냅샷으로 다시 시도한다 — 출고는 다시 하지 않는다.
 // C 반영: PDF 상태 코드 없음(pdf_path 유무), 출고번호 대신 출하요청, 칩 문구는 공통 코드 ITEM_TYPE 표시명.
+import { millSheetPdfFileName } from '@fantasteel/shared';
 import { useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { ERROR_MESSAGE, ITEM_TYPE_LABEL, PERMISSION, type ProductItemType } from '@/codes';
+import { ERROR_MESSAGE, ITEM_TYPE_LABEL, PERMISSION, SHIPMENT_REQUEST_STATUS_LABEL, type ProductItemType } from '@/codes';
 import type { MillSheetDetailView, MillSheetListRow } from '@/api/millSheets';
 import { Banner } from '@/components/Banner';
 import { Button, ButtonLink } from '@/components/Button';
@@ -18,6 +19,7 @@ import { ReadOnlyHint } from '@/components/ReadOnlyHint';
 import { EmptyNote, StateView } from '@/components/StateView';
 import { MillSheetPaper } from '@/features/millSheets/components/MillSheetPaper';
 import { MillSheetPrintPortal } from '@/features/millSheets/components/MillSheetPrintPortal';
+import { downloadMillSheetPdf, toPdfSnapshot } from '@/features/millSheets/lib/millSheetPdf';
 import { useShellTitle } from '@/features/shell/useShellTitle';
 import { PdfBadge, SalesOrderLink, ShipmentRequestLink } from '@/features/shipment/components/ShipmentBadges';
 import { useMarkMillSheetPdf, useMillSheetDetail, useMillSheetList } from '@/hooks/useMillSheets';
@@ -64,6 +66,7 @@ function ListPane({ query, selectedId }: { query: ReturnType<typeof useMillSheet
   const groups = [...new Set(visible.map((r) => r.shipmentRequestId))].map((id) => visible.filter((r) => r.shipmentRequestId === id));
   return (
     <MasterPane
+      petKey="card:millSheets.list"
       head={
         <>
           <div className="flex items-center gap-2">
@@ -73,7 +76,7 @@ function ListPane({ query, selectedId }: { query: ReturnType<typeof useMillSheet
           <Input leadingIcon="search" placeholder="밀시트·수주·고객사·규격·히트 검색" value={keyword} onChange={(e) => setKeyword(e.target.value)} aria-label="밀시트 검색" />
           <div className="flex gap-1.5">
             {TYPE_FILTERS.map((f) => (
-              <Chip key={f} on={filter === f} onClick={() => setFilter(f)}>
+              <Chip key={f} on={filter === f} onClick={() => setFilter(f)} data-pet-term={f === 'ALL' ? '전체' : ITEM_TYPE_LABEL[f]}>
                 {f === 'ALL' ? '전체' : ITEM_TYPE_LABEL[f]}
                 <b>{f === 'ALL' ? rows.length : rows.filter((r) => r.itemTypes.includes(f)).length}</b>
               </Chip>
@@ -92,8 +95,18 @@ function ListPane({ query, selectedId }: { query: ReturnType<typeof useMillSheet
             <ul>
               {groups.map((group) => (
                 <li key={group[0].shipmentRequestId}>
-                  <div className="bg-surface-2 px-4 py-1.5 text-cap text-ink-3">
-                    {fmtMDHM(group[0].issuedAt)} 출고 · <span className="font-mono">{group[0].shipmentRequestNo}</span>
+                  <div className="flex items-center gap-1 bg-surface-2 px-4 py-1.5 text-cap text-ink-3" data-pet-item="goodsIssue" data-pet-item-title={group[0].shipmentRequestNo}>
+                    <span className="flex-none" data-pet-field="출고 일시">
+                      {fmtMDHM(group[0].issuedAt)}
+                    </span>
+                    <span className="flex-none">{SHIPMENT_REQUEST_STATUS_LABEL.ISSUED} ·</span>
+                    <span className="flex-none font-mono">{group[0].shipmentRequestNo}</span>
+                    <span className="ml-auto min-w-0 truncate" data-pet-field="고객사">
+                      {group[0].customerName}
+                    </span>
+                    <span className="flex-none" data-pet-field="밀시트">
+                      {group.length}장
+                    </span>
                   </div>
                   <ul>
                     {group.map((row) => (
@@ -117,23 +130,31 @@ function ListItem({ row, selected }: { row: MillSheetListRow; selected: boolean 
       <Link
         href={`/mill-sheets?id=${row.id}`}
         aria-current={selected ? 'page' : undefined}
-        className={cn('flex flex-col gap-1 border-b border-line px-4 py-2.5 hover:bg-surface-2', selected && 'bg-brand-tint shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-brand-tint')}
+        data-pet-item="millSheet"
+        data-pet-item-title={row.millSheetNo}
+        className={cn('flex flex-col gap-1 border-b border-line px-4 py-2.5 hover:bg-surface-2', selected && 'bg-brand-tint shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-brand-tint-hover')}
       >
         <span className="flex items-center gap-2">
           <span className="font-mono text-mono font-semibold">{row.millSheetNo}</span>
-          <span className="ml-auto">
+          <span className="ml-auto" data-pet-field="PDF">
             <PdfBadge pdfPath={row.pdfPath} />
           </span>
         </span>
         <span className="flex items-center gap-1.5 text-sm">
-          <span className="truncate">{row.customerName}</span>
-          <span className="font-mono text-cap text-ink-3">{row.salesOrderNo}</span>
+          <span className="truncate" data-pet-field="고객사">
+            {row.customerName}
+          </span>
+          <span className="font-mono text-cap text-ink-3" data-pet-field="수주">
+            {row.salesOrderNo}
+          </span>
         </span>
-        <span className="text-xs text-ink-2">
+        <span className="text-xs text-ink-2" data-pet-field="품목 · 수량 · 이론중량">
           {row.itemTypes.map((t) => ITEM_TYPE_LABEL[t]).join('·')} {row.itemCodes[0]}
           {row.itemCodes.length > 1 ? ` 외 ${row.itemCodes.length - 1}` : ''} · {row.totalQty} · {fmtTon(row.totalWeightTon)}
         </span>
-        <span className="text-cap text-ink-3">발행 {fmtDate(row.issuedAt)}</span>
+        <span className="text-cap text-ink-3" data-pet-field="발행일">
+          발행 {fmtDate(row.issuedAt)}
+        </span>
       </Link>
     </li>
   );
@@ -152,17 +173,20 @@ function DetailBody({ detail }: { detail: MillSheetDetailView }) {
   const canPrint = useCanUse(PERMISSION.MILL_SHEET_READ);
   const mark = useMarkMillSheetPdf();
   const [printFailed, setPrintFailed] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const s = detail.snapshot;
   useShellTitle(detail.millSheetNo, s.customer.customerName);
 
-  /** 브라우저 인쇄 창을 연다. 인쇄 창에서 'PDF로 저장'을 고르면 PDF가 된다. */
-  const generatePdf = () => {
+  /** 스냅샷으로 PDF 파일을 만들어 저장 이름 양식으로 내려받는다 (브라우저 인쇄 창은 환경에 따라 파일 이름을 못 채운다). */
+  const generatePdf = async () => {
+    setGenerating(true);
     try {
-      if (typeof window.print !== 'function') throw new Error('print unavailable');
-      window.print();
+      await downloadMillSheetPdf(s);
     } catch {
       setPrintFailed(true);
       return;
+    } finally {
+      setGenerating(false);
     }
     setPrintFailed(false);
     if (!detail.pdfPath) mark.mutate({ millSheetId: detail.id });
@@ -188,17 +212,20 @@ function DetailBody({ detail }: { detail: MillSheetDetailView }) {
               <ButtonLink href={`/lots/trace?shipmentRequestNo=${encodeURIComponent(s.shipmentRequest.shipmentRequestNo)}`} variant="ghost" icon="trace">
                 LOT 추적
               </ButtonLink>
-              <Button variant="primary" icon="print" disabled={!canPrint || mark.isPending} title={canPrint ? undefined : permissionNeedText([PERMISSION.MILL_SHEET_READ])} onClick={generatePdf}>
-                {mark.isPending ? 'PDF 만드는 중…' : detail.pdfPath ? 'PDF 다시 출력' : 'PDF 생성'}
+              <Button data-pet-target="card:millSheets.pdf" variant="primary" icon="print" disabled={!canPrint || mark.isPending || generating} title={canPrint ? undefined : permissionNeedText([PERMISSION.MILL_SHEET_READ])} onClick={generatePdf}>
+                {mark.isPending || generating ? 'PDF 만드는 중…' : detail.pdfPath ? 'PDF 다시 내려받기' : 'PDF 생성'}
               </Button>
             </>
           }
         />
-        <div className="-mt-2 flex flex-wrap items-center gap-2 text-sm text-ink-2">
-          <span className="font-medium text-ink">{s.customer.customerName}</span>
-          <SalesOrderLink salesOrderId={s.salesOrder.salesOrderId} salesOrderNo={s.salesOrder.salesOrderNo} />
-          <ShipmentRequestLink id={s.shipmentRequest.shipmentRequestId} no={s.shipmentRequest.shipmentRequestNo} />
-          <span className="text-ink-3">· 발행 {fmtDateTime(detail.issuedAt)}</span>
+        <div className="-mt-2 flex flex-wrap items-center gap-2 self-start text-sm text-ink-2">
+          {/* 펫 강조 테두리는 고객사·수주·출하요청 묶음에만 단다: 글자를 키워 PDF 경로가 다음 줄로 넘어가면 줄이 화면 너비만큼 늘어나 테두리가 오른쪽 빈 곳까지 커진다 */}
+          <span data-pet-target="card:millSheets.links" className="flex flex-wrap items-center gap-2">
+            <span className="font-medium text-ink">{s.customer.customerName}</span>
+            <SalesOrderLink salesOrderId={s.salesOrder.salesOrderId} salesOrderNo={s.salesOrder.salesOrderNo} />
+            <ShipmentRequestLink id={s.shipmentRequest.shipmentRequestId} no={s.shipmentRequest.shipmentRequestNo} />
+            <span className="text-ink-3">· 발행 {fmtDateTime(detail.issuedAt)}</span>
+          </span>
           {detail.pdfPath ? <span className="font-mono text-cap text-ink-3">· {detail.pdfPath}</span> : null}
         </div>
         {printFailed ? (
@@ -217,12 +244,12 @@ function DetailBody({ detail }: { detail: MillSheetDetailView }) {
           </Banner>
         ) : null}
         <Banner tone="neutral" icon="info">
-          발행 시점 값을 스냅샷으로 저장해요. 화면과 PDF 모두 이 스냅샷만 써요. 인쇄 창에서 &lsquo;PDF로 저장&rsquo;을 고르면 PDF 파일이 돼요.
+          발행 시점 값을 스냅샷으로 저장해요. 화면과 PDF 모두 이 스냅샷만 써요. &lsquo;PDF 생성&rsquo;을 누르면 {millSheetPdfFileName(toPdfSnapshot(s))} 이름으로 내려받아요.
         </Banner>
       </div>
       <MillSheetPaper snapshot={s} />
       <MillSheetPrintPortal>
-        <MillSheetPaper snapshot={s} />
+        <MillSheetPaper snapshot={s} forPrint />
       </MillSheetPrintPortal>
     </>
   );

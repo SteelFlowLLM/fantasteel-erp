@@ -14,7 +14,7 @@ import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
 import { Tag } from '@/components/Tag';
-import { CODE_LINK, MASTER_LOCK_TEXT, ModalFooter, RowActions, TableFoot } from '@/features/masterData/components/MasterParts';
+import { CODE_LINK, MASTER_LOCK_TEXT, ModalFooter, RowActions, TableFoot, useMasterDelete } from '@/features/masterData/components/MasterParts';
 import { useAction } from '@/hooks/useAction';
 import { useMasterDataFieldErrors } from '@/hooks/useMasterDataForm';
 import { useMasterSteelGrades } from '@/hooks/useMasterData';
@@ -23,14 +23,16 @@ const buildSteelmakingHref = (steelGradeId: number) => `/quality/standards?proce
 
 export function SteelGradeTab({ canEdit }: { canEdit: boolean }) {
   const grades = useMasterSteelGrades();
-  const [editing, setEditing] = useState<MasterSteelGradeView | 'new' | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<MasterSteelGradeView | null>(null);
+  const deletion = useMasterDelete();
   return (
-    <Card>
+    <Card petKey="card:masterData.grades">
       <CardHead
         title="강종"
         meta={grades.data ? `${grades.data.length}종` : undefined}
         actions={
-          <Button size="sm" variant="primary" icon="plus" disabled={!canEdit} title={canEdit ? undefined : MASTER_LOCK_TEXT} onClick={() => setEditing('new')}>
+          <Button size="sm" variant="primary" icon="plus" disabled={!canEdit} title={canEdit ? undefined : MASTER_LOCK_TEXT} onClick={() => setAdding(true)}>
             강종 추가
           </Button>
         }
@@ -52,7 +54,7 @@ export function SteelGradeTab({ canEdit }: { canEdit: boolean }) {
                 </thead>
                 <tbody>
                   {rows.map((g) => (
-                    <tr key={g.id}>
+                    <tr key={g.id} data-pet-item="steelGrade" data-pet-item-title={g.steelGradeCode}>
                       <Td className="font-semibold">{g.steelGradeCode}</Td>
                       <Td>{g.steelGradeName}</Td>
                       <Td>{g.standardNo ?? <span className="text-ink-3">적용 규격 번호 없음</span>}</Td>
@@ -76,7 +78,7 @@ export function SteelGradeTab({ canEdit }: { canEdit: boolean }) {
                         <RowActions
                           canEdit={canEdit}
                           onEdit={() => setEditing(g)}
-                          remove={{ what: `강종 ${g.steelGradeCode}`, run: () => masterDataApi.deleteSteelGrade(g.id), success: '강종을 삭제했어요', blockedReason: g.referenceText }}
+                          onDelete={() => deletion.open({ id: g.id, name: g.steelGradeCode, object: '강종을', remove: masterDataApi.deleteSteelGrade })}
                         />
                       </Td>
                     </tr>
@@ -87,40 +89,48 @@ export function SteelGradeTab({ canEdit }: { canEdit: boolean }) {
             </div>
             <TableFoot>
               성분 규격(C·Si·Mn·P·S, SM 계열 탄소당량)은 품질 담당이 검사 기준(제강)에서 버전으로 관리해요 · SM355는 A–D 등급을 각각 강종으로 등록해요 · 규격·원단위·검사
-              기준·LOT가 쓰는 강종은 지울 수 없어요
+              기준·LOT가 쓰는 강종은 지울 수 없고 코드도 바꿀 수 없어요 (이름·적용 규격 번호는 고칠 수 있어요)
             </TableFoot>
           </>
         )}
       </QueryBoundary>
-      {editing ? <SteelGradeModal grade={editing === 'new' ? null : editing} onClose={() => setEditing(null)} /> : null}
+      {adding ? <SteelGradeModal onClose={() => setAdding(false)} /> : null}
+      {editing ? <SteelGradeModal key={editing.id} editing={editing} onClose={() => setEditing(null)} /> : null}
+      {deletion.dialog}
     </Card>
   );
 }
 
-function SteelGradeModal({ grade, onClose }: { grade: MasterSteelGradeView | null; onClose: () => void }) {
+/**
+ * 강종 추가·수정 (API-169·280). 수정은 이름·적용 규격 번호를 언제든 고치고, 코드는 쓰는 곳이 없을 때만 바꾼다(서버가 확인).
+ * 규격이 있는 강종은 화면에서도 코드를 잠가 둔다. 불러온 뒤 다른 사람이 고쳤으면 서버가 거절한다 (COM-001).
+ */
+function SteelGradeModal({ onClose, editing }: { onClose: () => void; editing?: MasterSteelGradeView }) {
   const fieldErrors = useMasterDataFieldErrors();
-  const [code, setCode] = useState(grade?.steelGradeCode ?? '');
-  const [name, setName] = useState(grade?.steelGradeName ?? '');
-  const [standardNo, setStandardNo] = useState(grade?.standardNo ?? '');
-  const options = { onSuccess: onClose, onError: fieldErrors.takeFrom };
-  const create = useAction(masterDataApi.createSteelGrade, { ...options, success: '강종을 추가했어요' });
-  const update = useAction(masterDataApi.updateSteelGrade, { ...options, success: '강종을 저장했어요' });
-
-  const submit = () => {
-    if (grade) update.mutate({ id: grade.id, steelGradeName: name, standardNo, expectedUpdatedAt: grade.updatedAt });
-    else create.mutate({ steelGradeCode: code, steelGradeName: name, standardNo });
-  };
+  const [code, setCode] = useState(editing?.steelGradeCode ?? '');
+  const [name, setName] = useState(editing?.steelGradeName ?? '');
+  const [standardNo, setStandardNo] = useState(editing?.standardNo ?? '');
+  const create = useAction(masterDataApi.createSteelGrade, { onSuccess: onClose, onError: fieldErrors.takeFrom, success: '강종을 추가했어요' });
+  const update = useAction(masterDataApi.updateSteelGrade, { onSuccess: onClose, onError: fieldErrors.takeFrom, refreshOnStale: true, onStale: onClose, success: '강종을 고쳤어요' });
+  const pending = create.isPending || update.isPending;
+  // 서버가 내려 준 쓰는 곳(품목·배합 원단위·검사 기준·LOT)이 하나라도 있으면 서버와 같은 기준으로 코드를 잠근다
+  const lockedBy = editing?.codeLockedBy ?? [];
+  const codeLocked = lockedBy.length > 0;
+  const submit = () =>
+    editing
+      ? update.mutate({ id: editing.id, steelGradeCode: code, steelGradeName: name, standardNo, expectedUpdatedAt: editing.updatedAt })
+      : create.mutate({ steelGradeCode: code, steelGradeName: name, standardNo });
   return (
     <Modal
-      title={grade ? `강종 수정 · ${grade.steelGradeCode}` : '강종 추가'}
+      title={editing ? `강종 수정 · ${editing.steelGradeCode}` : '강종 추가'}
       onClose={onClose}
       width={460}
-      footer={<ModalFooter pending={create.isPending || update.isPending} submitLabel={grade ? '저장' : '추가'} onCancel={onClose} onSubmit={submit} />}
+      footer={<ModalFooter pending={pending} submitLabel={editing ? '저장' : '추가'} onCancel={onClose} onSubmit={submit} />}
     >
-      <Field label="강종 코드" required hint={grade ? '강종 코드는 바꿀 수 없어요' : '영문 대문자·숫자·하이픈 (예: SM355A)'} error={fieldErrors.errorOf('steelGradeCode')}>
+      <Field label="강종 코드" required hint={codeLocked ? `쓰는 곳이 있어 코드를 바꿀 수 없어요: ${lockedBy.join('·')}` : '영문 대문자·숫자·하이픈 (예: SM355A)'} error={fieldErrors.errorOf('steelGradeCode')}>
         <Input
           value={code}
-          readOnly={grade !== null}
+          disabled={codeLocked}
           maxLength={20}
           placeholder="SM355A"
           invalid={fieldErrors.errorOf('steelGradeCode') !== null}

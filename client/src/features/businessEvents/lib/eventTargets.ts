@@ -1,8 +1,6 @@
 // 작업 로그 대상(target_type = 테이블 DB명)의 화면 이름과 이동할 화면.
 // 이름은 용어 사전의 엔티티 한글명(DB명 열)이다. 용어 사전에 없는 테이블은 DB명을 그대로 보인다.
-import type { DbTableName } from '@/mock/schema';
-
-export const TARGET_TABLE_LABEL: Partial<Record<DbTableName, string>> = {
+export const TARGET_TABLE_LABEL: Partial<Record<string, string>> = {
   sales_order: '수주',
   sales_order_item: '수주 품목',
   reservation: '예약',
@@ -21,6 +19,7 @@ export const TARGET_TABLE_LABEL: Partial<Record<DbTableName, string>> = {
   shipment_request_item: '출하요청 품목',
   mill_sheet: '밀시트',
   action_draft: 'Action Draft',
+  past_case: '과거 사례',
   item: '품목',
   steel_grade: '강종',
   customer: '고객사',
@@ -30,8 +29,8 @@ export const TARGET_TABLE_LABEL: Partial<Record<DbTableName, string>> = {
   department: '부서',
 };
 
-/** 대상 필터에 보이는 테이블: 29개 이벤트가 기록되는 업무 테이블 (REQ-LOG-002) */
-export const TARGET_FILTER_TABLES: readonly DbTableName[] = [
+/** 대상 필터에 보이는 테이블: 작업 로그 이벤트가 기록되는 업무 테이블 (REQ-LOG-002). 강종(불합격률 상승 감지)·과거 사례는 #509에서 더했다 */
+export const TARGET_FILTER_TABLES = [
   'sales_order',
   'sales_order_item',
   'production_plan',
@@ -47,11 +46,15 @@ export const TARGET_FILTER_TABLES: readonly DbTableName[] = [
   'shipment_request_item',
   'mill_sheet',
   'action_draft',
-];
+  'steel_grade',
+  'past_case',
+] as const;
 
-export const targetTableLabel = (table: string): string => TARGET_TABLE_LABEL[table as DbTableName] ?? table;
+export type TargetFilterTable = (typeof TARGET_FILTER_TABLES)[number];
 
-export const isTargetFilterTable = (value: string): value is DbTableName => (TARGET_FILTER_TABLES as readonly string[]).includes(value);
+export const targetTableLabel = (table: string): string => TARGET_TABLE_LABEL[table] ?? table;
+
+export const isTargetFilterTable = (value: string): value is TargetFilterTable => (TARGET_FILTER_TABLES as readonly string[]).includes(value);
 
 export const lotTraceHref = (lotNo: string, direction?: 'backward' | 'forward'): string =>
   `/lots/trace?lot=${encodeURIComponent(lotNo)}${direction ? `&direction=${direction}` : ''}`;
@@ -69,6 +72,8 @@ export interface TargetRef {
   purchaseOrderId?: number | null;
   /** 출하요청 품목 대상(배정 추천)일 때 그 출하요청 id */
   shipmentRequestId?: number | null;
+  /** 초안 대상이 Agent 대응 후보인지 (후보는 메시지 초안 상세가 아니라 Agent 화면에서 본다) */
+  isAgentCandidate?: boolean;
 }
 
 /** 대상 번호를 눌렀을 때 갈 화면 (없으면 null). 화면 주소의 쿼리 이름은 각 화면의 약속을 따른다. */
@@ -103,7 +108,7 @@ export function targetHref(target: TargetRef): string | null {
     case 'mill_sheet':
       return `/mill-sheets?id=${targetId}`;
     case 'action_draft':
-      return `/action-drafts/${targetId}`;
+      return target.isAgentCandidate ? '/agent' : `/action-drafts/${targetId}`;
     default:
       return null;
   }

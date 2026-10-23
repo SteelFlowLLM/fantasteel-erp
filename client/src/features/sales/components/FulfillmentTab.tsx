@@ -21,6 +21,7 @@ import { SHIPMENT_REQUEST_STATUS_TONE } from '@/lib/statusTone';
 import { sumTon } from '@/lib/weight';
 import { ShipmentRequestButton, WorkRoomButton } from '@/features/sales/components/SalesOrderActions';
 import { DueRiskBadge, DueText, ItemLabel, MeasureBar, PlanLink, SalesOrderStatusBadge } from '@/features/sales/components/SalesOrderParts';
+import { ScreenLink } from '@/features/shell/ScreenLink';
 import { qtyUnitOf } from '@/features/sales/lib/salesOrderForm';
 
 const isShipmentRequestStatus = (value: string): value is ShipmentRequestStatus => value in SHIPMENT_REQUEST_STATUS_LABEL;
@@ -88,17 +89,14 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <Card>
+      <Card petKey="card:salesOrders.fulfillment">
         <div className="overflow-auto">
           <Table>
             <thead>
               <tr>
                 <Th>품목</Th>
-                <Th align="right">수주 매수</Th>
-                <Th align="right" title="매수 × 1매 이론중량 계산값">
-                  톤 (계산값)
-                </Th>
-                <Th>납기</Th>
+                {/* 수주 매수·톤·납기를 한 칸 두 줄로: 열 10개면 1440px에서도 표가 넘쳐 출하·미확보·추가 계획 필요가 오른쪽으로 잘렸다 */}
+                <Th title="수주 매수 · 톤(매수 × 1매 이론중량 계산값) · 납기">수주 · 납기</Th>
                 <Th title={`${RESERVATION_STATUS_LABEL.ACTIVE} 매수 ÷ 미출하 매수`}>예약 ÷ 미출하</Th>
                 <Th title="진행중·완료 생산계획의 잔여 목표 ÷ 수주 매수">생산중 ÷ 수주</Th>
                 <Th title="이 품목 몫으로 확보한 합격 제품(예약 + 출하) ÷ 수주 매수">검사합격 ÷ 수주</Th>
@@ -116,38 +114,46 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
                 const itemUnit = qtyUnitOf([item.itemType]);
                 const cancelled = item.salesOrderItemStatus === 'CANCELLED';
                 return (
-                  <tr key={item.salesOrderItemId} data-muted={cancelled} data-risk={item.isDueRisk}>
-                    <Td className="max-w-[260px]">
+                  <tr
+                    key={item.salesOrderItemId}
+                    data-pet-item="salesOrderItem"
+                    data-pet-item-title={`품목 ${item.lineNo} ${item.itemName}`}
+                    data-muted={cancelled}
+                    data-risk={item.isDueRisk}
+                  >
+                    <Td className="max-w-[240px]">
                       <span className="flex flex-col gap-1 py-1.5">
                         <ItemLabel lineNo={item.lineNo} itemType={item.itemType} itemName={item.itemName} />
                         <span className="flex items-center gap-1">
                           <SalesOrderStatusBadge status={item.salesOrderItemStatus} />
                           {item.isDueRisk ? <DueRiskBadge /> : null}
-                          <span className="font-mono text-[11px] text-ink-3">{item.itemCode}</span>
+                          <span className="font-mono text-cap text-ink-3">{item.itemCode}</span>
                         </span>
                       </span>
                     </Td>
-                    <Td align="right" className="tabular-nums">
-                      {item.orderedQty}
-                      <small className="ml-px text-cap text-ink-3">{itemUnit}</small>
-                    </Td>
-                    <Td align="right" className="tabular-nums">
-                      {fmtTon(item.orderedTon)}
+                    <Td>
+                      <span className="flex flex-col gap-0.5 whitespace-nowrap">
+                        <span className="tabular-nums">
+                          {item.orderedQty}
+                          <small className="ml-px text-cap text-ink-3">{itemUnit}</small>
+                          <span className="text-cap text-ink-3"> · {fmtTon(item.orderedTon)}</span>
+                        </span>
+                        <span className="text-xs">
+                          <DueText dueDate={item.dueDate} risk={item.isDueRisk} done={cancelled || item.salesOrderItemStatus === 'SHIPPED'} />
+                        </span>
+                      </span>
                     </Td>
                     <Td>
-                      <DueText dueDate={item.dueDate} risk={item.isDueRisk} done={cancelled || item.salesOrderItemStatus === 'SHIPPED'} />
+                      <MeasureBar label="예약" unit={itemUnit} tone="brand" measure={item.measures.reserved} compact />
                     </Td>
                     <Td>
-                      <MeasureBar label="예약" unit={itemUnit} tone="brand" measure={item.measures.reserved} />
+                      <MeasureBar label="생산중" unit={itemUnit} tone="muted" measure={item.measures.inProduction} compact />
                     </Td>
                     <Td>
-                      <MeasureBar label="생산중" unit={itemUnit} tone="muted" measure={item.measures.inProduction} />
+                      <MeasureBar label="검사합격" unit={itemUnit} tone="ok" measure={item.measures.passed} compact />
                     </Td>
                     <Td>
-                      <MeasureBar label="검사합격" unit={itemUnit} tone="ok" measure={item.measures.passed} />
-                    </Td>
-                    <Td>
-                      <MeasureBar label="출하" unit={itemUnit} tone="run" measure={item.measures.shipped} />
+                      <MeasureBar label="출하" unit={itemUnit} tone="run" measure={item.measures.shipped} compact />
                     </Td>
                     <Td align="right" className="tabular-nums">
                       {cancelled ? '-' : `${item.shortage.unsecuredQty}${itemUnit}`}
@@ -162,14 +168,11 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
             <tfoot>
               <tr>
                 <Td>합계</Td>
-                <Td align="right" className="tabular-nums">
+                <Td className="whitespace-nowrap tabular-nums">
                   {detail.totalOrderedQty}
                   {unit}
+                  <span className="text-cap font-normal text-ink-3"> · {fmtTon(sumTon(detail.items.map((i) => i.orderedTon)))}</span>
                 </Td>
-                <Td align="right" className="tabular-nums">
-                  {fmtTon(sumTon(detail.items.map((i) => i.orderedTon)))}
-                </Td>
-                <Td />
                 <Td className="tabular-nums">
                   {sum((i) => i.activeReservedQty)} / {sum((i) => i.shortage.unshippedQty)}
                   {unit}
@@ -198,7 +201,7 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
             </tfoot>
           </Table>
         </div>
-        <div className="border-t border-line px-4 py-2.5 text-cap leading-[18px] text-ink-3">
+        <div className="border-t border-line px-4 py-2.5 text-cap leading-relaxed text-ink-3">
           지표마다 분모가 달라요. 예약은 미출하 매수로, 생산중·검사합격·출하는 수주 매수로 나눠요. 검사합격은 이 품목 몫으로 확보한 합격 제품(예약 + 출하)이라
           예약과 겹쳐요 — 지표를 더하지 않아요. 미확보 = 미출하 − 예약, 추가 계획 필요 = 미확보 − 진행 계획 잔여 목표.
         </div>
@@ -221,14 +224,19 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
       ))}
 
       <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-4">
-        <Card>
+        <Card petKey="card:salesOrders.shipping">
           <CardHead title="출하 준비" meta="출하요청·밀시트" actions={<ShipmentRequestButton summary={detail} />} />
           <CardBody>
             <ul className="flex flex-col gap-1 text-sm">
               {live.map((item) => (
-                <li key={item.salesOrderItemId} className="flex items-center gap-2">
+                <li
+                  key={item.salesOrderItemId}
+                  data-pet-item="salesOrderItem"
+                  data-pet-item-title={`품목 ${item.lineNo} ${item.itemName}`}
+                  className="flex items-center gap-2"
+                >
                   <ItemLabel lineNo={item.lineNo} itemType={item.itemType} itemName={item.itemName} />
-                  <span className="ml-auto text-cap text-ink-2 tabular-nums">
+                  <span data-pet-field="출하 가능" className="ml-auto text-cap text-ink-2 tabular-nums">
                     {item.activeReservedQty > 0 ? `예약 ${item.activeReservedQty}${qtyUnitOf([item.itemType])} 출하 가능` : '확보된 매수 없음'}
                   </span>
                 </li>
@@ -249,11 +257,11 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
                 </thead>
                 <tbody>
                   {detail.shipmentRequests.map((request) => (
-                    <tr key={request.id}>
+                    <tr key={request.id} data-pet-item="shipmentRequest" data-pet-item-title={request.shipmentRequestNo}>
                       <Td>
-                        <Link href={`/shipment-requests/${request.id}`} className="font-mono text-xs font-medium text-run hover:underline">
+                        <ScreenLink href={`/shipment-requests/${request.id}`} className="font-mono text-xs font-medium text-run hover:underline" textClassName="font-mono text-xs font-medium">
                           {request.shipmentRequestNo}
-                        </Link>
+                        </ScreenLink>
                       </Td>
                       <Td>
                         <Badge tone={isShipmentRequestStatus(request.shipmentRequestStatus) ? SHIPMENT_REQUEST_STATUS_TONE[request.shipmentRequestStatus] : 'neutral'}>
@@ -273,9 +281,17 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
             )}
             {detail.millSheets.length > 0 ? (
               <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                <span className="text-ink-3">밀시트</span>
+                <span data-pet-term="밀시트" className="text-ink-3">
+                  밀시트
+                </span>
                 {detail.millSheets.map((sheet) => (
-                  <Link key={sheet.id} href={`/mill-sheets?id=${sheet.id}`} className="font-mono font-medium text-run hover:underline">
+                  <Link
+                    key={sheet.id}
+                    href={`/mill-sheets?id=${sheet.id}`}
+                    data-pet-item="millSheet"
+                    data-pet-item-title={sheet.millSheetNo}
+                    className="font-mono font-medium text-run hover:underline"
+                  >
                     {sheet.millSheetNo}
                   </Link>
                 ))}
@@ -283,10 +299,10 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
             ) : null}
           </CardBody>
         </Card>
-        <Card>
+        <Card petKey="card:salesOrders.workRoom">
           <CardHead title="업무방" />
           <CardBody>
-            <p className="text-sm leading-5 text-ink-2">
+            <p className="text-sm leading-normal text-ink-2">
               {detail.workRoomId !== null
                 ? '이 수주의 업무방이 있어요. 함께할 사람을 더하거나 메신저로 갈 수 있어요.'
                 : salesOrderCancelled
@@ -301,13 +317,20 @@ export function FulfillmentTab({ detail }: { detail: SalesOrderDetail }) {
       </div>
 
       {detail.items.some((i) => i.plans.length > 0) ? (
-        <Card>
+        <Card petKey="card:salesOrders.plans">
           <CardHead title="품목별 생산계획" meta="자세한 편성은 생산 연결 탭" />
           <CardBody>
             {detail.items.map((item) =>
               item.plans.map((plan) => (
-                <div key={plan.productionPlanId} className="flex items-center gap-2 text-xs">
-                  <span className="text-ink-3">품목 {item.lineNo}</span>
+                <div
+                  key={plan.productionPlanId}
+                  data-pet-item="productionPlan"
+                  data-pet-item-title={plan.productionPlanNo}
+                  className="flex items-center gap-2 text-xs"
+                >
+                  <span data-pet-field="품목" className="text-ink-3">
+                    품목 {item.lineNo}
+                  </span>
                   <PlanLink productionPlanId={plan.productionPlanId} productionPlanNo={plan.productionPlanNo} />
                   <span className="text-ink-2">
                     부족 {plan.shortageQty} · 잔여 목표 {plan.remainingTargetQty} · 히트 {plan.heatCount}

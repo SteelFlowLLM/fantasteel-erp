@@ -1,19 +1,19 @@
 'use client';
 
-// 초안 카드: 추출 스키마(REQ-ACT-001 · TRM-095) 원료 품목 · 수량(톤) · 희망 입고일 · 요청자 + 선택 입력 요청 근거
-// AI 자동 추출은 준비 중이라 요청자가 직접 입력한다(SPEC 5장 결정 2). 확정은 요청자만(REQ-ACT-002, BP-ACT-01).
+// 구매요청 초안 카드: 추출 스키마(REQ-ACT-001 · TRM-095) 원료 품목 · 수량(톤) · 희망 입고일 · 요청자 + 선택 입력 요청 근거
+// 만들 때 AI가 메시지에서 칸을 채우고, 못 채운 칸은 요청자가 입력한다(SPEC 5장 결정 2). 확정은 요청자만(REQ-ACT-002, BP-ACT-01).
 import { useState } from 'react';
 import { DRAFT_STATUS_LABEL, PERMISSION } from '@/codes';
-import { actionDraftApi, type DraftConfirmResult, type DraftDetailView } from '@/api/actionDrafts';
-import { ApiError, InputError } from '@/api/client';
+import { actionDraftApi, type DraftConfirmResult, type DraftDetailView, type PurchaseRequisitionDraftPayload } from '@/api/actionDrafts';
+import { ApiError, InputError } from '@/api/errors';
 import { Badge } from '@/components/Badge';
 import { Button } from '@/components/Button';
 import { Card, CardFoot } from '@/components/Card';
-import { ComingSoon, SoonButton } from '@/components/ComingSoon';
 import { DateInput } from '@/components/DateInput';
 import { Icon } from '@/components/Icon';
 import { Input, Select, Textarea } from '@/components/Input';
 import { ReadOnlyHint } from '@/components/ReadOnlyHint';
+import { AiFillHint } from '@/features/actionDrafts/components/AiFillHint';
 import { Table, Td, Th } from '@/components/Table';
 import {
   DRAFT_FIELD_LABEL,
@@ -29,6 +29,7 @@ import { useAction } from '@/hooks/useAction';
 import { useDraftRawMaterials } from '@/hooks/useActionDrafts';
 import { useCanUse } from '@/hooks/usePermission';
 import { cn } from '@/lib/cn';
+import { createSubmitLock } from '@/lib/submitLock';
 import { fmtMDHM, fmtTon } from '@/lib/format';
 import { withEulReul } from '@/lib/josa';
 import { toast } from '@/stores/useToastStore';
@@ -44,6 +45,8 @@ export interface ConfirmFailure {
 
 interface DraftFormCardProps {
   draft: DraftDetailView;
+  /** 구매요청 초안 값 (화면이 유형을 가려 넘긴다) */
+  payload: PurchaseRequisitionDraftPayload;
   failure: DraftExecutionFailure | null;
   /** 확정·실행이 막혔을 때 위쪽 배너에 보일 내용 (null = 지움) */
   onConfirmFailure: (failure: ConfirmFailure | null) => void;
@@ -54,10 +57,10 @@ function toastConfirmResult(result: DraftConfirmResult) {
   else toast.error('확정했지만 구매요청을 만들지 못했어요');
 }
 
-export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCardProps) {
+export function DraftFormCard({ draft, payload, failure, onConfirmFailure }: DraftFormCardProps) {
   const canUsePurchaseRequisition = useCanUse(PERMISSION.PURCHASE_REQUISITION_CREATE);
   const materials = useDraftRawMaterials();
-  const saved = buildDraftForm(draft.payload);
+  const saved = buildDraftForm(payload);
   const [form, setForm] = useState<DraftForm>(saved);
   // 다른 탭·저장으로 초안이 바뀌면, 내가 고치는 중이 아닐 때만 폼을 맞춘다 (렌더 중 상태 맞추기)
   const [base, setBase] = useState({ updatedAt: draft.updatedAt, form: saved });
@@ -100,10 +103,20 @@ export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCar
     },
   });
   const pending = update.isPending || confirm.isPending || execute.isPending || reject.isPending;
+  // 확정·다시 실행·반려를 렌더를 기다리지 않고 잠근다: 더블클릭한 두 번째 요청을 보내지 않는다 (#531)
+  const [lock] = useState(createSubmitLock);
+  const once = (run: () => Promise<unknown>) => () => {
+    if (!lock.tryEnter()) return;
+    void run()
+      .catch(() => {
+        // 안내는 useAction(토스트)과 onError가 한다
+      })
+      .finally(() => lock.release());
+  };
 
   const setField = <K extends keyof DraftForm>(key: K, value: DraftForm[K]) => setForm((current) => ({ ...current, [key]: value }));
   const save = () => update.mutate({ actionDraftId: draft.id, payload: buildDraftPayload(form), expectedUpdatedAt: draft.updatedAt });
-  const doConfirm = async () => {
+  const doConfirm = once(async () => {
     onConfirmFailure(null);
     setFieldErrors({});
     try {
@@ -113,7 +126,7 @@ export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCar
     } catch {
       // 안내는 useAction(토스트)과 onError(위 배너·칸 아래 안내)가 한다
     }
-  };
+  });
 
   const materialList = materials.data ?? [];
   const material = materialList.find((m) => m.id === form.itemId);
@@ -123,14 +136,16 @@ export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCar
 
   const renderLabel = (field: keyof DraftForm, required: boolean) => (
     <span className="flex flex-wrap items-center gap-1.5">
-      <span>
+      <span data-pet-term={DRAFT_FIELD_LABEL[field]}>
         {DRAFT_FIELD_LABEL[field]}
         {required ? <span className="ml-0.5 text-danger">*</span> : null}
       </span>
       {isUnresolved(field) ? (
-        <Badge tone="wait" plain>
-          미확정
-        </Badge>
+        <span data-pet-term="미확정">
+          <Badge tone="wait" plain>
+            미확정
+          </Badge>
+        </span>
       ) : null}
     </span>
   );
@@ -146,19 +161,13 @@ export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCar
   const cell = 'h-auto py-2.5 whitespace-normal align-middle';
 
   return (
-    <Card className={cn(status === 'EXECUTED' && 'border-[#b9dec8]', status === 'REJECTED' && 'opacity-90')}>
+    <Card petKey="card:purchaseRequisitions.draftForm" className={cn(status === 'EXECUTED' && 'border-[#b9dec8]', status === 'REJECTED' && 'opacity-90')}>
       <header className="flex flex-none flex-wrap items-center gap-2 border-b border-line px-4 py-2.5">
         <h2 className="text-base font-semibold">{editable ? '값을 입력하고 확정해 주세요' : '초안 내용'}</h2>
-        <span className="flex items-center gap-1.5 rounded-sm border border-dashed border-line-strong bg-surface-2 px-2 py-1 text-cap text-ink-3">
-          <ComingSoon grade="AI" />
-          AI 자동 추출은 준비 중이에요. 값을 직접 입력해 주세요.
-        </span>
-        <span className="ml-auto flex items-center gap-2">
-          <SoonButton grade="AI" variant="ai-outline" size="sm">
-            AI 자동 추출
-          </SoonButton>
-          <Badge tone={DRAFT_STATUS_TONE[status]}>{DRAFT_STATUS_LABEL[status]}</Badge>
-        </span>
+        <AiFillHint aiFilledFields={payload.aiFilledFields ?? []} aiExtraction={payload.aiExtraction} editable={editable} />
+        <Badge tone={DRAFT_STATUS_TONE[status]} className="ml-auto">
+          {DRAFT_STATUS_LABEL[status]}
+        </Badge>
       </header>
       <div className="overflow-x-auto px-4 py-3">
         <Table>
@@ -201,26 +210,26 @@ export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCar
                   : '기준정보에 등록된 원료'}
               </Td>
             </tr>
-            <tr data-risk={isUnresolved('requiredTon') || undefined}>
-              <Td className={cn(cell, 'text-ink-2')}>{renderLabel('requiredTon', true)}</Td>
+            <tr data-risk={isUnresolved('requestedTon') || undefined}>
+              <Td className={cn(cell, 'text-ink-2')}>{renderLabel('requestedTon', true)}</Td>
               <Td className={cell}>
                 {editable ? (
                   <Input
-                    aria-label={DRAFT_FIELD_LABEL.requiredTon}
+                    aria-label={DRAFT_FIELD_LABEL.requestedTon}
                     numeric
                     suffix="t"
                     inputMode="decimal"
                     placeholder="0.000"
                     className="w-44"
-                    value={form.requiredTon}
-                    invalid={Boolean(getFieldError('requiredTon'))}
+                    value={form.requestedTon}
+                    invalid={Boolean(getFieldError('requestedTon'))}
                     disabled={pending}
-                    onChange={(event) => setField('requiredTon', event.target.value)}
+                    onChange={(event) => setField('requestedTon', event.target.value)}
                   />
                 ) : (
-                  renderReadValue(draft.payload.requiredTon ? fmtTon(draft.payload.requiredTon) : null)
+                  renderReadValue(payload.requestedTon ? fmtTon(payload.requestedTon) : null)
                 )}
-                {renderFieldError('requiredTon')}
+                {renderFieldError('requestedTon')}
               </Td>
               <Td className={cn(cell, 'text-cap text-ink-3')}>0보다 큰 톤 · 소수 3자리까지</Td>
             </tr>
@@ -237,14 +246,16 @@ export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCar
                     className="w-44"
                   />
                 ) : (
-                  renderReadValue(draft.payload.desiredReceiptDate)
+                  renderReadValue(payload.desiredReceiptDate)
                 )}
                 {renderFieldError('desiredReceiptDate')}
               </Td>
               <Td className={cn(cell, 'text-cap text-ink-3')}>YYYY-MM-DD 날짜</Td>
             </tr>
             <tr>
-              <Td className={cn(cell, 'text-ink-2')}>요청자</Td>
+              <Td className={cn(cell, 'text-ink-2')}>
+                <span data-pet-term="요청자">요청자</span>
+              </Td>
               <Td className={cell}>
                 <span className="text-sm text-ink">
                   {draft.requester.employeeName}
@@ -268,7 +279,7 @@ export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCar
                     onChange={(event) => setField('requestReason', event.target.value)}
                   />
                 ) : (
-                  renderReadValue(draft.payload.requestReason)
+                  renderReadValue(payload.requestReason)
                 )}
                 {reasonTooLong && editable ? <span className="mt-1 block text-cap text-danger">{REASON_MAX}자까지 쓸 수 있어요</span> : renderFieldError('requestReason')}
               </Td>
@@ -279,7 +290,7 @@ export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCar
       </div>
       <CardFoot className="flex-wrap">
         {editable || retryable ? (
-          rejecting && editable ? (
+          rejecting ? (
             <>
               <Input
                 aria-label="반려 사유"
@@ -297,7 +308,7 @@ export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCar
               <Button
                 variant="danger-outline"
                 disabled={rejectReason.trim() === '' || pending}
-                onClick={() => reject.mutate({ actionDraftId: draft.id, rejectReason: rejectReason.trim(), expectedUpdatedAt: draft.updatedAt })}
+                onClick={once(() => reject.mutateAsync({ actionDraftId: draft.id, rejectReason: rejectReason.trim(), expectedUpdatedAt: draft.updatedAt }))}
               >
                 반려 확정
               </Button>
@@ -311,14 +322,18 @@ export function DraftFormCard({ draft, failure, onConfirmFailure }: DraftFormCar
               <Button icon="check" className="ml-auto" disabled={!dirty || reasonTooLong || pending} onClick={save}>
                 저장
               </Button>
-              <Button variant="primary" icon="send" disabled={reasonTooLong || pending} onClick={() => void doConfirm()}>
+              <Button variant="primary" icon="send" disabled={reasonTooLong || pending} onClick={doConfirm}>
                 확정하고 구매요청 만들기
               </Button>
             </>
           ) : (
             <>
+              {/* 실행에 실패한 초안은 반려해 끝낼 수 있다 (#471 리뷰) */}
+              <Button variant="ghost" icon="x-circle" disabled={pending} onClick={() => setRejecting(true)}>
+                반려
+              </Button>
               <span className="text-cap text-ink-3">확정된 값은 바꿀 수 없어요</span>
-              <Button variant="primary" icon="refresh" className="ml-auto" disabled={pending} onClick={() => execute.mutate({ actionDraftId: draft.id })}>
+              <Button variant="primary" icon="refresh" className="ml-auto" disabled={pending} onClick={once(() => execute.mutateAsync({ actionDraftId: draft.id }))}>
                 구매요청 만들기 다시 실행
               </Button>
             </>

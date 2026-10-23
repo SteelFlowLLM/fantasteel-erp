@@ -1,4 +1,11 @@
-import { Controller } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Put, Query } from '@nestjs/common';
+import { PERMISSION, type DepartmentNode, type DepartmentView, type EmployeeView, type JobGradeView, type PageResult, type RoleView } from '@fantasteel/shared';
+import { RequirePermission } from '../../common/auth/auth.decorators';
+import { CreateDepartmentDto, UpdateDepartmentDto } from './dto/department.dto';
+import { CreateEmployeeDto, UpdateEmployeeDto } from './dto/employee.dto';
+import { CreateJobGradeDto, UpdateJobGradeDto } from './dto/job-grade.dto';
+import { ListEmployeesQuery } from './dto/list-employees.query';
+import { UpdateRolePermissionsDto } from './dto/role-permission.dto';
 import { OrganizationService } from './organization.service';
 
 /**
@@ -9,4 +16,93 @@ import { OrganizationService } from './organization.service';
 @Controller()
 export class OrganizationController {
   constructor(private readonly service: OrganizationService) {}
+
+  /** API-155 사원 목록 */
+  @Get('employees')
+  @RequirePermission(PERMISSION.EMPLOYEE_MANAGE, 'VIEW')
+  listEmployees(@Query() query: ListEmployeesQuery): Promise<PageResult<EmployeeView>> {
+    return this.service.listEmployees(query);
+  }
+
+  /** API-156 사원 등록 */
+  @Post('employees')
+  @RequirePermission(PERMISSION.EMPLOYEE_MANAGE, 'USE')
+  createEmployee(@Body() dto: CreateEmployeeDto): Promise<EmployeeView> {
+    return this.service.createEmployee(dto);
+  }
+
+  /** API-157 사원 수정·퇴사 처리 */
+  @Patch('employees/:id')
+  @RequirePermission(PERMISSION.EMPLOYEE_MANAGE, 'USE')
+  updateEmployee(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateEmployeeDto): Promise<EmployeeView> {
+    return this.service.updateEmployee(id, dto);
+  }
+
+  /** API-158 부서 트리·조직도. 로그인한 사원 모두 (메신저 멤버·알림 대상 선택에도 사용) */
+  @Get('departments')
+  listDepartments(): Promise<DepartmentNode[]> {
+    return this.service.listDepartments();
+  }
+
+  /** API-159 부서 등록 */
+  @Post('departments')
+  @RequirePermission(PERMISSION.ORG_MANAGE, 'USE')
+  createDepartment(@Body() dto: CreateDepartmentDto): Promise<DepartmentView> {
+    return this.service.createDepartment(dto);
+  }
+
+  /** API-160 부서 수정·부서장 지정 */
+  @Patch('departments/:id')
+  @RequirePermission(PERMISSION.ORG_MANAGE, 'USE')
+  updateDepartment(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateDepartmentDto): Promise<DepartmentView> {
+    return this.service.updateDepartment(id, dto);
+  }
+
+  /** API-271 부서 삭제. 참조(하위 부서·소속 사원)가 없을 때만 (컨벤션 7-2). 지운 부서를 돌려준다 */
+  @Delete('departments/:id')
+  @RequirePermission(PERMISSION.ORG_MANAGE, 'USE')
+  deleteDepartment(@Param('id', ParseIntPipe) id: number): Promise<DepartmentView> {
+    return this.service.deleteDepartment(id);
+  }
+
+  /** API-161 직급 목록. 로그인한 사원 모두 */
+  @Get('job-grades')
+  listJobGrades(): Promise<JobGradeView[]> {
+    return this.service.listJobGrades();
+  }
+
+  /** API-162 직급 등록. 직급 관리 권한 코드가 따로 없어 API 명세대로 사원 관리 권한을 쓴다 (organization.md 8장) */
+  @Post('job-grades')
+  @RequirePermission(PERMISSION.EMPLOYEE_MANAGE, 'USE')
+  createJobGrade(@Body() dto: CreateJobGradeDto): Promise<JobGradeView> {
+    return this.service.createJobGrade(dto);
+  }
+
+  /** API-272 직급 수정 (이름·표시 순서). 권한은 직급 등록과 같다 */
+  @Patch('job-grades/:id')
+  @RequirePermission(PERMISSION.EMPLOYEE_MANAGE, 'USE')
+  updateJobGrade(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateJobGradeDto): Promise<JobGradeView> {
+    return this.service.updateJobGrade(id, dto);
+  }
+
+  /** API-273 직급 삭제. 쓰는 사원이 없을 때만 (컨벤션 7-2). 지운 직급을 돌려준다 */
+  @Delete('job-grades/:id')
+  @RequirePermission(PERMISSION.EMPLOYEE_MANAGE, 'USE')
+  deleteJobGrade(@Param('id', ParseIntPipe) id: number): Promise<JobGradeView> {
+    return this.service.deleteJobGrade(id);
+  }
+
+  /** API-163 역할·권한 */
+  @Get('roles')
+  @RequirePermission(PERMISSION.ORG_MANAGE, 'VIEW')
+  listRoles(): Promise<RoleView[]> {
+    return this.service.listRoles();
+  }
+
+  /** API-164 역할별 권한 변경 */
+  @Put('roles/:id/permissions')
+  @RequirePermission(PERMISSION.ORG_MANAGE, 'USE')
+  updateRolePermissions(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateRolePermissionsDto): Promise<RoleView> {
+    return this.service.updateRolePermissions(id, dto);
+  }
 }

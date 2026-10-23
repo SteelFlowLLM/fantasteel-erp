@@ -51,7 +51,7 @@ export function ChangeAllocationModal({ allocation, candidates, onClose }: { all
         </>
       }
     >
-      <span className="text-sm leading-5 text-ink-2">지금 배정을 해제하고 고른 슬래브를 새로 배정해요. 두 가지를 한 번에 처리하고, 사유는 작업 로그에 &lsquo;배정 변경&rsquo;으로 남아요.</span>
+      <span className="text-sm leading-normal text-ink-2">지금 배정을 해제하고 고른 슬래브를 새로 배정해요. 두 가지를 한 번에 처리하고, 사유는 작업 로그에 &lsquo;배정 변경&rsquo;으로 남아요.</span>
       <Field label="새 슬래브" required error={errors.newLotId}>
         <Select value={newLotId ?? ''} onChange={(e) => setNewLotId(Number(e.target.value))} invalid={!!errors.newLotId}>
           {candidates.length === 0 ? <option value="">바꿀 수 있는 슬래브가 없어요</option> : null}
@@ -89,7 +89,7 @@ export function ReleaseAllocationModal({ allocation, onClose }: { allocation: Ro
         </>
       }
     >
-      <span className="text-sm leading-5 text-ink-2">해제한 슬래브는 다시 미배정 합격 슬래브(여재·가용재고)가 돼요.</span>
+      <span className="text-sm leading-normal text-ink-2">해제한 슬래브는 다시 미배정 합격 슬래브(여재·가용재고)가 돼요.</span>
       <Field label="사유" hint="작업 로그에 남아요 (선택, 500자 이내)">
         <Textarea value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} />
       </Field>

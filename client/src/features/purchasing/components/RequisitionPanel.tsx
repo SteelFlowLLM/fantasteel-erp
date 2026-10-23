@@ -5,7 +5,7 @@
 import Link from 'next/link';
 import { useState, type ReactNode } from 'react';
 import { PERMISSION } from '@/codes';
-import { InputError } from '@/api/client';
+import { InputError } from '@/api/errors';
 import type { RequisitionDetail } from '@/api/purchasing';
 import { Banner } from '@/components/Banner';
 import { Button, ButtonLink } from '@/components/Button';
@@ -20,7 +20,7 @@ import { Steps, type StepItem } from '@/components/Steps';
 import { Table, Td, Th } from '@/components/Table';
 import { PurchaseOrderStatusBadge, RequisitionSourceTag, RequisitionStatusBadge } from '@/features/purchasing/components/PurchasingParts';
 import { RequisitionFormModal } from '@/features/purchasing/components/RequisitionFormModal';
-import { REQUISITION_SOURCE_LABEL, summarizeItemNames, trimTonText } from '@/features/purchasing/lib/purchasingView';
+import { REQUISITION_SOURCE_LABEL, trimTonText } from '@/features/purchasing/lib/purchasingView';
 import { useApproveRequisition, useRejectRequisition } from '@/hooks/useApprovals';
 import { useCanUse, useCanView } from '@/hooks/usePermission';
 import { usePurchaseRequisitionDetail } from '@/hooks/usePurchaseRequisitions';
@@ -48,7 +48,7 @@ function stepsOf(detail: RequisitionDetail): StepItem[] {
   return [
     { key: 'registered', label: '등록', state: 'done' },
     { key: 'approval', label: status === 'REJECTED' ? '부서장 승인 · 반려' : '부서장 승인', state: status === 'WAITING_APPROVAL' || status === 'REJECTED' ? 'run' : 'done' },
-    { key: 'ordered', label: '발주', state: status === 'ORDERED' ? 'done' : status === 'APPROVED' ? 'run' : 'todo' },
+    { key: 'ordered', label: status === 'ORDER_CANCELLED' ? '발주 · 취소' : '발주', state: status === 'ORDERED' || status === 'ORDER_CANCELLED' ? 'done' : status === 'APPROVED' ? 'run' : 'todo' },
   ];
 }
 
@@ -62,6 +62,8 @@ function stageText(detail: RequisitionDetail): string {
       return `${detail.approverName ?? '부서장'} 반려 ${fmtDateTime(detail.rejectedAt)} · 요청자가 고쳐 다시 요청할 수 있어요`;
     case 'ORDERED':
       return `발주 완료 · ${[...new Set(detail.purchaseOrderLines.map((l) => l.purchaseOrderNo))].join(', ')}`;
+    case 'ORDER_CANCELLED':
+      return `발주 취소 · ${[...new Set(detail.purchaseOrderLines.map((l) => l.purchaseOrderNo))].join(', ')} · 같은 원료가 필요하면 새로 구매요청해요`;
   }
 }
 
@@ -91,10 +93,8 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
   });
 
   const status = detail.purchaseRequisitionStatus;
-  const hasUnordered = detail.items.some((i) => i.purchaseOrderNo === null);
   const orderedTotal = decSum(detail.purchaseOrderLines.map((l) => l.orderedTon));
   const receivedTotal = decSum(detail.purchaseOrderLines.map((l) => l.receivedTon));
-  const planNos = [...new Set(detail.items.map((i) => i.productionPlanNo).filter((no): no is string => no !== null))];
 
   const submitReject = () => {
     if (!rejectReason.trim()) {
@@ -123,7 +123,7 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
                 초안 #{detail.sourceDraft.id} 보기
               </ButtonLink>
             ) : null}
-            {status === 'APPROVED' && hasUnordered ? (
+            {status === 'APPROVED' && detail.purchaseOrderNo === null ? (
               canConfirmPurchaseOrder ? (
                 <ButtonLink href={`/purchase-orders?pr=${detail.id}`} variant="primary" icon="building" size="sm">
                   발주 만들기
@@ -139,64 +139,52 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
         }
       />
       <p className="-mt-2 text-sm text-ink-2">
-        {summarizeItemNames(detail.items)} · 합계 <b className="font-semibold tabular-nums">{fmtTon(detail.totalTon)}</b> · {detail.requesterName ?? '-'} · {fmtDateTime(detail.createdAt)} 등록
+        {detail.itemName} · <b className="font-semibold tabular-nums">{fmtTon(detail.requestedTon)}</b> · {detail.requesterName ?? '-'} · {fmtDateTime(detail.createdAt)} 등록
       </p>
 
-      <Card>
+      <Card petKey="card:purchaseRequisitions.progress">
         <CardBody className="gap-2">
           <Steps items={stepsOf(detail)} />
           <span className="text-xs text-ink-2">{stageText(detail)}</span>
         </CardBody>
       </Card>
 
-      {status === 'REJECTED' ? (
-        <Banner tone="danger">
-          <b>반려 사유</b> · {detail.rejectReason ?? '사유가 기록되지 않았어요'}
+      {status === 'ORDER_CANCELLED' ? (
+        <Banner tone="wait">
+          <b>발주 취소</b> · 이 요청은 다시 발주하지 않아요. 같은 원료가 필요하면{' '}
+          {canSeeMrp && detail.productionPlanId !== null ? (
+            <Link className="font-semibold text-run hover:underline" href="/mrp">
+              MRP에서 다시 요청할 수 있어요
+            </Link>
+          ) : (
+            '새로 구매요청해 주세요'
+          )}
+          {canSeeMrp && detail.productionPlanId !== null ? ' (새 요청은 다시 부서장 승인을 받아요)' : ''}
         </Banner>
       ) : null}
 
-      <Card>
-        <CardHead title="요청 내용" meta={`${REQUISITION_SOURCE_LABEL[detail.source]} · 원료 ${detail.items.length}종`} />
-        <CardBody flush>
-          <Table>
-            <thead>
-              <tr>
-                <Th align="right">#</Th>
-                <Th>원료</Th>
-                <Th align="right">수량(톤)</Th>
-                <Th>근거 생산계획</Th>
-                <Th>발주</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {detail.items.map((line) => (
-                <tr key={line.id}>
-                  <Td align="right" className="text-ink-3">
-                    {line.lineNo}
-                  </Td>
-                  <Td>
-                    {line.itemName} <span className="font-mono text-cap text-ink-3">{line.itemCode}</span>
-                  </Td>
-                  <Td align="right">{fmtTon(line.requiredTon)}</Td>
-                  <Td>{line.productionPlanNo ? <span className="font-mono">{line.productionPlanNo}</span> : <span className="text-ink-3">-</span>}</Td>
-                  <Td>{line.purchaseOrderNo ? <span className="font-mono">{line.purchaseOrderNo}</span> : <span className="text-ink-3">미발주</span>}</Td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr>
-                <Td />
-                <Td>합계</Td>
-                <Td align="right">{fmtTon(detail.totalTon)}</Td>
-                <Td />
-                <Td />
-              </tr>
-            </tfoot>
-          </Table>
-        </CardBody>
+      {status === 'REJECTED' ? (
+        <Banner tone="danger">
+          <b data-pet-term="반려 사유">반려 사유</b> · {detail.rejectReason ?? '사유가 기록되지 않았어요'}
+        </Banner>
+      ) : null}
+
+      <Card petKey="card:purchaseRequisitions.detail">
+        <CardHead title="요청 내용" meta={REQUISITION_SOURCE_LABEL[detail.source]} />
         <CardBody>
           <KvList
             items={[
+              {
+                label: '원료',
+                value: (
+                  <>
+                    {detail.itemName} <span className="font-mono text-cap text-ink-3">{detail.itemCode}</span>
+                  </>
+                ),
+              },
+              { label: '수량(톤)', value: <span className="tabular-nums">{fmtTon(detail.requestedTon)}</span> },
+              { label: '근거 생산계획', value: detail.productionPlanNo ? <span className="font-mono">{detail.productionPlanNo}</span> : <span className="text-ink-3">-</span> },
+              { label: '발주', value: detail.purchaseOrderNo ? <span className="font-mono">{detail.purchaseOrderNo}</span> : <span className="text-ink-3">미발주</span> },
               { label: '희망 입고일', value: detail.desiredReceiptDate ? fmtDate(detail.desiredReceiptDate) : '-' },
               { label: '요청자', value: `${detail.requesterName ?? '-'}${detail.requesterJobGradeName ? ` ${detail.requesterJobGradeName}` : ''} · ${detail.departmentName ?? '-'}` },
               {
@@ -216,17 +204,19 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
         </CardBody>
       </Card>
 
-      <Card>
+      <Card petKey="card:purchaseRequisitions.source">
         <CardHead title="출처" meta={REQUISITION_SOURCE_LABEL[detail.source]} />
         <CardBody>
           {detail.source === 'MESSAGE' ? (
             detail.sourceDraft?.message ? (
-              <div className="flex flex-col gap-2 rounded-md border border-line bg-surface-2 px-3.5 py-3">
-                <span className="text-cap text-ink-3">
+              <div data-pet-item="message" data-pet-item-title={`초안 #${detail.sourceDraft.id} 원본 메시지`} className="flex flex-col gap-2 rounded-md border border-line bg-surface-2 px-3.5 py-3">
+                <span data-pet-field="채팅방" className="text-cap text-ink-3">
                   {detail.sourceDraft.message.chatRoomName ?? '채팅방'} · {detail.sourceDraft.message.senderName ?? '-'} · {fmtDateTime(detail.sourceDraft.message.createdAt)}
                 </span>
-                <p className="text-sm whitespace-pre-wrap text-ink">“{detail.sourceDraft.message.content ?? ''}”</p>
-                <span className="flex flex-wrap items-center gap-2 text-cap text-ink-3">
+                <p data-pet-field="메시지" className="text-sm whitespace-pre-wrap text-ink">
+                  “{detail.sourceDraft.message.content ?? ''}”
+                </p>
+                <span data-pet-field="초안" className="flex flex-wrap items-center gap-2 text-cap text-ink-3">
                   Message → ERP 초안 #{detail.sourceDraft.id} · 요청자 확정 {fmtDateTime(detail.sourceDraft.confirmedAt)}
                   <Link className="text-run hover:underline" href={`/messenger?room=${detail.sourceDraft.message.chatRoomId}`}>
                     채팅방으로 이동
@@ -238,7 +228,7 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
             )
           ) : detail.source === 'MRP' ? (
             <p className="text-sm text-ink-2">
-              MRP 순소요로 등록한 요청이에요 · 근거 생산계획 <span className="font-mono">{planNos.join(', ')}</span>
+              MRP 순소요로 등록한 요청이에요 · 근거 생산계획 <span className="font-mono">{detail.productionPlanNo}</span>
               {canSeeMrp ? (
                 <>
                   {' · '}
@@ -255,9 +245,10 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
       </Card>
 
       {canSeeOrders ? (
-        <Card>
+        <Card petKey="card:purchaseRequisitions.purchaseOrders">
           <CardHead title="연결 발주" meta={detail.purchaseOrderLines.length > 0 ? `입고 ${fmtTon(receivedTotal)} / 발주 ${fmtTon(orderedTotal)}` : undefined} />
-          <CardBody flush>
+          {/* 글자를 키우면 표가 오른쪽 칸(목록 옆)보다 넓어져 카드 밖으로 삐져나오므로 카드 안에서 가로로 넘긴다 */}
+          <CardBody flush className="overflow-x-auto">
             {detail.purchaseOrderLines.length === 0 ? (
               <EmptyNote>{status === 'APPROVED' ? '아직 발주하지 않았어요. 구매 담당이 발주 화면에서 발주해요' : '승인된 뒤에 발주할 수 있어요'}</EmptyNote>
             ) : (
@@ -270,13 +261,13 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
                     <Th align="right">발주</Th>
                     <Th align="right">입고</Th>
                     <Th align="right">입고예정</Th>
-                    <Th>납기</Th>
+                    <Th>입고 예정일</Th>
                     <Th>상태</Th>
                   </tr>
                 </thead>
                 <tbody>
                   {detail.purchaseOrderLines.map((line) => (
-                    <tr key={`${line.purchaseOrderId}-${line.purchaseRequisitionLineNo}`}>
+                    <tr key={line.purchaseOrderId} data-pet-item="purchaseOrder" data-pet-item-title={line.purchaseOrderNo}>
                       <Td>
                         {canOpenPurchaseOrders ? (
                           <Link className="font-mono text-run hover:underline" href={`/purchase-orders?po=${line.purchaseOrderId}`}>
@@ -290,10 +281,10 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
                       <Td>{line.supplierName}</Td>
                       <Td align="right">{fmtTon(line.orderedTon)}</Td>
                       <Td align="right">{fmtTon(line.receivedTon)}</Td>
-                      <Td align="right" className={decCmp(line.scheduledReceiptTon, 0) > 0 ? 'font-semibold' : 'text-ink-3'}>
-                        {fmtTon(line.scheduledReceiptTon)}
+                      <Td align="right" className={decCmp(line.remainingTon, 0) > 0 ? 'font-semibold' : 'text-ink-3'}>
+                        {fmtTon(line.remainingTon)}
                       </Td>
-                      <Td>{line.dueDate ? fmtDate(line.dueDate) : '-'}</Td>
+                      <Td>{line.expectedReceiptDate ? fmtDate(line.expectedReceiptDate) : '-'}</Td>
                       <Td>
                         <PurchaseOrderStatusBadge status={line.purchaseOrderStatus} />
                       </Td>
@@ -306,7 +297,7 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
         </Card>
       ) : null}
 
-      <Card>
+      <Card petKey="card:purchaseRequisitions.decision">
         <CardHead title="처리" />
         <CardBody>
           {detail.canApprove ? (
@@ -315,7 +306,7 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
                 {detail.departmentName} 부서장으로 승인권자예요 · 요청자 {detail.requesterName ?? '-'} · 등록 {fmtDateTime(detail.createdAt)}
               </span>
               {rejecting ? (
-                <Field label="반려 사유 (요청자에게 전달돼요)" required htmlFor={`reject-${detail.id}`} error={rejectError} hint={`${rejectReason.length} / 500자`}>
+                <Field label={<span data-pet-term="반려 사유">반려 사유 (요청자에게 전달돼요)</span>} required htmlFor={`reject-${detail.id}`} error={rejectError} hint={`${rejectReason.length} / 500자`}>
                   <Textarea id={`reject-${detail.id}`} rows={3} maxLength={500} value={rejectReason} invalid={Boolean(rejectError)} onChange={(event) => setRejectReason(event.target.value)} />
                 </Field>
               ) : null}
@@ -377,14 +368,12 @@ function RequisitionPanelBody({ detail, crumb, extraActions, onDecided }: Requis
           mode="resubmit"
           requisition={{ id: detail.id, purchaseRequisitionNo: detail.purchaseRequisitionNo, updatedAt: detail.updatedAt, rejectReason: detail.rejectReason }}
           initial={{
+            itemId: detail.itemId,
+            requestedTon: trimTonText(detail.requestedTon),
+            productionPlanId: detail.productionPlanId,
+            productionPlanNo: detail.productionPlanNo,
             desiredReceiptDate: detail.desiredReceiptDate ?? '',
             requestReason: detail.requestReason ?? '',
-            items: detail.items.map((line) => ({
-              itemId: line.itemId,
-              requiredTon: trimTonText(line.requiredTon),
-              productionPlanId: line.productionPlanId,
-              productionPlanNo: line.productionPlanNo,
-            })),
           }}
           onClose={() => setEditing(false)}
         />
@@ -404,5 +393,7 @@ function lockText(detail: RequisitionDetail, canCreate: boolean): string {
       return '승인된 구매요청이에요 · 구매 담당 발주 대기';
     case 'ORDERED':
       return '발주까지 끝난 요청이에요';
+    case 'ORDER_CANCELLED':
+      return '발주가 취소된 요청이에요 · 이 요청은 다시 발주하지 않아요';
   }
 }

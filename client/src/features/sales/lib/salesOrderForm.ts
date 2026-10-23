@@ -1,12 +1,19 @@
 // 수주 화면의 순수 계산: 매수 입력 확인(4.1·SO-002), 등록 줄 상태, 수량 단위, 충족 지표 표시(4.5 분모 명시), 목록 거르기.
+import { MAX_ORDERED_QTY, ORDERED_QTY_OVER_MESSAGE } from '@fantasteel/shared';
 import { ERROR_MESSAGE, PRODUCT_QTY_UNIT, type ProductItemType, type SalesOrderItemStatus } from '@/codes';
 import type { ProgressMeasure } from '@/lib/inventoryMath';
 
-/** 매수: 1 이상 정수만. 소수·0·음수·글자는 거부하고, 글자를 지우거나 반올림하지 않는다 (4.1, SO-002). */
+/** 매수: 1 이상 한 줄 상한 이하 정수만. 소수·0·음수·글자는 거부하고, 글자를 지우거나 반올림하지 않는다 (4.1, SO-002). */
 export function parseOrderedQty(text: string): number | null {
   if (!/^\d+$/.test(text)) return null;
   const qty = Number(text);
-  return Number.isSafeInteger(qty) && qty >= 1 ? qty : null;
+  return Number.isSafeInteger(qty) && qty >= 1 && qty <= MAX_ORDERED_QTY ? qty : null;
+}
+
+/** 매수 칸 오류 문구: 상한만 넘었으면 상한 안내, 그 밖에는 SO-002 문구 그대로 (서버와 같은 기준) */
+function orderedQtyError(text: string): string | undefined {
+  if (parseOrderedQty(text) !== null) return undefined;
+  return /^\d+$/.test(text) && Number(text) > MAX_ORDERED_QTY ? ORDERED_QTY_OVER_MESSAGE : ERROR_MESSAGE['SO-002'];
 }
 
 export interface DraftLine {
@@ -28,7 +35,8 @@ export interface DraftLineErrors {
 export function draftLineErrors(line: DraftLine, submitted: boolean): DraftLineErrors {
   const errors: DraftLineErrors = {};
   if (line.itemId === null && submitted) errors.itemId = '규격을 선택해 주세요';
-  if ((line.qtyText !== '' || submitted) && parseOrderedQty(line.qtyText) === null) errors.qty = ERROR_MESSAGE['SO-002'];
+  const qtyError = line.qtyText !== '' || submitted ? orderedQtyError(line.qtyText) : undefined;
+  if (qtyError) errors.qty = qtyError;
   if (line.dueDate === '' && submitted) errors.dueDate = '납기를 입력해 주세요';
   return errors;
 }
@@ -94,6 +102,31 @@ export function filterSalesOrders<T extends FilterableSalesOrder>(rows: readonly
 /** 적용한 필터 수 (키워드 제외) */
 export const activeFilterCount = (filter: SalesOrderFilter): number =>
   [filter.status !== 'ALL', filter.customerId !== null, filter.itemType !== 'ALL', filter.riskOnly].filter(Boolean).length;
+
+/** 수주 취소 창 미리보기 (BP-SO-02 예외): 진행중·부분출하 품목만 취소하고 출고 매수와 전량 출고 품목은 그대로 둔다 (서버 cancellableItemsOf와 같은 기준) */
+export interface CancelPreview {
+  activeReservedQty: number;
+  plannedCount: number;
+  inProgressCount: number;
+  /** 취소할 품목에서 이미 출고돼 그대로 남는 매수 */
+  keptShippedQty: number;
+  /** 전량 출고돼 그대로 두는 품목 수 */
+  shippedItemCount: number;
+}
+
+export function cancelPreviewOf(
+  items: readonly { salesOrderItemStatus: SalesOrderItemStatus; activeReservedQty: number; shippedQty: number; plans: readonly { productionPlanStatus: string }[] }[],
+): CancelPreview {
+  const targets = items.filter((i) => i.salesOrderItemStatus === 'OPEN' || i.salesOrderItemStatus === 'PARTIALLY_SHIPPED');
+  const plans = targets.flatMap((i) => i.plans);
+  return {
+    activeReservedQty: targets.reduce((sum, i) => sum + i.activeReservedQty, 0),
+    plannedCount: plans.filter((p) => p.productionPlanStatus === 'PLANNED').length,
+    inProgressCount: plans.filter((p) => p.productionPlanStatus === 'IN_PROGRESS').length,
+    keptShippedQty: targets.reduce((sum, i) => sum + i.shippedQty, 0),
+    shippedItemCount: items.filter((i) => i.salesOrderItemStatus === 'SHIPPED').length,
+  };
+}
 
 export interface CancellationEffects {
   releasedReserved: readonly { itemType: ProductItemType; qty: number }[];

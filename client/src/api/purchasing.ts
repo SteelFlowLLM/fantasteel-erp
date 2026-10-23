@@ -1,43 +1,10 @@
 // 구매요청·발주 API (REQ-PUR-001~003, REQ-AUTH-004, BP-PUR-01, 업무 프로세스 10장·12.2).
-// 권한은 이 층에서 먼저 확인하고(requireActor, 없으면 COM-002), 업무 규칙·작업 로그·알림은 core 서비스가 한다.
 // - 구매요청 등록 = 바로 승인 대기(임시 저장 없음). 반려되면 요청자가 고쳐 다시 요청한다(resubmit).
-// - 발주: 승인된 요청 품목을 품목의 기본 공급업체별로 묶어 공급업체 1곳당 발주 1건.
-import { PERMISSION, type DraftStatus, type Permission, type PurchaseOrderStatus } from '@/codes';
-import { requireActor } from '@/api/actor';
-import { ApiError, mockMutation, mockQuery } from '@/api/client';
-import { employeeBasicsOf } from '@/api/orgViews';
-import { canView } from '@/lib/permissions';
-import type { MockTables, PurchaseRequisitionRow } from '@/mock/schema';
-import {
-  actionDraftView,
-  canApproveRequisition,
-  createPurchaseOrders,
-  createPurchaseRequisition,
-  findById,
-  listPurchaseOrders,
-  listPurchaseRequisitions,
-  orderableRequisitionItems,
-  purchaseOrderView,
-  requisitionView,
-  resubmitPurchaseRequisition,
-  userActor,
-  type PurchaseOrderView,
-  type RequisitionLineInput,
-  type RequisitionView,
-} from '@/mock/services';
-
-export type { PurchaseOrderView, RequisitionLineInput, RequisitionSource, RequisitionView } from '@/mock/services';
-
-type Tables = Readonly<MockTables>;
-
-/** 구매요청 목록·상세를 볼 수 있는 권한 (조회 이상) */
-export const REQUISITION_VIEW_PERMISSIONS: readonly Permission[] = [PERMISSION.PURCHASE_REQUISITION_CREATE, PERMISSION.PURCHASE_ORDER_CONFIRM];
-/** 발주 목록을 볼 수 있는 권한 (조회 이상) */
-export const PURCHASE_ORDER_VIEW_PERMISSIONS: readonly Permission[] = [
-  PERMISSION.PURCHASE_ORDER_CONFIRM,
-  PERMISSION.GOODS_RECEIPT_CONFIRM,
-  PERMISSION.PURCHASE_REQUISITION_CREATE,
-];
+// - 발주: 공급업체 1곳당 발주 1건(서버 POST purchase-orders와 같은 입력). 화면이 공급업체별로 나눠 보낸다.
+// 두 데이터 모드 모두 실제 서버를 부른다 (api/server/purchaseRequisitions.ts·purchaseOrders.ts). 권한·업무 규칙은 서버가 확인한다.
+import type { DraftStatus, PurchaseOrderStatus, PurchaseRequisitionStatus } from '@/codes';
+import { serverPurchaseOrderApi } from '@/api/server/purchaseOrders';
+import { serverPurchaseRequisitionApi } from '@/api/server/purchaseRequisitions';
 
 export const purchaseRequisitionKeys = {
   all: ['purchase-requisitions'] as const,
@@ -56,12 +23,51 @@ export const purchaseOrderKeys = {
 
 // ── 구매요청 ─────────────────────────────────────────
 
+/** 출처(계산값): Message → ERP 초안 / MRP 계획 / 직접 */
+export type RequisitionSource = 'MESSAGE' | 'MRP' | 'DIRECT';
+
+/** 구매요청 1건 = 원료 1품목 (ERD purchase_requisition, 서버 PurchaseRequisitionSummary와 같은 모양) */
+export interface RequisitionView {
+  id: number;
+  purchaseRequisitionNo: string;
+  purchaseRequisitionStatus: PurchaseRequisitionStatus;
+  source: RequisitionSource;
+  itemId: number;
+  itemCode: string;
+  itemName: string;
+  requestedTon: string;
+  productionPlanId: number | null;
+  productionPlanNo: string | null;
+  /** 발주했으면 발주번호 */
+  purchaseOrderNo: string | null;
+  requesterId: number;
+  requesterName: string | null;
+  /** 요청 시점 요청자 소속 부서 */
+  departmentId: number | null;
+  departmentName: string | null;
+  approverName: string | null;
+  desiredReceiptDate: string;
+  requestReason: string | null;
+  rejectReason: string | null;
+  actionDraftId: number | null;
+  createdAt: string;
+  updatedAt: string;
+  approvedAt: string | null;
+  /** 작업 로그의 반려 시각 (ERD에 칸이 없다) */
+  rejectedAt: string | null;
+}
+
+/** 구매요청 1건 = 원료 1품목 (ERD, 서버 POST purchase-requisitions와 같은 칸) */
 export interface RequisitionInput {
-  /** YYYY-MM-DD 또는 '' */
+  itemId: number;
+  /** 톤 (소수 3자리) */
+  requestedTon: string;
+  /** YYYY-MM-DD (필수, ERD NOT NULL) */
   desiredReceiptDate: string;
   /** 요청 근거 */
   requestReason: string;
-  items: readonly RequisitionLineInput[];
+  /** MRP 근거 생산계획 */
+  productionPlanId?: number | null;
 }
 
 export interface RequisitionResubmitInput extends RequisitionInput {
@@ -75,12 +81,11 @@ export interface RequisitionPurchaseOrderLine {
   purchaseOrderNo: string;
   purchaseOrderStatus: PurchaseOrderStatus;
   supplierName: string;
-  dueDate: string | null;
-  purchaseRequisitionLineNo: number;
+  expectedReceiptDate: string | null;
   itemName: string;
   orderedTon: string;
   receivedTon: string;
-  scheduledReceiptTon: string;
+  remainingTon: string;
 }
 
 export interface RequisitionDetail extends RequisitionView {
@@ -107,146 +112,94 @@ export interface RequisitionFormContext {
   departmentName: string;
   /** 소속 부서의 부서장. 없으면 등록할 수 없다(PUR-001) */
   headName: string | null;
-}
-
-function requisitionPurchaseOrderLines(tables: Tables, purchaseRequisition: PurchaseRequisitionRow): RequisitionPurchaseOrderLine[] {
-  const purchaseRequisitionItems = tables.purchaseRequisitionItem.filter((i) => i.purchaseRequisitionId === purchaseRequisition.id);
-  return purchaseRequisitionItems.flatMap((purchaseRequisitionItem) =>
-    tables.purchaseOrderItem
-      .filter((line) => line.purchaseRequisitionItemId === purchaseRequisitionItem.id)
-      .flatMap((line) => {
-        const po = findById(tables, 'purchaseOrder', line.purchaseOrderId);
-        if (!po) return [];
-        return [
-          {
-            purchaseOrderId: po.id,
-            purchaseOrderNo: po.purchaseOrderNo,
-            purchaseOrderStatus: po.purchaseOrderStatus,
-            supplierName: findById(tables, 'supplier', po.supplierId)?.supplierName ?? '',
-            dueDate: po.dueDate,
-            purchaseRequisitionLineNo: purchaseRequisitionItem.lineNo,
-            itemName: findById(tables, 'item', line.itemId)?.itemName ?? '',
-            orderedTon: line.orderedTon,
-            receivedTon: line.receivedTon,
-            scheduledReceiptTon: line.scheduledReceiptTon,
-          },
-        ];
-      }),
-  );
-}
-
-function activeHeadNameOf(tables: Tables, departmentId: number): string | null {
-  const headId = findById(tables, 'department', departmentId)?.headEmployeeId ?? null;
-  const head = findById(tables, 'employee', headId);
-  return head && head.isActive ? head.employeeName : null;
-}
-
-function requisitionDetailOf(tables: Tables, purchaseRequisition: PurchaseRequisitionRow, viewerId: number): RequisitionDetail {
-  const requester = findById(tables, 'employee', purchaseRequisition.requesterId);
-  const draft = purchaseRequisition.actionDraftId !== null && findById(tables, 'actionDraft', purchaseRequisition.actionDraftId) ? actionDraftView(tables, purchaseRequisition.actionDraftId) : null;
-  return {
-    ...requisitionView(tables, purchaseRequisition),
-    requesterJobGradeName: requester ? employeeBasicsOf(tables, requester).jobGradeName : null,
-    departmentHeadName: activeHeadNameOf(tables, purchaseRequisition.departmentId),
-    isRequester: purchaseRequisition.requesterId === viewerId,
-    canApprove: canApproveRequisition(tables, viewerId, purchaseRequisition),
-    purchaseOrderLines: requisitionPurchaseOrderLines(tables, purchaseRequisition),
-    sourceDraft: draft ? { id: draft.id, draftStatus: draft.draftStatus, confirmedAt: draft.confirmedAt, message: draft.message } : null,
-  };
+  /** 요청자가 소속 부서의 부서장이면 승인할 사람이 없어 등록할 수 없다(PUR-001, 자동 승인 금지) */
+  isDepartmentHead: boolean;
 }
 
 export const purchaseRequisitionApi = {
   /** 구매요청 목록 (최근 것부터) */
-  list: (): Promise<RequisitionView[]> =>
-    mockQuery((tables) => {
-      requireActor(tables, { view: REQUISITION_VIEW_PERMISSIONS });
-      return listPurchaseRequisitions(tables);
-    }),
+  list: (): Promise<RequisitionView[]> => serverPurchaseRequisitionApi.list(),
 
   /** 구매요청 한 건. 조회 권한이 없어도 요청자와 요청 부서의 부서장(승인권자)은 볼 수 있다. */
-  detail: (id: number): Promise<RequisitionDetail> =>
-    mockQuery((tables) => {
-      const actor = requireActor(tables);
-      const purchaseRequisition = findById(tables, 'purchaseRequisition', id);
-      if (!purchaseRequisition) throw new ApiError('COM-003', `구매요청 ${id}`);
-      const isApprover = findById(tables, 'department', purchaseRequisition.departmentId)?.headEmployeeId === actor.employee.id;
-      if (!canView(actor, ...REQUISITION_VIEW_PERMISSIONS) && purchaseRequisition.requesterId !== actor.employee.id && !isApprover) {
-        throw new ApiError('COM-002', '구매요청 조회 권한이 필요해요');
-      }
-      return requisitionDetailOf(tables, purchaseRequisition, actor.employee.id);
-    }),
+  detail: (id: number): Promise<RequisitionDetail> => serverPurchaseRequisitionApi.detail(id),
 
   /** 등록 창: 요청자·소속 부서·승인권자 */
-  formContext: (): Promise<RequisitionFormContext> =>
-    mockQuery((tables) => {
-      const actor = requireActor(tables);
-      return {
-        requesterName: actor.employee.employeeName,
-        departmentName: findById(tables, 'department', actor.employee.departmentId)?.departmentName ?? '-',
-        headName: activeHeadNameOf(tables, actor.employee.departmentId),
-      };
-    }),
+  formContext: (): Promise<RequisitionFormContext> => serverPurchaseRequisitionApi.formContext(),
 
   /** 등록 = 바로 승인 대기. 요청자 소속 부서에 부서장이 없으면 PUR-001. 부서장에게 승인 요청 알림. */
-  create: (input: RequisitionInput): Promise<RequisitionView> =>
-    mockMutation((tx) => {
-      const actor = requireActor(tx.tables, { use: [PERMISSION.PURCHASE_REQUISITION_CREATE] });
-      const { purchaseRequisition } = createPurchaseRequisition(tx, userActor(actor.employee.id), {
-        desiredReceiptDate: input.desiredReceiptDate || null,
-        requestReason: input.requestReason.trim() || null,
-        items: input.items,
-      });
-      return requisitionView(tx.tables, purchaseRequisition);
-    }),
+  create: (input: RequisitionInput): Promise<RequisitionView> => serverPurchaseRequisitionApi.create(input),
 
-  /** 반려된 요청을 요청자가 고쳐 다시 요청 → 승인 대기 */
-  resubmit: (input: RequisitionResubmitInput): Promise<RequisitionView> =>
-    mockMutation((tx) => {
-      const actor = requireActor(tx.tables, { use: [PERMISSION.PURCHASE_REQUISITION_CREATE] });
-      const updated = resubmitPurchaseRequisition(tx, userActor(actor.employee.id), {
-        purchaseRequisitionId: input.purchaseRequisitionId,
-        desiredReceiptDate: input.desiredReceiptDate || null,
-        requestReason: input.requestReason.trim() || null,
-        items: input.items,
-        expectedUpdatedAt: input.expectedUpdatedAt,
-      });
-      return requisitionView(tx.tables, updated);
-    }),
+  /** 반려된 요청을 요청자가 수량·희망 입고일·근거를 고쳐 다시 요청 → 승인 대기 (원료 품목은 그대로) */
+  resubmit: (input: RequisitionResubmitInput): Promise<RequisitionView> => serverPurchaseRequisitionApi.resubmit(input),
 };
 
 // ── 발주 ─────────────────────────────────────────────
 
-export type PurchaseOrderCandidateItem = ReturnType<typeof orderableRequisitionItems>[number];
+/** 발주 후보 = 승인됐고 아직 발주하지 않은 구매요청 1건, 원료의 기본 공급업체 포함 */
+export type PurchaseOrderCandidateItem = RequisitionView & { supplierId: number | null; supplierName: string | null };
+
+/** 발주 1건과 품목별 입고·원료 LOT */
+export interface PurchaseOrderView {
+  id: number;
+  purchaseOrderNo: string;
+  supplierId: number;
+  supplierName: string;
+  purchaseOrderStatus: PurchaseOrderStatus;
+  /** 발주한 사원 (ERD에 칸이 없어 작업 로그 PURCHASE_ORDER_CREATED로 본다) */
+  orderedEmployeeName: string | null;
+  /** 발주 취소·잔량 마감한 사유·사원·시각 (그 상태일 때만, 작업 로그) */
+  statusChange: { reason: string | null; employeeName: string | null; at: string } | null;
+  createdAt: string;
+  items: {
+    id: number;
+    purchaseRequisitionId: number;
+    itemId: number;
+    itemCode: string;
+    itemName: string;
+    purchaseRequisitionNo: string | null;
+    orderedTon: string;
+    expectedReceiptDate: string | null;
+    /** 입고 누계 (입고 기록 합계) */
+    receivedTon: string;
+    /** 미입고량(입고예정) = 발주량 − 입고 누계. 발주 취소·잔량 마감한 발주는 0 */
+    remainingTon: string;
+    /** 발주 취소·잔량 마감으로 닫은 양 */
+    closedTon: string;
+    /** 입고 취소 행(음수, reversedGoodsReceiptNo = 취소한 입고)도 들어 있다 */
+    goodsReceipts: { id: number; goodsReceiptNo: string; receivedTon: string; receivedDate: string; lotNo: string | null; reversedGoodsReceiptNo: string | null; reversalGoodsReceiptNo: string | null }[];
+  }[];
+}
+
+/** 발주 취소·잔량 마감 (사유 필수, 500자) */
+export interface PurchaseOrderReasonInput {
+  purchaseOrderId: number;
+  reason: string;
+}
 
 export interface PurchaseOrderCreateInput {
-  purchaseRequisitionItemIds: readonly number[];
-  /** 입고예정일(납기). '' = 고른 요청의 가장 이른 희망 입고일 */
-  dueDate: string;
+  supplierId: number;
+  items: readonly {
+    purchaseRequisitionId: number;
+    /** 톤 (요청량 이하) */
+    orderedTon: string;
+    /** YYYY-MM-DD 또는 '' (= 구매요청의 희망 입고일) */
+    expectedReceiptDate: string;
+  }[];
 }
 
 export const purchaseOrderApi = {
-  /** 발주 목록 (줄별 입고·원료 LOT 포함) */
-  list: (): Promise<PurchaseOrderView[]> =>
-    mockQuery((tables) => {
-      requireActor(tables, { view: PURCHASE_ORDER_VIEW_PERMISSIONS });
-      return listPurchaseOrders(tables);
-    }),
+  /** 발주 목록 (품목별 입고·원료 LOT 포함) */
+  list: (): Promise<PurchaseOrderView[]> => serverPurchaseOrderApi.list(),
 
-  /** 발주할 수 있는 요청 품목: 승인됨·미발주, 품목의 기본 공급업체 포함 */
-  candidateItems: (): Promise<PurchaseOrderCandidateItem[]> =>
-    mockQuery((tables) => {
-      requireActor(tables, { view: [PERMISSION.PURCHASE_ORDER_CONFIRM] });
-      return orderableRequisitionItems(tables);
-    }),
+  /** 발주할 수 있는 구매요청: 승인됨·미발주, 원료의 기본 공급업체 포함 */
+  candidateItems: (): Promise<PurchaseOrderCandidateItem[]> => serverPurchaseRequisitionApi.orderable(),
 
-  /** 발주 확정: 공급업체 1곳당 발주 1건 (승인 전이면 PUR-002) */
-  create: (input: PurchaseOrderCreateInput): Promise<PurchaseOrderView[]> =>
-    mockMutation((tx) => {
-      const actor = requireActor(tx.tables, { use: [PERMISSION.PURCHASE_ORDER_CONFIRM] });
-      const purchaseOrders = createPurchaseOrders(tx, userActor(actor.employee.id), {
-        purchaseRequisitionItemIds: input.purchaseRequisitionItemIds,
-        dueDate: input.dueDate || null,
-      });
-      return purchaseOrders.map((po) => purchaseOrderView(tx.tables, po));
-    }),
+  /** 발주 확정: 공급업체마다 발주 1건 (승인 전이면 PUR-002). 서버는 공급업체마다 차례로 만든다 */
+  create: (orders: readonly PurchaseOrderCreateInput[]): Promise<PurchaseOrderView[]> => serverPurchaseOrderApi.create(orders),
+
+  /** 발주 취소: 입고가 없는 발주만 (있으면 PUR-004). 연결 구매요청은 발주 취소가 된다 */
+  cancel: (input: PurchaseOrderReasonInput): Promise<PurchaseOrderView> => serverPurchaseOrderApi.cancel(input),
+
+  /** 잔량 마감: 일부만 입고된 발주만 (아니면 PUR-005). 남은 양은 입고예정에서 빠진다 */
+  close: (input: PurchaseOrderReasonInput): Promise<PurchaseOrderView> => serverPurchaseOrderApi.close(input),
 };

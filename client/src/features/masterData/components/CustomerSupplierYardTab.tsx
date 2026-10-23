@@ -1,10 +1,10 @@
 'use client';
 
 // 고객사·공급업체 (REQ-MST-007), 야드 (REQ-MST-008: 원료·슬래브·코일 야드, 야드 안 위치는 관리하지 않음).
-// '사용 안 함' 토글 없이 삭제만 둔다. 쓰는 곳이 있으면 삭제를 거부한다 (PLAN 5장, 컨벤션 7-2).
+// '사용 안 함' 토글은 두지 않고 삭제만 둔다(PLAN 5장, 컨벤션 7-2). 쓰는 곳이 있으면 서버가 막는다(API-277~279).
 // 야드 수정 창은 그 야드의 실제 야드 유형을 보여 준다 (옛 화면의 '항상 원료 야드' 표시 버그 수정, 보고서 5).
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { YARD_TYPE, YARD_TYPE_LABEL, type YardType } from '@/codes';
 import { masterDataApi } from '@/api/masterData';
 import { Button } from '@/components/Button';
@@ -16,18 +16,20 @@ import { QueryBoundary } from '@/components/QueryBoundary';
 import { EmptyNote } from '@/components/StateView';
 import { Table, Td, Th } from '@/components/Table';
 import { Segmented } from '@/components/Tabs';
-import { MASTER_LOCK_TEXT, ModalFooter, RowActions, TableFoot } from '@/features/masterData/components/MasterParts';
+import { MASTER_LOCK_TEXT, ModalFooter, RowActions, TableFoot, useMasterDelete } from '@/features/masterData/components/MasterParts';
 import { useAction } from '@/hooks/useAction';
 import { useMasterDataFieldErrors } from '@/hooks/useMasterDataForm';
 import { useMasterCustomers, useMasterSuppliers, useMasterYards } from '@/hooks/useMasterData';
 
 // 화면 안에서 세 목록을 고르는 값 (주소 &sub=)
 type ListKind = 'customers' | 'suppliers' | 'yards';
-const KINDS: readonly { key: ListKind; label: string }[] = [
-  { key: 'customers', label: '고객사' },
-  { key: 'suppliers', label: '공급업체' },
-  { key: 'yards', label: '야드' },
+const KINDS: readonly { key: ListKind; label: ReactNode }[] = [
+  { key: 'customers', label: <span data-pet-term="고객사">고객사</span> },
+  { key: 'suppliers', label: <span data-pet-term="공급업체">공급업체</span> },
+  { key: 'yards', label: <span data-pet-term="야드">야드</span> },
 ];
+/** 화면 도우미 펫의 항목 종류 (ERD 이름) */
+const PET_ITEM: Record<ListKind, 'customer' | 'supplier' | 'yard'> = { customers: 'customer', suppliers: 'supplier', yards: 'yard' };
 const isListKind = (value: string | null): value is ListKind => KINDS.some((k) => k.key === value);
 
 /** 세 대상을 같은 표로 그리기 위한 화면 행 (저장할 때는 ERD 이름의 입력으로 바꾼다) */
@@ -105,34 +107,40 @@ export function CustomerSupplierYardTab({ canEdit }: { canEdit: boolean }) {
 function CustomerList({ canEdit }: { canEdit: boolean }) {
   const query = useMasterCustomers();
   const rows = query.data?.map((c): CodeNameRow => ({ id: c.id, code: c.customerCode, name: c.customerName, yardType: null, referenceText: c.referenceText, updatedAt: c.updatedAt }));
-  return <CodeNameTable kind="customers" canEdit={canEdit} query={{ ...query, data: rows }} remove={masterDataApi.deleteCustomer} />;
+  return <CodeNameTable kind="customers" canEdit={canEdit} query={{ ...query, data: rows }} />;
 }
 
 function SupplierList({ canEdit }: { canEdit: boolean }) {
   const query = useMasterSuppliers();
   const rows = query.data?.map((s): CodeNameRow => ({ id: s.id, code: s.supplierCode, name: s.supplierName, yardType: null, referenceText: s.referenceText, updatedAt: s.updatedAt }));
-  return <CodeNameTable kind="suppliers" canEdit={canEdit} query={{ ...query, data: rows }} remove={masterDataApi.deleteSupplier} />;
+  return <CodeNameTable kind="suppliers" canEdit={canEdit} query={{ ...query, data: rows }} />;
 }
 
 function YardList({ canEdit }: { canEdit: boolean }) {
   const query = useMasterYards();
   const rows = query.data?.map((y): CodeNameRow => ({ id: y.id, code: y.yardCode, name: y.yardName, yardType: y.yardType, referenceText: y.referenceText, updatedAt: y.updatedAt }));
-  return <CodeNameTable kind="yards" canEdit={canEdit} query={{ ...query, data: rows }} remove={masterDataApi.deleteYard} />;
+  return <CodeNameTable kind="yards" canEdit={canEdit} query={{ ...query, data: rows }} />;
 }
 
 interface CodeNameTableProps {
   kind: ListKind;
   canEdit: boolean;
   query: { data: CodeNameRow[] | undefined; isPending: boolean; error: unknown; refetch: () => unknown };
-  remove: (id: number) => Promise<number>;
 }
 
-function CodeNameTable({ kind, canEdit, query, remove }: CodeNameTableProps) {
+const REMOVE: Record<ListKind, (id: number) => Promise<void>> = {
+  customers: masterDataApi.deleteCustomer,
+  suppliers: masterDataApi.deleteSupplier,
+  yards: masterDataApi.deleteYard,
+};
+
+function CodeNameTable({ kind, canEdit, query }: CodeNameTableProps) {
   const text = KIND_TEXT[kind];
   const [keyword, setKeyword] = useState('');
   const [editing, setEditing] = useState<CodeNameRow | 'new' | null>(null);
+  const deletion = useMasterDelete();
   return (
-    <Card>
+    <Card petKey="card:masterData.partners">
       <CardHead
         title={text.what}
         meta={query.data ? `${query.data.length}곳` : undefined}
@@ -162,7 +170,7 @@ function CodeNameTable({ kind, canEdit, query, remove }: CodeNameTableProps) {
                 </thead>
                 <tbody>
                   {shown.map((row) => (
-                    <tr key={row.id}>
+                    <tr key={row.id} data-pet-item={PET_ITEM[kind]} data-pet-item-title={row.code}>
                       <Td className="font-mono text-mono">{row.code}</Td>
                       <Td>{row.name}</Td>
                       {kind === 'yards' ? <Td>{row.yardType ? YARD_TYPE_LABEL[row.yardType] : '-'}</Td> : null}
@@ -170,7 +178,7 @@ function CodeNameTable({ kind, canEdit, query, remove }: CodeNameTableProps) {
                         <RowActions
                           canEdit={canEdit}
                           onEdit={() => setEditing(row)}
-                          remove={{ what: `${text.what} ${row.name}`, run: () => remove(row.id), success: `${text.what}를 삭제했어요`, blockedReason: row.referenceText }}
+                          onDelete={() => deletion.open({ id: row.id, name: row.code, object: `${text.what}를`, remove: REMOVE[kind] })}
                         />
                       </Td>
                     </tr>
@@ -184,6 +192,7 @@ function CodeNameTable({ kind, canEdit, query, remove }: CodeNameTableProps) {
         }}
       </QueryBoundary>
       {editing ? <CodeNameModal kind={kind} row={editing === 'new' ? null : editing} onClose={() => setEditing(null)} /> : null}
+      {deletion.dialog}
     </Card>
   );
 }
@@ -194,7 +203,8 @@ function CodeNameModal({ kind, row, onClose }: { kind: ListKind; row: CodeNameRo
   const [code, setCode] = useState(row?.code ?? '');
   const [name, setName] = useState(row?.name ?? '');
   const [yardType, setYardType] = useState<YardType | ''>(row?.yardType ?? '');
-  const options = { onSuccess: onClose, onError: fieldErrors.takeFrom };
+  // 다른 사람이 먼저 고쳐 막히면(COM-001) 조회를 다시 읽고 옛 값으로 열린 창을 닫는다
+  const options = { onSuccess: onClose, onError: fieldErrors.takeFrom, refreshOnStale: true, onStale: onClose };
   const created = `${text.what}를 추가했어요`;
   const saved = `${text.what}를 저장했어요`;
   const createCustomer = useAction(masterDataApi.createCustomer, { ...options, success: created });

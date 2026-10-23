@@ -49,7 +49,7 @@ describe('위젯 목록', () => {
       '생산량',
       'AI 활용 현황',
     ]);
-    expect(WIDGETS.filter((w) => w.soon).map((w) => w.key)).toEqual(['AGENT_RISK', 'AI_USAGE']);
+    expect(WIDGETS.filter((w) => w.soon).map((w) => w.key)).toEqual(['AI_USAGE']);
     for (const w of WIDGETS) {
       expect(w.minW).toBeLessThanOrEqual(w.defaultW);
       expect(w.minH).toBeLessThanOrEqual(w.defaultH);
@@ -58,11 +58,11 @@ describe('위젯 목록', () => {
 });
 
 describe('위젯 배치', () => {
-  it('기본 배치: 공정 흐름 한 줄 → 6칸씩 두 개씩', () => {
+  it('기본 배치: 공정 흐름 한 줄 → 수주 충족 8칸·Agent 4칸 → 6칸씩 두 개씩', () => {
     expect(buildDefaultPlacements()).toEqual([
       { key: 'PROCESS_FLOW', x: 0, y: 0, w: 12, h: 3 },
-      { key: 'ORDER_FULFILLMENT', x: 0, y: 3, w: 6, h: 5 },
-      { key: 'AGENT_RISK', x: 6, y: 3, w: 6, h: 5 },
+      { key: 'ORDER_FULFILLMENT', x: 0, y: 3, w: 8, h: 5 },
+      { key: 'AGENT_RISK', x: 8, y: 3, w: 4, h: 5 },
       { key: 'RECENT_EVENTS', x: 0, y: 8, w: 6, h: 5 },
       { key: 'PRODUCT_STOCK', x: 6, y: 8, w: 6, h: 5 },
       { key: 'PROCESS_YIELD', x: 0, y: 13, w: 6, h: 4 },
@@ -120,5 +120,36 @@ describe('위젯 배치', () => {
     storage.setItem(layoutStorageKey(9), '{망가진 값');
     expect(readStoredLayout(9, storage)).toBeNull();
     expect(readStoredLayout(9, null)).toBeNull();
+  });
+});
+
+describe('역할별 기본 배치 (품질)', () => {
+  it('품질은 공정 흐름 바로 아래 수주 충족 현황 대신 강종별 불합격률과 공정별 수율, Agent 위험 감지(전체 폭, 한 칸 높이)는 맨 아래 (빈 칸 없음)', () => {
+    const quality = buildDefaultPlacements('QUALITY');
+    expect(quality.some((p) => p.key === 'ORDER_FULFILLMENT')).toBe(false);
+    expect(quality).toEqual([
+      { key: 'PROCESS_FLOW', x: 0, y: 0, w: 12, h: 3 },
+      { key: 'AGENT_RISK', x: 0, y: 3, w: 12, h: 1 },
+      { key: 'REJECT_RATE', x: 0, y: 4, w: 6, h: 5 },
+      { key: 'PROCESS_YIELD', x: 6, y: 4, w: 6, h: 5 },
+      { key: 'RECENT_EVENTS', x: 0, y: 9, w: 6, h: 5 },
+      { key: 'PRODUCT_STOCK', x: 6, y: 9, w: 6, h: 5 },
+    ]);
+    // 줄마다 12칸을 다 채운다
+    const widthByRow = new Map<number, number>();
+    for (const p of quality) widthByRow.set(p.y, (widthByRow.get(p.y) ?? 0) + p.w);
+    expect([...widthByRow.values()].every((w) => w === 12)).toBe(true);
+    // 공통 기본 위젯 중 수주 충족 현황만 빠지고 나머지는 모두 있다
+    expect(quality.map((p) => p.key).sort()).toEqual([...buildDefaultPlacements().map((p) => p.key).filter((k) => k !== 'ORDER_FULFILLMENT'), 'REJECT_RATE'].sort());
+  });
+
+  it('다른 역할(영업 등)과 역할을 모를 때는 공통 기본 배치 그대로', () => {
+    expect(buildDefaultPlacements('SALES')).toEqual(buildDefaultPlacements());
+    expect(buildDefaultPlacements(undefined)).toEqual(buildDefaultPlacements());
+  });
+
+  it('품질의 기본 배치는 품질 기준으로 "기본"이다 (저장값을 남기지 않는다)', () => {
+    expect(isDefaultLayout(buildDefaultPlacements('QUALITY'), 'QUALITY')).toBe(true);
+    expect(isDefaultLayout(buildDefaultPlacements(), 'QUALITY')).toBe(false);
   });
 });

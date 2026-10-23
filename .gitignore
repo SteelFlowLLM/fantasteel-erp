@@ -14,6 +14,11 @@ CLAUDE.md
 .env
 .env.*
 !.env.example
+# 배포 폴더의 실제 환경 파일 (deploy/aws/server.env.example 같은 예시 파일은 올린다)
+deploy/**/*.env
+deploy/**/*.env.local
+# Google 서비스 계정 키 등 비밀 파일 (server/.env.example의 GOOGLE_SERVICE_ACCOUNT_KEY_FILE)
+server/secrets/
 
 # ── 의존성·빌드 결과 ─────────────────────────────────
 node_modules
@@ -26,6 +31,7 @@ server/src/generated
 
 # ── 로컬 실행 데이터 ─────────────────────────────────
 .local-db
+.local-db-pg17
 server/storage
 .run
 coverage
@@ -34,3 +40,6 @@ coverage
 # ── OS ───────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+
+# Python (tools/voice-sidecar)
+__pycache__/

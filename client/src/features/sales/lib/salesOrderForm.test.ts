@@ -4,6 +4,7 @@ import { progressOf } from '@/lib/inventoryMath';
 import {
   activeFilterCount,
   cancellationEffectsText,
+  cancelPreviewOf,
   draftLineErrors,
   EMPTY_FILTER,
   filterSalesOrders,
@@ -30,6 +31,15 @@ describe('매수 입력 (4.1, SO-002)', () => {
     expect(parseOrderedQty('10')).toBe(10);
     expect(parseOrderedQty('007')).toBe(7);
     for (const text of ['10.5', '0', '-1', '', ' 3', '3매', '1e3', '１０']) expect(parseOrderedQty(text)).toBeNull();
+  });
+
+  it('한 줄 상한(9,999)을 넘으면 받지 않고 상한 문구를 보인다 (#496)', () => {
+    expect(parseOrderedQty('9999')).toBe(9999);
+    expect(parseOrderedQty('10000')).toBeNull();
+    expect(parseOrderedQty('3000000000')).toBeNull();
+    expect(draftLineErrors(line({ qtyText: '1000000' }), false)).toEqual({ qty: '수량은 품목 한 줄에 9,999까지 입력할 수 있어요' });
+    expect(draftLineErrors(line({ qtyText: '9999' }), true)).toEqual({});
+    expect(previewLinesOf([line({ qtyText: '10000' })])).toEqual([]);
   });
 
   it('줄 오류: 저장 전에는 입력한 칸만, 저장을 누른 뒤에는 빈칸도. 매수 문구는 SO-002 그대로', () => {
@@ -87,6 +97,30 @@ describe('목록 거르기', () => {
     expect(filterSalesOrders(rows, { ...EMPTY_FILTER, keyword: '나래' }).map((r) => r.salesOrderNo)).toEqual(['SO-2609-004']);
     expect(filterSalesOrders(rows, { ...EMPTY_FILTER, keyword: '2609-003' }).map((r) => r.salesOrderNo)).toEqual(['SO-2609-003']);
     expect(activeFilterCount({ ...EMPTY_FILTER, riskOnly: true, customerId: 2, keyword: 'x' })).toBe(2);
+  });
+});
+
+describe('수주 취소 창 미리보기 (BP-SO-02 예외: 부분 출고 뒤 잔량만 취소)', () => {
+  const plan = (productionPlanStatus: string) => ({ productionPlanStatus });
+  it('진행중·부분출하 품목의 예약·계획만 세고, 출고 매수와 전량 출고 품목은 그대로 남는다고 센다', () => {
+    expect(
+      cancelPreviewOf([
+        { salesOrderItemStatus: 'PARTIALLY_SHIPPED', activeReservedQty: 2, shippedQty: 4, plans: [plan('PLANNED')] },
+        { salesOrderItemStatus: 'SHIPPED', activeReservedQty: 0, shippedQty: 2, plans: [plan('IN_PROGRESS')] },
+        { salesOrderItemStatus: 'OPEN', activeReservedQty: 3, shippedQty: 0, plans: [plan('IN_PROGRESS'), plan('COMPLETED')] },
+        { salesOrderItemStatus: 'CANCELLED', activeReservedQty: 0, shippedQty: 1, plans: [plan('PLANNED')] },
+      ]),
+    ).toEqual({ activeReservedQty: 5, plannedCount: 1, inProgressCount: 1, keptShippedQty: 4, shippedItemCount: 1 });
+  });
+
+  it('출고가 없으면 전부 취소 대상이고 남는 출고분이 없다', () => {
+    expect(cancelPreviewOf([{ salesOrderItemStatus: 'OPEN', activeReservedQty: 6, shippedQty: 0, plans: [plan('PLANNED')] }])).toEqual({
+      activeReservedQty: 6,
+      plannedCount: 1,
+      inProgressCount: 0,
+      keptShippedQty: 0,
+      shippedItemCount: 0,
+    });
   });
 });
 

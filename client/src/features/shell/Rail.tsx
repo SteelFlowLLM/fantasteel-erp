@@ -8,6 +8,7 @@ import { CountBadge } from '@/components/Badge';
 import { soonLabel } from '@/components/ComingSoon';
 import { Icon } from '@/components/Icon';
 import { activeNavHref, buildNavigation } from '@/features/shell/navigation';
+import { SCREEN_KEY_BY_HREF } from '@/features/shell/screens';
 import { Logo } from '@/features/shell/Logo';
 import { useNavBadges } from '@/features/shell/useNavBadges';
 import { useMe } from '@/hooks/useMe';
@@ -23,6 +24,7 @@ export function Rail() {
   return (
     <nav
       aria-label="주 메뉴"
+      data-pet-climb=""
       // 조회 권한 화면까지 붙으면 레일이 길어진다(관리자는 모든 화면). 세로로 스크롤하고, 얇은 막대로 스크롤할 수 있음을 보인다.
       className="flex w-[72px] flex-none flex-col items-center gap-0.5 overflow-y-auto overscroll-contain bg-nav-dark py-2.5 text-nav-ink [scrollbar-color:#2e3d4e_transparent] [scrollbar-width:thin]"
     >
@@ -39,10 +41,12 @@ export function Rail() {
             key={entry.href}
             href={entry.href}
             title={hint}
+            data-pet-target={SCREEN_KEY_BY_HREF.get(entry.href)}
+            data-pet-perch=""
             aria-label={entry.soon ? hint : undefined}
             aria-current={isActive ? 'page' : undefined}
             className={cn(
-              'relative flex w-[60px] flex-none flex-col items-center gap-[3px] rounded-md pt-[7px] pb-1.5 text-center text-2xs font-medium break-keep [&_.ic]:size-5',
+              'relative flex w-[60px] flex-none flex-col items-center gap-[3px] rounded-md pt-[7px] pb-1.5 text-center text-2xs leading-tight font-medium break-keep [&_.ic]:size-5',
               isActive ? 'bg-nav-dark-2 text-white [&_.ic]:text-[#8fb4e0]' : 'text-nav-ink hover:bg-nav-dark-2',
             )}
           >

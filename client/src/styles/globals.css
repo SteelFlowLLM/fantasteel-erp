@@ -2,6 +2,8 @@
    화면은 Tailwind 유틸리티로만 만든다. 이 파일에는 토큰과 Tailwind로 표현할 수 없는 기본값만 둔다. */
 @import 'tailwindcss';
 @import './icons.css';
+@import './wake-orb.css';
+@import './morning-briefing.css';
 
 @theme {
   /* 색: B안 토큰만 쓰도록 기본 팔레트를 비운다 */
@@ -21,6 +23,8 @@
   --color-brand: #173a5e;
   --color-brand-hover: #0f2b47;
   --color-brand-tint: #e7eef5;
+  /* 선택된 목록 항목에 마우스를 올렸을 때: 선택색보다 한 단계 진하게 */
+  --color-brand-tint-hover: #d3e1ee;
   --color-on-brand: #ffffff;
   --color-nav-dark: #16202b;
   --color-nav-dark-2: #223040;
@@ -33,10 +37,24 @@
   --color-wait-bg: #fdf0df;
   --color-run: #1f5fcc;
   --color-run-bg: #e6eefc;
+  /* 상태 색 바탕(-bg) 위 글자는 상태 색보다 한 단계 진하게: 옅은 바탕에서 글자가 흐려 보이지 않게 */
+  --color-ok-ink: #115c38;
+  --color-danger-ink: #8e231e;
+  --color-wait-ink: #7a3d00;
+  /* 기준 밖 값: 칸 테두리와 바탕 (빨간 테두리보다 옅게, 칸이 여럿이어도 화면이 빨갛게 덮이지 않게) */
+  --color-danger-line: #e3a7a2;
+  --color-danger-field: #fff9f8;
+  /* 게이지의 합격 범위 띠 */
+  --color-ok-band: #bfe3ce;
   --color-ai: #5b3fc4;
   --color-ai-strong: #452fa0;
   --color-ai-bg: #f3f0fd;
   --color-ai-line: #cfc5f5;
+  /* 철강맨AI(AI 어시스턴트 패널·상단 바 버튼): 화면 도우미 펫 철강맨 말풍선과 같은 색 (public/pet/pet-engine.js의 --fp-accent 계열) */
+  --color-steelman: #e07028;
+  --color-steelman-ink: #9a4a17;
+  --color-steelman-soft: #fbe9dc;
+  --color-steelman-shadow: #f2c09c;
   --color-chart-1: #23507f;
   --color-chart-2: #5b86b5;
   --color-chart-3: #9db6d1;
@@ -83,7 +101,34 @@
   --text-5xl--line-height: 42px;
 }
 
-/* 글꼴: next/font가 <html>에 --font-plex-sans / --font-plex-mono 변수를 단다 */
+/* 글자 크기 설정 (사원 메뉴, lib/fontSize.ts): 브라우저 확대(Ctrl +)처럼 화면 전체를 zoom으로 키운다.
+   글자만 키우면 고정 너비 칸에서 글자가 한 자씩 끊겨서, 칸·여백·아이콘까지 같은 비율로 키운다.
+   zoom 안에서는 100vh·100vw도 함께 커져 화면을 넘치므로 높이·너비는 아래 viewport 유틸리티로 준다. */
+html {
+  --app-zoom: 1;
+}
+
+html[data-font-size='large'] {
+  --app-zoom: 1.25;
+}
+
+html[data-font-size='xlarge'] {
+  --app-zoom: 1.5;
+}
+
+html[data-font-size] {
+  zoom: var(--app-zoom);
+}
+
+@utility h-viewport {
+  height: calc(100dvh / var(--app-zoom));
+}
+
+@utility w-viewport {
+  width: calc(100dvw / var(--app-zoom));
+}
+
+/* 글꼴: styles/fonts.css가 :root에 --font-plex-sans / --font-plex-mono 변수를 단다 */
 @theme inline {
   --font-sans: var(--font-plex-sans), 'IBM Plex Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
   --font-mono: var(--font-plex-mono), 'IBM Plex Mono', 'D2Coding', ui-monospace, monospace;

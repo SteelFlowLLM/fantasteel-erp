@@ -1,12 +1,12 @@
 'use client';
 
-// 생산계획 화면의 창: 계획 취소 (PLANNED일 때만) · 재생산 계획 (여재·진행 계획을 먼저 확인, 14.1-6)
+// 생산계획 화면의 창: 계획 취소·히트 편성 확정 (PLANNED일 때만) · 재생산 계획 (여재·진행 계획을 먼저 확인, 14.1-6)
+import Link from 'next/link';
 import { useState } from 'react';
 import { PRODUCT_QTY_UNIT, PRODUCTION_PLAN_STATUS_LABEL, RESERVATION_STATUS_LABEL, type ProductItemType } from '@/codes';
-import { productionPlanApi, type ReproductionCheck } from '@/api/production';
+import { productionPlanApi, type ProductionPlanDetail, type ReproductionCheck } from '@/api/production';
 import { Banner } from '@/components/Banner';
 import { Button } from '@/components/Button';
-import { SoonButton } from '@/components/ComingSoon';
 import { Field } from '@/components/Field';
 import { Textarea } from '@/components/Input';
 import { KvList } from '@/components/KvList';
@@ -38,13 +38,82 @@ export function CancelPlanModal({ planId, planNo, updatedAt, onClose }: { planId
         </>
       }
     >
-      <p className="text-sm leading-5 text-ink-2">
+      <p className="text-sm leading-normal text-ink-2">
         작업 실적이 하나도 없는 <b className="font-semibold">계획</b> 상태에서만 취소할 수 있어요. 열연 투입 배정이 있으면 함께 해제돼요. 수주 품목은 그대로 남아 부족분이 다시
         &lsquo;추가 계획 필요&rsquo;로 보여요.
       </p>
       <Field label="사유" hint="작업 로그에 남아요 (선택, 500자 이내)">
         <Textarea value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} placeholder="예: 설비 점검으로 다시 편성" />
       </Field>
+    </Modal>
+  );
+}
+
+/** 히트 편성 확정 (REQ-PRD-002): 기준정보가 바뀌어 다시 계산한 히트 수를 저장하기 전에 바뀌는 값을 보여 준다 */
+export function ConfirmHeatPlanModal({ plan, onClose }: { plan: ProductionPlanDetail; onClose: () => void }) {
+  const confirm = useAction(productionPlanApi.confirmHeatPlan, {
+    success: (r) => `${plan.productionPlanNo} 히트 편성을 히트 ${r.heatCount}개로 확정했어요`,
+    onSuccess: onClose,
+  });
+  const f = plan.formation;
+  if (!f) return null;
+  const nextSlabQty = f.slabQtyPerHeat * f.recalculatedHeatCount;
+  return (
+    <Modal
+      title={`히트 편성 확정 · ${plan.productionPlanNo}`}
+      onClose={onClose}
+      width={520}
+      footer={
+        <>
+          <Button onClick={onClose} disabled={confirm.isPending}>
+            닫기
+          </Button>
+          <Button
+            variant="primary"
+            disabled={confirm.isPending}
+            onClick={() => confirm.mutate({ productionPlanId: plan.id, expectedUpdatedAt: plan.updatedAt })}
+          >
+            {confirm.isPending ? '확정하는 중…' : `히트 ${f.recalculatedHeatCount}개로 확정`}
+          </Button>
+        </>
+      }
+    >
+      <p className="text-sm leading-normal text-ink-2">
+        수주 등록 뒤 기준정보(라우팅 수율·규격 매핑·히트 용량)가 바뀌어 지금 기준으로 다시 계산한 편성이 저장된 편성과 달라요. 작업을 시작하기 전(<b className="font-semibold">계획</b> 상태)에만 바꿀 수 있어요.
+      </p>
+      <Table compact>
+        <thead>
+          <tr>
+            <Th>항목</Th>
+            <Th align="right">저장된 편성</Th>
+            <Th align="right">다시 계산</Th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <Td className="font-medium">히트 수</Td>
+            <Td align="right">{f.heatCount}개</Td>
+            <Td align="right" className="font-semibold">
+              {f.recalculatedHeatCount}개
+            </Td>
+          </tr>
+          <tr>
+            <Td className="font-medium">계획 슬래브</Td>
+            <Td align="right">{f.plannedSlabQty}매</Td>
+            <Td align="right" className="font-semibold">
+              {nextSlabQty}매
+            </Td>
+          </tr>
+          <tr>
+            <Td className="font-medium">예상 슬래브 여재</Td>
+            <Td align="right">{f.expectedSurplusSlabQty}매</Td>
+            <Td align="right" className="font-semibold">
+              {Math.max(0, nextSlabQty - f.shortageQty)}매
+            </Td>
+          </tr>
+        </tbody>
+      </Table>
+      <p className="text-cap leading-normal text-ink-3">MRP 소요량도 확정한 히트 수로 다시 계산돼요.</p>
     </Modal>
   );
 }
@@ -135,9 +204,12 @@ export function ReproductionModal({ check, itemType, onClose }: { check: Reprodu
           {surplusFirst > check.additionalPlanQty ? ` 진행 계획 잔여 목표로 덮인 몫도 재고로 먼저 잡으므로, 그 계획의 산출은 뒤에 여재로 남을 수 있어요.` : ''}
         </Banner>
       )}
-      <div className="flex items-center gap-2 text-cap text-ink-3">
-        <SoonButton size="sm">재생산 자동 초안</SoonButton>
-        AI Factory Agent의 재생산 초안은 담당 부서원이 확정하는 2등급 기능이에요.
+      <div className="text-cap text-ink-3">
+        합격 매수가 부족해지면 AI Factory Agent가 재생산 계획 후보를 만들어요. 담당 부서원이{' '}
+        <Link href="/agent" className="font-semibold text-run hover:underline">
+          AI Factory Agent
+        </Link>
+        에서 확정해요.
       </div>
     </Modal>
   );

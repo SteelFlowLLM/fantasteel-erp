@@ -3,6 +3,7 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { Icon } from '@/components/Icon';
 import { Tag } from '@/components/Tag';
+import { cn } from '@/lib/cn';
 
 export const lotTraceHref = (lotNo: string, direction?: 'forward' | 'backward'): string =>
   `/lots/trace?lot=${encodeURIComponent(lotNo)}${direction ? `&direction=${direction}` : ''}`;
@@ -32,6 +33,21 @@ export function LotHeader({ area, lotNo, typeName, badges, actions }: { area: st
 }
 
 /** 이름-값 칸 묶음 (옛 qc-kv): 폭에 맞춰 여러 줄로 흐른다 */
+/** 강종 · 규격 칸: 강종과 규격 코드를 줄을 나눈다. 규격 코드는 하이픈에서 끊지 않고, 칸보다 길면 말줄임(전체는 툴팁) */
+export function GradeSpec({ steelGradeCode, itemCode }: { steelGradeCode: string | null; itemCode: string | null }) {
+  if (!steelGradeCode && !itemCode) return <span>—</span>;
+  return (
+    <span className="flex min-w-0 flex-col font-mono">
+      {steelGradeCode ? <span>{steelGradeCode}</span> : null}
+      {itemCode ? (
+        <span className="truncate whitespace-nowrap text-ink-2" title={itemCode}>
+          {itemCode}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 export function InfoGrid({ items }: { items: readonly { label: ReactNode; value: ReactNode }[] }) {
   return (
     <dl className="grid grid-cols-[repeat(auto-fill,minmax(210px,1fr))] gap-x-4.5 gap-y-3">
@@ -45,17 +61,35 @@ export function InfoGrid({ items }: { items: readonly { label: ReactNode; value:
   );
 }
 
-/** 목록 칸의 한 줄 (옛 hl-mitem). 고른 줄은 왼쪽에 막대를 그린다. */
-export function MasterItemLink({ href, active, children }: { href: string; active: boolean; children: ReactNode }) {
+/** 목록 칸의 한 줄 (옛 hl-mitem). 고른 줄은 왼쪽에 막대를 그린다. petItem·petTitle은 화면 도우미 펫이 읽는 레코드 종류·제목 (data-pet-item) */
+export function MasterItemLink({
+  href,
+  active,
+  petItem,
+  petTitle,
+  className,
+  children,
+}: {
+  href: string;
+  active: boolean;
+  petItem?: string;
+  petTitle?: string;
+  /** 묶음 안 줄의 들여쓰기 등 (불합격 히트의 하위 LOT) */
+  className?: string;
+  children: ReactNode;
+}) {
   return (
     <Link
       href={href}
+      data-pet-item={petItem}
+      data-pet-item-title={petTitle}
       aria-current={active ? 'true' : undefined}
-      className={
+      className={cn(
         active
-          ? 'flex flex-col gap-1 border-b border-line bg-brand-tint px-4 py-2.5 shadow-[inset_3px_0_0_var(--color-brand)]'
-          : 'flex flex-col gap-1 border-b border-line px-4 py-2.5 hover:bg-surface-2'
-      }
+          ? 'flex flex-col gap-1 border-b border-line bg-brand-tint px-4 py-2.5 shadow-[inset_3px_0_0_var(--color-brand)] hover:bg-brand-tint-hover'
+          : 'flex flex-col gap-1 border-b border-line px-4 py-2.5 hover:bg-surface-2',
+        className,
+      )}
     >
       {children}
     </Link>

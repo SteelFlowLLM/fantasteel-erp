@@ -1,288 +1,368 @@
-// AI Factory Agent (P2 준비 중). 옛 B안 화면의 구성을 남기고 내용은 고정 예시다. 기능·데이터 변경 없음.
-// 고친 점 (reports/6 C-5, PLAN 7장): 대응 후보는 담당 부서원이 확정(확정자 = 요청자), 구매요청이면 요청자 소속 부서장이 최종 승인.
-// 작업 로그 주체는 사용자/시스템만, 번호는 9.1·9.2 형식, 강종은 SM355A~D, 코드 원문 대신 공통 코드 표시명.
-import { Fragment } from 'react';
-import { Badge } from '@/components/Badge';
-import { Button } from '@/components/Button';
-import { Card, CardBody, CardHead } from '@/components/Card';
-import { Chip } from '@/components/Chip';
-import { ComingSoonArea, SoonButton } from '@/components/ComingSoon';
-import { Icon } from '@/components/Icon';
-import { KvList } from '@/components/KvList';
-import { PageHead } from '@/components/Page';
-import { Steps } from '@/components/Steps';
-import { Tag } from '@/components/Tag';
-import { Timeline } from '@/components/Timeline';
-import { ACTION_TYPE_LABEL, DRAFT_STATUS_LABEL, PERMISSION_LABEL, PERMISSION_LEVEL, PERMISSION_LEVEL_LABEL } from '@/codes';
-import {
-  ActorTag,
-  AiBrief,
-  AiCard,
-  DaySeparator,
-  EventName,
-  ExampleNotice,
-  Figure,
-  LockHint,
-  MasterItem,
-  OriginLine,
-  SourceList,
-} from '@/features/agent/components/SoonExampleParts';
-import {
-  AGENT_DETECTIONS,
-  AGENT_HISTORY,
-  AGENT_RESOLVED_EXAMPLE,
-  AGENT_RISK_NAME,
-  AGENT_RULES,
-  AGENT_TRIGGER_NAME,
-  CANDIDATE_FLOW,
-  DRAFT_FLOW,
-  EXAMPLE_NO,
-  RAW_SHORTAGE_CANDIDATE,
-  RAW_SHORTAGE_METRICS,
-  agentRuleOf,
-  draftStepState,
-} from '@/features/agent/agentExample';
-import { businessEventLabelOf } from '@/features/agent/lib/businessEventLabel';
+'use client';
 
-function DetectionList() {
-  const selectedKey = AGENT_DETECTIONS[0]?.key;
+// AI Factory Agent (REQ-AGT-001~006, BP-AGT-01). 규칙이 감지해 만든 대응 후보를 담당 부서원이 후보별로 확정·반려한다.
+// AI는 상황 설명만 하고 후보를 정하지 않는다. 납기 위험·불합격률 상승은 후보 없이 알림만 보내므로 이 목록에 없다.
+import { Fragment, useMemo, useState } from 'react';
+import type { AgentCandidateView, AgentExplainView, AgentRiskType } from '@fantasteel/shared';
+import { ACTION_TYPE_LABEL, DRAFT_STATUS_LABEL, ERROR_MESSAGE, isErrorCode, PERMISSION_LABEL } from '@/codes';
+import { agentCandidateApi, agentCandidateKeys } from '@/api/agentCandidates';
+import { Badge } from '@/components/Badge';
+import { Banner } from '@/components/Banner';
+import { Button, ButtonLink } from '@/components/Button';
+import { Chip } from '@/components/Chip';
+import { Icon } from '@/components/Icon';
+import { Textarea } from '@/components/Input';
+import { KvList } from '@/components/KvList';
+import { Modal } from '@/components/Modal';
+import { PageHead } from '@/components/Page';
+import { QueryBoundary } from '@/components/QueryBoundary';
+import { StateView } from '@/components/StateView';
+import { Tag } from '@/components/Tag';
+import { AiCard, MasterItem } from '@/features/agent/components/SoonExampleParts';
+import {
+  CANDIDATE_RISKS,
+  CONFIRM_PERMISSION,
+  RISK_NAME,
+  STATUS_TONE,
+  evidenceLabelOf,
+  isConfirmable,
+  isOpenCandidate,
+  recommendationsOf,
+  ALERT_ONLY_NOTE,
+  scanOutcomeText,
+  scanSummary,
+  staleCandidateLabel,
+  sortCandidates,
+} from '@/features/agent/lib/agentDisplay';
+import { useShellTitle } from '@/features/shell/useShellTitle';
+import { useAction } from '@/hooks/useAction';
+import { useAgentCandidates } from '@/hooks/useAgentCandidates';
+import { useMe } from '@/hooks/useMe';
+import { useCanUse } from '@/hooks/usePermission';
+import { fmtHM, fmtMDHM } from '@/lib/format';
+
+const REASON_MAX = 500;
+
+export function AgentScreen() {
+  useShellTitle('AI Factory Agent', '위험 감지 · 대응 후보');
+  const query = useAgentCandidates();
   return (
-    <section aria-label="감지 목록" className="flex min-h-0 w-80 flex-none flex-col rounded-md border border-line bg-surface shadow-1">
+    <div className="flex min-h-0 min-w-0 flex-1">
+      <QueryBoundary query={query} loadingLabel="대응 후보를 불러오는 중…">
+        {(list) => <AgentBoard candidates={sortCandidates(list)} />}
+      </QueryBoundary>
+    </div>
+  );
+}
+
+function AgentBoard({ candidates }: { candidates: AgentCandidateView[] }) {
+  const [risk, setRisk] = useState<AgentRiskType | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const visible = useMemo(() => candidates.filter((c) => risk === null || c.riskType === risk), [candidates, risk]);
+  const selected = visible.find((c) => c.id === selectedId) ?? visible[0] ?? null;
+
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 gap-4">
+      <CandidateList candidates={candidates} visible={visible} risk={risk} onRisk={setRisk} selectedId={selected?.id ?? null} onSelect={setSelectedId} />
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3.5 overflow-auto">
+        {selected ? <CandidateDetail key={selected.id} candidate={selected} onSelect={setSelectedId} /> : <EmptyDetail hasAny={candidates.length > 0} />}
+      </div>
+    </div>
+  );
+}
+
+function CandidateList({
+  candidates,
+  visible,
+  risk,
+  onRisk,
+  selectedId,
+  onSelect,
+}: {
+  candidates: AgentCandidateView[];
+  visible: AgentCandidateView[];
+  risk: AgentRiskType | null;
+  onRisk: (risk: AgentRiskType | null) => void;
+  selectedId: number | null;
+  onSelect: (id: number) => void;
+}) {
+  const openCount = candidates.filter(isOpenCandidate).length;
+  const now = new Date();
+  const staleLabelOf = (c: AgentCandidateView) => staleCandidateLabel(c, now);
+  // 관리자만: 24시간 스케줄을 기다리지 않고 지금 감지를 돌린다 (같은 대상의 처리 전 후보는 새로 만들지 않는다)
+  const isAdmin = useMe().roleCode === 'ADMIN';
+  const scan = useAction(agentCandidateApi.scan, { invalidate: [agentCandidateKeys.all], success: scanSummary });
+  return (
+    <section aria-label="대응 후보 목록" data-pet-target="card:agent.detections" data-pet-perch="" className="flex min-h-0 w-80 flex-none flex-col rounded-md border border-line bg-surface shadow-1">
       <div className="flex flex-col gap-2.5 border-b border-line px-4 pt-3.5 pb-2.5">
         <div className="flex items-center gap-2">
-          <Icon name="radar" className="text-ai" />
-          <b className="text-base font-semibold">감지 {AGENT_DETECTIONS.length}건</b>
-          <span className="text-cap text-ink-3">위험 유형마다 1건 · 예시</span>
+          <Icon name="radar" className="text-steelman" />
+          <b className="text-base font-semibold">대응 후보 {openCount}건</b>
+          <span className="text-cap text-ink-3">확정 대기</span>
+          {isAdmin ? (
+            <Button size="sm" icon="radar" className="ml-auto" disabled={scan.isPending} title="스케줄(24시간)을 기다리지 않고 위험 감지를 지금 돌려요 (관리자만)" onClick={() => scan.mutate()}>
+              {scan.isPending ? '감지하는 중…' : '지금 감지'}
+            </Button>
+          ) : null}
         </div>
+        {scan.data ? (
+          <p role="status" className="rounded-xs bg-surface-2 px-2 py-1 text-cap text-ink-2">
+            {fmtHM(scan.data.ranAt)} 지금 감지 · {scanOutcomeText(scan.data)}
+          </p>
+        ) : null}
         <div className="flex flex-wrap gap-1.5">
-          <Chip on>
-            전체 <b>{AGENT_DETECTIONS.length}</b>
+          <Chip on={risk === null} onClick={() => onRisk(null)}>
+            전체 <b>{candidates.length}</b>
           </Chip>
-          {AGENT_DETECTIONS.map((detection) => (
-            <Chip key={detection.key}>
-              {AGENT_RISK_NAME[detection.riskCode]} <b>1</b>
+          {CANDIDATE_RISKS.map((type) => (
+            <Chip key={type} on={risk === type} onClick={() => onRisk(type)} data-pet-term={RISK_NAME[type]}>
+              {RISK_NAME[type]} <b>{candidates.filter((c) => c.riskType === type).length}</b>
             </Chip>
           ))}
         </div>
+        <p className="text-cap text-ink-3">{ALERT_ONLY_NOTE}</p>
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
-        {AGENT_DETECTIONS.map((detection, index) => {
-          const rule = agentRuleOf(detection.riskCode);
-          return (
-            <MasterItem key={detection.key} active={detection.key === selectedKey}>
-              <div className="flex items-center gap-2">
-                <b className="text-sm font-semibold">
-                  {index + 1}. {AGENT_RISK_NAME[detection.riskCode]}
-                </b>
-                <Tag size="sm" tone="outline">
-                  {AGENT_TRIGGER_NAME[rule.trigger]}
-                </Tag>
-                <span className="ml-auto text-cap text-ink-3 tabular-nums">{detection.detectedAt}</span>
-              </div>
-              <span className="text-xs text-ink-2">{detection.title}</span>
-              <div className="flex min-w-0 items-center gap-1.5">
-                {detection.candidateCount ? (
-                  <Badge tone="ai" plain>
-                    대응 후보 {detection.candidateCount}
-                  </Badge>
-                ) : (
-                  <Tag size="sm">대응 후보 없음</Tag>
-                )}
-                <span className="truncate text-cap text-ink-3">{rule.response}</span>
-              </div>
-            </MasterItem>
-          );
-        })}
-        <DaySeparator>확정 전에 해소됨</DaySeparator>
-        <MasterItem muted>
-          <div className="flex items-center gap-2">
-            <Badge tone="ok">해소</Badge>
-            <b className="text-sm font-semibold">{AGENT_RISK_NAME[AGENT_RESOLVED_EXAMPLE.riskCode]}</b>
-          </div>
-          <span className="text-xs text-ink-2">{AGENT_RESOLVED_EXAMPLE.title}</span>
-          <span className="text-cap text-ink-3">{AGENT_RESOLVED_EXAMPLE.note}</span>
-        </MasterItem>
-        <div className="flex flex-col gap-2 px-4 py-3.5">
-          <span className="text-cap font-semibold text-ink-3">감지 트리거 · 규칙과 대응</span>
-          <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-xs">
-            {AGENT_RULES.map((rule) => (
-              <Fragment key={rule.riskCode}>
-                <dt className="text-ink-3">
-                  {AGENT_RISK_NAME[rule.riskCode]}
-                  <span className="ml-1 text-[10px]">({AGENT_TRIGGER_NAME[rule.trigger]})</span>
-                </dt>
-                <dd className="m-0 text-ink-2">
-                  {rule.condition} → <b className="font-semibold">{rule.response}</b>
-                </dd>
-              </Fragment>
-            ))}
-          </dl>
-        </div>
+        {visible.length === 0 ? (
+          <p className="px-4 py-6 text-xs text-ink-3">보여 줄 대응 후보가 없어요.</p>
+        ) : (
+          visible.map((c) => (
+            <button key={c.id} type="button" onClick={() => onSelect(c.id)} className="block w-full text-left">
+              <MasterItem active={c.id === selectedId} muted={!isOpenCandidate(c)} petItem="actionDraft" petTitle={RISK_NAME[c.riskType]}>
+                <div className="flex items-center gap-2">
+                  <b className="text-sm font-semibold">{RISK_NAME[c.riskType]}</b>
+                  <Tag size="sm" tone="outline">
+                    {ACTION_TYPE_LABEL[c.actionType]}
+                  </Tag>
+                  <span className="ml-auto text-cap text-ink-3 tabular-nums">{fmtMDHM(c.createdAt)}</span>
+                </div>
+                <span className="text-xs text-ink-2">{c.summary}</span>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <Badge tone={STATUS_TONE[c.draftStatus]}>{DRAFT_STATUS_LABEL[c.draftStatus]}</Badge>
+                  {staleLabelOf(c) ? (
+                    <Tag size="sm" tone="outline" className="text-danger" title="오래 확인하지 않았어요. 아직 필요하면 확정하고, 이미 처리했거나 필요 없으면 반려해 주세요">
+                      {staleLabelOf(c)}
+                    </Tag>
+                  ) : null}
+                </div>
+              </MasterItem>
+            </button>
+          ))
+        )}
       </div>
     </section>
   );
 }
 
-function CandidateCard() {
-  const rule = agentRuleOf('RAW_SHORTAGE');
-  const confirmPermission = rule.confirmPermission ? PERMISSION_LABEL[rule.confirmPermission] : '';
+function EmptyDetail({ hasAny }: { hasAny: boolean }) {
   return (
-    <AiCard
-      icon="cart"
-      title={`대응 후보 1 · ${ACTION_TYPE_LABEL[RAW_SHORTAGE_CANDIDATE.actionType]}`}
-      meta="규칙으로 생성 · Action Draft"
-      actions={<Badge tone="wait">{DRAFT_STATUS_LABEL[RAW_SHORTAGE_CANDIDATE.draftStatus]}</Badge>}
-      className="flex-none"
-    >
-      <div className="grid grid-cols-[1.1fr_1fr] gap-4">
-        <KvList
-          items={[
-            {
-              label: '원료',
-              value: (
-                <>
-                  {RAW_SHORTAGE_CANDIDATE.rawMaterial} <span className="font-mono text-xs text-ink-3">{RAW_SHORTAGE_CANDIDATE.rawMaterialCode}</span>
-                </>
-              ),
-            },
-            { label: '수량', value: `${RAW_SHORTAGE_CANDIDATE.requiredTon} t` },
-            { label: '희망 입고일', value: RAW_SHORTAGE_CANDIDATE.desiredReceiptDate },
-            { label: '확정', value: `구매 부서원 (${confirmPermission} ${PERMISSION_LEVEL_LABEL[PERMISSION_LEVEL.USE]} 권한)` },
-            { label: '요청자', value: '확정한 사람' },
-            { label: '최종 승인', value: '요청자 소속 부서장' },
-          ]}
-        />
-        <div className="flex flex-col gap-2">
-          <OriginLine icon="radar">Agent 감지 10-01 06:00 · 원료 부족 · 부족량 1,200 t 기준</OriginLine>
-          <OriginLine icon="info">같은 대상의 미처리 초안이 있으면 새로 만들지 않아요.</OriginLine>
-        </div>
-      </div>
-      <div className="flex items-center gap-3 rounded-sm bg-surface-2 px-3 py-2.5">
-        <span className="flex-none text-cap text-ink-3">처리 순서</span>
-        <Steps
-          className="flex-1"
-          items={CANDIDATE_FLOW.map((label, index) => ({ key: label, label, state: index === 0 ? 'run' : 'todo' }))}
-        />
-      </div>
-      <div className="flex items-center gap-3">
-        <span className="flex-none text-cap text-ink-3">초안 상태</span>
-        <Steps
-          items={DRAFT_FLOW.map((status) => ({
-            key: status,
-            label: DRAFT_STATUS_LABEL[status],
-            state: draftStepState(status, RAW_SHORTAGE_CANDIDATE.draftStatus),
-          }))}
-        />
-      </div>
-      <div className="flex items-center gap-2 border-t border-ai-line pt-3">
-        <SoonButton variant="primary" size="sm">
-          <Icon name="check" />
-          확정
-        </SoonButton>
-        <SoonButton size="sm">반려</SoonButton>
-        <Button size="sm" icon="cart" disabled>
-          구매요청 보기
-        </Button>
-        <LockHint className="ml-auto">AI는 데이터를 바꾸지 않아요 · 확정한 담당 부서원의 권한으로 실행돼요</LockHint>
-      </div>
-    </AiCard>
+    <StateView
+      kind="empty"
+      title={hasAny ? '이 유형의 대응 후보가 없어요' : '아직 감지된 대응 후보가 없어요'}
+      text="규칙이 위험을 감지하면 대응 후보가 여기에 생겨요. 같은 대상의 처리 전 후보가 있으면 새로 만들지 않아요."
+    />
   );
 }
 
-function DetectionDetail() {
+function CandidateDetail({ candidate, onSelect }: { candidate: AgentCandidateView; onSelect: (id: number) => void }) {
+  const [explain, setExplain] = useState<AgentExplainView | null>(null);
+  const [rejecting, setRejecting] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+  const permission = CONFIRM_PERMISSION[candidate.actionType];
+  const canConfirm = useCanUse(...(permission ? [permission] : []));
+  const confirmable = isConfirmable(candidate);
+  const explainAction = useAction(agentCandidateApi.explain, { onSuccess: setExplain });
+  const confirmAction = useAction(agentCandidateApi.confirm, {
+    success: (result) => (result.executed ? executedMessageOf(result.draft) : '확정했지만 실행하지 못했어요'),
+    onSuccess: (result) => {
+      // 확정하면 목록 순서가 바뀌므로, 방금 처리한 후보를 계속 보여 결과(만들어진 업무)를 확인할 수 있게 한다
+      onSelect(candidate.id);
+      setFailure(result.executed ? null : `${result.errorMessage ?? '실행하지 못했어요'}${result.errorCode ? ` (${result.errorCode})` : ''}`);
+    },
+  });
+
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3.5 overflow-auto">
+    <>
       <PageHead
         crumb={
           <>
             AI Factory Agent
             <Icon name="chevron-right" size="sm" />
-            1. 원료 부족
+            {RISK_NAME[candidate.riskType]}
           </>
         }
         title={
           <span className="flex items-center gap-2">
-            원료 부족 · 철광석 (ORE01)
-            <Tag tone="outline">{AGENT_TRIGGER_NAME.SCHEDULE}</Tag>
+            {RISK_NAME[candidate.riskType]}
+            <Badge tone={STATUS_TONE[candidate.draftStatus]}>{DRAFT_STATUS_LABEL[candidate.draftStatus]}</Badge>
           </span>
-        }
-        actions={
-          <SoonButton>
-            <Icon name="history" />
-            작업 로그
-          </SoonButton>
         }
       />
 
-      <AiBrief meta="감지 10-01 06:00 · 예시">
-        <b>AI는 상황 설명만 해요.</b> 대응 후보는 규칙이 만들고, 담당 부서원이 후보별로 확정해요.
-      </AiBrief>
-
-      <AiCard title="상황 설명" meta="AI가 작성 · 데이터 변경 없음" className="flex-none">
-        <p className="text-base leading-[21px]">
-          <b className="font-semibold">철광석 1,200 t 부족 예상</b> — 생산계획{' '}
-          <span className="font-mono text-sm">{EXAMPLE_NO.rawShortagePlans.join(' · ')}</span>의 소요량이 원료 잔량과 입고예정을 합친 양보다 많아요.
-        </p>
-        <div className="grid grid-cols-4 gap-2">
-          {RAW_SHORTAGE_METRICS.map((metric) => (
-            <Figure key={metric.label} label={metric.label} value={metric.value} unit={metric.unit} danger={metric.danger} />
-          ))}
+      <AiCard tone="steelman" title="상황 설명" className="flex-none" petKey="card:agent.situation">
+        <p className="text-base leading-normal">{explain?.explanation ?? candidate.summary}</p>
+        <KvList columns={1} items={Object.entries(candidate.evidence).map(([key, value]) => ({ label: evidenceLabelOf(key), value: value ?? '-' }))} />
+        <div className="flex items-center gap-2 border-t border-steelman-shadow pt-3">
+          <Button size="sm" variant="steelman-outline" icon="info" disabled={explainAction.isPending} onClick={() => explainAction.mutate({ id: candidate.id })}>
+            {explain ? '다시 설명 받기' : 'AI에게 상황 설명 받기'}
+          </Button>
+          {explain ? <Tag size="sm">{explain.generatedByAi ? 'AI가 작성' : '규칙 요약 (AI 연결 없음)'}</Tag> : null}
         </div>
-        <SourceList
-          caption="MRP 결과 기준 (소요량 − 원료 잔량 − 입고예정)"
-          items={[
-            { icon: 'calc', label: 'MRP 결과', note: '10-01 06:00' },
-            { icon: 'box', label: '원료 재고', note: 'ORE01' },
-            { icon: 'clipboard', label: '생산계획', note: EXAMPLE_NO.rawShortagePlans.join(' · ') },
-          ]}
-        />
       </AiCard>
 
-      <CandidateCard />
+      {failure ? (
+        <Banner tone="danger" icon="alert">
+          {failure}
+        </Banner>
+      ) : null}
+      {candidate.executionErrorCode ? (
+        <Banner tone="danger" icon="alert">
+          확정했지만 실행하지 못했어요: {isErrorCode(candidate.executionErrorCode) ? ERROR_MESSAGE[candidate.executionErrorCode] : candidate.executionErrorCode} (시도 {candidate.executionAttemptCount}회)
+        </Banner>
+      ) : null}
 
-      <div className="flex flex-none flex-col gap-1.5 rounded-md border border-dashed border-line-strong bg-surface-2 p-3">
-        <div className="flex items-center gap-1.5">
-          <Icon name="info" size="sm" className="text-ink-3" />
-          <b className="text-sm font-semibold">대응 후보가 없는 유형은 이렇게 보여요 (예: 불합격률 상승)</b>
+      <AiCard tone="steelman" icon="cart" title={`대응 후보 · ${ACTION_TYPE_LABEL[candidate.actionType]}`} className="flex-none" petKey="card:agent.candidate">
+        <CandidateBody candidate={candidate} />
+        <KvList
+          items={[
+            { label: '확정', value: permission ? `${PERMISSION_LABEL[permission]} 사용 권한이 있는 부서원` : '-' },
+            { label: '확정한 사람', value: candidate.confirmerName ?? '아직 없어요' },
+            ...(candidate.confirmedAt ? [{ label: '확정 시각', value: fmtMDHM(candidate.confirmedAt) }] : []),
+            ...(candidate.rejectReason ? [{ label: '닫은 이유', value: candidate.rejectReason }] : []),
+            ...(candidate.actionType === 'PURCHASE_REQUISITION_CREATE' ? [{ label: '최종 승인', value: '확정한 사람 소속 부서장' }] : []),
+          ]}
+        />
+        <div className="flex items-center gap-2 border-t border-steelman-shadow pt-3">
+          {confirmable ? (
+            <>
+              <Button
+                size="sm"
+                variant="primary"
+                icon="check"
+                disabled={!canConfirm || confirmAction.isPending}
+                title={canConfirm ? undefined : `${permission ? PERMISSION_LABEL[permission] : '해당 업무'} 사용 권한이 있는 부서원만 확정할 수 있어요`}
+                onClick={() => confirmAction.mutate({ id: candidate.id, expectedUpdatedAt: candidate.updatedAt })}
+              >
+                확정
+              </Button>
+              <Button size="sm" disabled={!canConfirm} onClick={() => setRejecting(true)}>
+                반려
+              </Button>
+            </>
+          ) : null}
+          <ResultLink candidate={candidate} />
         </div>
-        <span className="text-xs leading-[17px] text-ink-2">
-          상황 설명과 함께 품질 부서에 알림만 보내요. 원인 분석과 조치는 품질 담당이 판단해요.
-        </span>
-      </div>
+      </AiCard>
 
-      <Card className="flex-none">
-        <CardHead title="감지 이력" meta={`이 감지의 작업 로그 · 다음 단계 포함 ${AGENT_HISTORY.length}건`} />
-        <CardBody className="pb-1">
-          <Timeline
-            items={AGENT_HISTORY.map((entry) => ({
-              key: entry.key,
-              tone: entry.pending ? 'neutral' : entry.key === 'detected' ? 'danger' : 'ai',
-              title: (
-                <span className={entry.pending ? 'flex flex-wrap items-center gap-1.5 text-ink-3' : 'flex flex-wrap items-center gap-1.5'}>
-                  <ActorTag actorType={entry.actorType} />
-                  <EventName>{businessEventLabelOf(entry.businessEventType)}</EventName>
-                  <b className="font-semibold">{entry.head}</b>
-                  {entry.eventNo ? <span className="font-mono text-cap text-ink-3">{entry.eventNo}</span> : null}
-                </span>
-              ),
-              time: entry.time,
-              body: <span className="text-cap text-ink-3">{entry.detail}</span>,
-            }))}
-          />
-        </CardBody>
-      </Card>
+      {rejecting ? <RejectModal candidate={candidate} onSelect={onSelect} onClose={() => setRejecting(false)} /> : null}
+    </>
+  );
+}
+
+/** 확정한 뒤 안내 문구: 만들어진 업무 번호를 보인다 */
+function executedMessageOf(draft: AgentCandidateView): string {
+  if (draft.result?.kind === 'PURCHASE_REQUISITION') return `구매요청 ${draft.result.no}을 만들었어요. 부서장 승인을 기다려요`;
+  if (draft.result?.kind === 'PRODUCTION_PLAN') return `재생산 계획 ${draft.result.no}을 만들었어요`;
+  return '추천을 확인했어요. 재고·출하요청 화면에서 이어서 처리해 주세요';
+}
+
+function CandidateBody({ candidate }: { candidate: AgentCandidateView }) {
+  const p = candidate.payload;
+  if (candidate.actionType === 'PURCHASE_REQUISITION_CREATE') {
+    return (
+      <KvList
+        items={[
+          { label: '원료', value: String(candidate.evidence.itemCode ?? '-') },
+          { label: '수량', value: `${String(p.requestedTon ?? '-')} t` },
+          { label: '희망 입고일', value: String(p.desiredReceiptDate ?? '-') },
+          { label: '근거 생산계획', value: String(candidate.evidence.productionPlanNo ?? '-') },
+        ]}
+      />
+    );
+  }
+  if (candidate.actionType === 'REPRODUCTION_PLAN_CREATE') {
+    return (
+      <KvList
+        items={[
+          { label: '수주', value: `${String(candidate.evidence.salesOrderNo ?? '-')} · ${String(candidate.evidence.lineNo ?? '-')}번 품목` },
+          { label: '추가 계획 필요', value: `${String(p.additionalPlanQty ?? '-')}매` },
+        ]}
+      />
+    );
+  }
+  const recommendations = recommendationsOf(p);
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="text-cap text-ink-3">대기 수주 (납기 빠른 순). 추천만 하고, 실제 예약·배정은 재고와 출하요청 화면에서 해요.</span>
+      <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
+        {recommendations.map((r) => (
+          <Fragment key={r.salesOrderItemId}>
+            <dt className="text-ink-3">
+              {r.salesOrderNo} · {r.lineNo}번 품목
+            </dt>
+            <dd className="m-0 text-ink-2">
+              납기 {r.dueDate} · 미확보 {r.unsecuredQty}매
+            </dd>
+          </Fragment>
+        ))}
+      </dl>
     </div>
   );
 }
 
-export function AgentScreen() {
+function ResultLink({ candidate }: { candidate: AgentCandidateView }) {
+  if (candidate.result?.kind === 'PURCHASE_REQUISITION') {
+    return (
+      <ButtonLink href="/purchase-requisitions" size="sm" icon="cart">
+        구매요청 {candidate.result.no}
+      </ButtonLink>
+    );
+  }
+  if (candidate.result?.kind === 'PRODUCTION_PLAN') {
+    return (
+      <ButtonLink href="/production/plans" size="sm" icon="calendar">
+        생산계획 {candidate.result.no}
+      </ButtonLink>
+    );
+  }
+  if (candidate.actionType === 'ALLOCATION_CONFIRM') {
+    return (
+      <ButtonLink href="/inventories" size="sm" icon="stock">
+        재고에서 보기
+      </ButtonLink>
+    );
+  }
+  return null;
+}
+
+function RejectModal({ candidate, onSelect, onClose }: { candidate: AgentCandidateView; onSelect: (id: number) => void; onClose: () => void }) {
+  const [reason, setReason] = useState('');
+  const reject = useAction(agentCandidateApi.reject, {
+    success: '대응 후보를 반려했어요',
+    onSuccess: () => {
+      onSelect(candidate.id);
+      onClose();
+    },
+  });
+  const trimmed = reason.trim();
   return (
-    <ComingSoonArea grade="P2" title="AI Factory Agent">
-      <ExampleNotice />
-      <div className="flex min-h-0 flex-1 gap-4">
-        <DetectionList />
-        <DetectionDetail />
-      </div>
-    </ComingSoonArea>
+    <Modal
+      title="대응 후보 반려"
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={onClose}>취소</Button>
+          <Button variant="danger" disabled={trimmed === '' || reject.isPending} onClick={() => reject.mutate({ id: candidate.id, rejectReason: trimmed, expectedUpdatedAt: candidate.updatedAt })}>
+            반려
+          </Button>
+        </>
+      }
+    >
+      <p className="mb-2 text-sm text-ink-2">{candidate.summary}</p>
+      <Textarea aria-label="반려 사유" value={reason} maxLength={REASON_MAX} placeholder="반려 사유를 입력해 주세요" onChange={(e) => setReason(e.target.value)} />
+      <span className="text-cap text-ink-3">
+        {reason.length}/{REASON_MAX}
+      </span>
+    </Modal>
   );
 }

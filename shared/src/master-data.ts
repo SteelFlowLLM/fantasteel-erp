@@ -1,0 +1,115 @@
+// 기준정보 조회 응답 타입 (REQ-MST-001~009, docs/backend/master-data.md). 톤·치수·수율은 문자열.
+import type { ItemType, ProcessType, RawMaterialType, UnitType, YardType } from './codes';
+
+export interface CustomerView {
+  id: number;
+  customerCode: string;
+  customerName: string;
+  /** 수정할 때 expectedUpdatedAt으로 돌려보낸다 (ISO 8601, 이슈 #498) */
+  updatedAt: string;
+}
+
+export interface ItemView {
+  id: number;
+  itemCode: string;
+  itemName: string;
+  itemType: ItemType;
+  unitType: UnitType;
+  /** 원료만 */
+  rawMaterialType: RawMaterialType | null;
+  /** 제품만 */
+  steelGradeId: number | null;
+  steelGradeCode: string | null;
+  thicknessMm: string | null;
+  widthMm: string | null;
+  lengthMm: string | null;
+  /** 1매 이론중량(t, 소수 3자리). 제품만 */
+  theoreticalWeightTon: string | null;
+  defaultYardId: number;
+  /** 원료만. 품목별 기본 공급업체 1곳 */
+  defaultSupplierId: number | null;
+  /** 수정할 때 expectedUpdatedAt으로 돌려보낸다 (ISO 8601, 이슈 #498) */
+  updatedAt: string;
+}
+
+/** API-168. 성분 min/max는 제강 검사 기준(inspection-standards)에서 관리한다 */
+export interface SteelGradeView {
+  id: number;
+  steelGradeCode: string;
+  steelGradeName: string;
+  /** KS 규격 번호. 밀시트 표시 */
+  standardNo: string;
+  /** 수정할 때 expectedUpdatedAt으로 돌려보낸다 (ISO 8601) */
+  updatedAt: string;
+  /** 이 강종을 쓰는 곳 이름(품목·배합 원단위·검사 기준·LOT). 하나라도 있으면 코드를 바꿀 수 없다 (서버가 같은 기준으로 막는다) */
+  codeLockedBy: string[];
+}
+
+export interface SpecMappingItemView {
+  id: number;
+  itemCode: string;
+  thicknessMm: string;
+  widthMm: string;
+  lengthMm: string;
+  theoreticalWeightTon: string;
+}
+
+/** API-170. 열연 계획 수율 = 코일 1개 이론중량 ÷ 슬래브 1매 이론중량 (저장하지 않는 계산값, 소수 4자리) */
+export interface SpecMappingView {
+  id: number;
+  steelGradeId: number;
+  steelGradeCode: string;
+  slabItem: SpecMappingItemView;
+  coilItem: SpecMappingItemView;
+  hotRollingYieldRate: string;
+  /** 수정할 때 expectedUpdatedAt으로 돌려보낸다 (ISO 8601) */
+  updatedAt: string;
+}
+
+/** API-172. 열연은 계획 수율 null (규격 매핑에서 계산) */
+export interface RoutingView {
+  id: number;
+  itemType: ItemType;
+  processType: ProcessType;
+  sequenceNo: number;
+  plannedYieldRate: string | null;
+  /** 수정할 때 expectedUpdatedAt으로 돌려보낸다 (ISO 8601, 이슈 #498) */
+  updatedAt: string;
+}
+
+/** API-175. 강종 null = 용선 1t당 t(공통), 강종 있음 = 용강 1t당 합금철 kg */
+export interface SpecificConsumptionView {
+  id: number;
+  rawMaterialItemId: number;
+  rawMaterialItemCode: string;
+  rawMaterialType: RawMaterialType;
+  steelGradeId: number | null;
+  steelGradeCode: string | null;
+  consumptionRate: string;
+}
+
+export interface SupplierView {
+  id: number;
+  supplierCode: string;
+  supplierName: string;
+  /** 수정할 때 expectedUpdatedAt으로 돌려보낸다 (ISO 8601, 이슈 #498) */
+  updatedAt: string;
+}
+
+export interface YardView {
+  id: number;
+  yardCode: string;
+  yardName: string;
+  yardType: YardType;
+  /** 수정할 때 expectedUpdatedAt으로 돌려보낸다 (ISO 8601, 이슈 #498) */
+  updatedAt: string;
+}
+
+/** API-187. 1행만 둔다 */
+export interface ProductionSettingView {
+  id: number;
+  heatCapacityTon: string;
+  deliveryRiskDays: number;
+  /** 수정할 때 expectedUpdatedAt으로 돌려보낸다 (ISO 8601, 이슈 #498) */
+  updatedAt: string;
+}

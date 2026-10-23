@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, normalize, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -23,6 +23,11 @@ export class StorageService {
 
   read(path: string): Promise<Buffer> {
     return readFile(this.resolve(path));
+  }
+
+  /** 저장한 파일을 지운다 (DB에 남지 않은 첨부 정리, 이슈 #488). 이미 없으면 그대로 넘어간다 */
+  async remove(path: string): Promise<void> {
+    await rm(this.resolve(path), { force: true });
   }
 
   /** 저장소 밖 경로(../ 등)를 막는다 */
