@@ -59,7 +59,7 @@ describe('재고 도구 (get_inventory)', () => {
     const output = await tool.run({ keyword: 'ss 275' }, SALES_USER);
     expect(output.label).toBe('재고 · ss 275');
     expect(output.data).toMatchObject({
-      제품: [{ 규격: 'C-SS275-2.0', 품목유형: '코일', '합격 재고 매수': 20, '예약 매수': 6, '가용재고 매수': 14, '가용재고 톤': '280.000' }],
+      제품: [{ 규격: 'C-SS275-2.0', 품목유형: '코일', '수량 단위': '개', '합격 재고 매수': 20, '예약 매수': 6, '가용재고 매수': 14, '가용재고 톤': '280.000' }],
       원료: [],
       여재: [],
     });

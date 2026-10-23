@@ -2,7 +2,7 @@ import { PERMISSION, SALES_ORDER_ITEM_STATUS_LABEL, type SalesOrderFulfillment, 
 import { AppException } from '../../../common/errors/app.exception';
 import { seoulToday } from '../../../common/time/seoul-date';
 import type { SalesOrderService } from '../../sales-order/sales-order.service';
-import { daysUntil, limitRows, optionalBoolean, optionalPositiveInt, optionalString, percentText, ToolArgumentError, type AssistantTool } from './assistant-tool';
+import { daysUntil, limitRows, qtyUnitOf, optionalBoolean, optionalPositiveInt, optionalString, percentText, ToolArgumentError, type AssistantTool } from './assistant-tool';
 
 /** 목록에서 납기 위험만 고를 때 한 번에 읽는 수주 수 (API 상한 100) */
 const SCAN_SIZE = 100;
@@ -100,6 +100,7 @@ function detailOutput(f: SalesOrderFulfillment, s: Pick<SalesOrderSummary, 'cust
       품목: f.items.map((i) => ({
         규격: i.itemCode,
         품목: i.itemName,
+        '수량 단위': qtyUnitOf(i.itemType),
         납기: i.dueDate,
         '납기까지 남은 일수': daysUntil(i.dueDate, today),
         상태: SALES_ORDER_ITEM_STATUS_LABEL[i.salesOrderItemStatus],
