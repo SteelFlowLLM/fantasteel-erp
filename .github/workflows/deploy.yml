@@ -1,0 +1,56 @@
+# main에 머지되면 EC2에 배포한다 (이슈 #550). 쓰는 법: deploy/aws/README.md 6장.
+# 러너를 Tailscale로 tailnet에 넣고 EC2의 Tailscale 주소로 SSH한다 (보안 그룹 22는 밖에 열지 않는다)
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 배포가 겹치면 앞의 배포를 끝까지 마치고 다음을 한다 (빌드 도중에 끊지 않는다)
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: EC2 배포
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: 준비 확인
+        id: ready
+        env:
+          TS_OAUTH_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_HOST: ${{ vars.EC2_HOST }}
+        run: |
+          if [ -z "$TS_OAUTH_CLIENT_ID" ] || [ -z "$EC2_SSH_KEY" ] || [ -z "$EC2_HOST" ]; then
+            echo "::warning::TS_OAUTH_CLIENT_ID·EC2_SSH_KEY(secrets) 또는 EC2_HOST(variables)가 없어 배포를 건너뜁니다"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.ready.outputs.ok == 'true'
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - if: steps.ready.outputs.ok == 'true'
+        name: 배포
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_HOST: ${{ vars.EC2_HOST }}
+          EC2_KNOWN_HOSTS: ${{ vars.EC2_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$EC2_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 \
+            "ubuntu@$EC2_HOST" 'cd ~/fantasteel-erp && git fetch -q origin main && git switch -q main && git merge -q --ff-only origin/main && bash deploy/aws/deploy.sh'
