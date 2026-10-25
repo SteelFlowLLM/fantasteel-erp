@@ -81,13 +81,23 @@ curl -sI https://<도메인>/login | head -1    # HTTP/2 200
 
 ## 6. 새 버전 올리기
 
-```bash
-cd ~/fantasteel-erp && git pull
-npm install
-npm run generate:sql -w @fantasteel/server   # 새 SQL이 생겼을 수 있다. 먼저 개발 PC에서 db:deploy로 스키마를 반영해 둔다
-npm run build
-pm2 reload deploy/aws/ecosystem.config.cjs   # server는 SIGTERM으로 정리한 뒤 다시 뜬다
-```
+`main`에 머지되면 GitHub Actions(`.github/workflows/deploy.yml`)가 러너를 Tailscale로 tailnet에 넣고, 이 서버의 Tailscale 주소로 SSH해 `deploy/aws/deploy.sh`를 돌린다. Actions 탭의 **Deploy → Run workflow**로 손으로 다시 돌릴 수도 있다. `deploy.sh`가 하는 일:
+
+1. `main`을 받는다 (`--ff-only`: 서버에서 고친 파일이 있으면 멈춘다).
+2. 운영 DB에 반영되지 않은 마이그레이션이 있으면 **멈춘다**. DB 반영은 자동으로 하지 않는다.
+3. `npm ci` → `generate:sql` → `npm run build` → `pm2 reload` (server는 SIGTERM으로 정리한 뒤 다시 뜬다).
+4. 서버 401·화면 200을 60초 안에 확인한다. 아니면 실패로 끝난다.
+
+준비(한 번):
+
+| 어디 | 이름 | 값 |
+| --- | --- | --- |
+| Tailscale ACL | `tag:ci` | 태그를 만들고 `tag:ci` → 이 서버 22번을 허용한다 |
+| GitHub Secrets | `TS_OAUTH_CLIENT_ID`·`TS_OAUTH_SECRET` | Tailscale OAuth 클라이언트 (`auth_keys` 쓰기, 태그 `tag:ci`) |
+| GitHub Secrets | `EC2_SSH_KEY` | 배포 전용 SSH 개인 키. 공개 키는 서버 `~/.ssh/authorized_keys`에 `from="100.64.0.0/10"`을 붙여 tailnet에서만 받는다 |
+| GitHub Variables | `EC2_HOST`·`EC2_KNOWN_HOSTS` | 이 서버의 Tailscale IP와 그 주소의 호스트 키 줄 (`ssh-keyscan`) |
+
+값이 하나라도 없으면 배포 단계는 경고만 남기고 건너뛴다. 손으로 올릴 때는 서버에서 `bash ~/fantasteel-erp/deploy/aws/deploy.sh`.
 
 스키마가 바뀌는 배포는 **DB 반영 → 서버 배포** 순서로 한다(칸 삭제·이름 변경은 옛 코드가 바로 깨지므로 미리 공지, `docs/SERVER-GUIDE.md` 8장).
 
